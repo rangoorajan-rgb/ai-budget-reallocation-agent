@@ -1,0 +1,5 @@
+campaign_id,campaign_name,platform,status,kpi_type,kpi_target,current_budget,minimum_budget,maximum_budget,spend_to_date,conversions_7d,conversions_28d,kpi_actual_7d,kpi_actual_28d,tracking_status,business_priority,is_protected,is_test_campaign,test_budget_floor,campaign_max_change_percentage
+G001,Search - Brand,Google Ads,Active,CPA,45.00,3000.00,500.00,6000.00,2850.00,40,155,42.10,44.80,Healthy,High,False,False,,
+M001,Prospecting - Lookalike,Meta Ads,Active,ROAS,3.50,2500.00,500.00,5000.00,2400.00,55,210,4.20,3.90,Healthy,Medium,False,False,,0.15
+G002,Shopping - Core Catalog,Google Ads,Active,ROAS,2.50,5000.00,1000.00,8000.00,4950.00,140,520,3.60,3.10,Healthy,High,True,False,,
+G003,Shopping - New Arrivals Test,Google Ads,Active,CPA,60.00,1200.00,100.00,2000.00,300.00,5,20,58.00,61.00,Healthy,Standard,False,True,300.00,

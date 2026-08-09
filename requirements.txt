@@ -1,6 +1,6 @@
 streamlit
 pandas
-pydantic
+pydantic>=2,<3
 google-generativeai
 pytest
 python-dotenv
