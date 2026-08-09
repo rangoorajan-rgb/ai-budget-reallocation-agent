@@ -1,0 +1,8 @@
+[project]
+name = "ai-budget-reallocation-agent"
+version = "0.1.0"
+description = "Human-in-the-loop budget reallocation agent for Google Ads and Meta Ads campaign data."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
