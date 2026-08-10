@@ -1,10 +1,11 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 5 populates the Performance Classification Scenarios
-> section below, backed by `tests/test_classification.py` (23 tests), in addition to the
-> Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3
-> Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2
-> Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
+> Sprint 1, Development Stage 6 populates the Trend Classification Scenarios section
+> below, backed by `tests/test_trend_classification.py` (29 tests), in addition to the
+> Stage 5 Performance Classification Scenarios (`tests/test_classification.py`, 23
+> tests), the Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests),
+> the Stage 3 Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the
+> Stage 2 Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
 > Approval/Audit scenarios are pending later stages.
 
 ## Validation Scenarios
@@ -188,6 +189,43 @@ score, eligibility, or allocation outcome.
 | 20 | Any result | No `float` anywhere. |
 | 21 | Classification call | Performs no arithmetic — input `Decimal` value is unchanged after the call. |
 | 22 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — classification is comparison-only and needs no local context. |
+
+## Trend Classification Scenarios
+
+All scenarios below use `classify_campaign_trend(metrics: CampaignMetrics) ->
+CampaignTrendClass` from `src/classification.py`. Every result is **descriptive evidence
+only**, independent of `PerformanceBand` — none of these scenarios produces a
+`RecommendationAction`, `Confidence`, `ReasonCode`, performance band, tracking
+interpretation, score, eligibility, or allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `TrendDirection` members | Exactly `IMPROVING`, `STABLE`, `DECLINING`, each value equal to its name. |
+| 2 | `CampaignTrendClass` field set | Exactly `campaign_id`, `trend_direction`. |
+| 3 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate a `CampaignTrendClass` instance | Rejected (`frozen=True`). |
+| 5 | `trend_direction` | Always a `TrendDirection` instance. |
+| 6 | `campaign_id` on the result | Copied exactly from the source `CampaignMetrics`. |
+| 7 | `classify_campaign_trend({"trend_delta": ...})` (dict, not `CampaignMetrics`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | `trend_delta = Decimal("0.1000000000000000000000000001")` | `IMPROVING`. |
+| 9 | `trend_delta = Decimal("0.10")` (exactly `TREND_THRESHOLD`) | `IMPROVING` — the threshold belongs to the directional band. |
+| 10 | `trend_delta = Decimal("0.0999999999999999999999999999")` | `STABLE`. |
+| 11 | `trend_delta = Decimal("0.05")` | `STABLE`. |
+| 12 | `trend_delta = Decimal("0")` | `STABLE`. |
+| 13 | `trend_delta = Decimal("-0.05")` | `STABLE`. |
+| 14 | `trend_delta = Decimal("-0.0999999999999999999999999999")` | `STABLE`. |
+| 15 | `trend_delta = Decimal("-0.10")` (exactly `-TREND_THRESHOLD`) | `DECLINING` — this is a **synthetic case, since no sample campaign has a negative `trend_delta`** (all four sample campaigns have 7-day performance better than 28-day). |
+| 16 | `trend_delta = Decimal("-0.1000000000000000000000000001")` | `DECLINING`. |
+| 17 | `trend_delta = Decimal("1000000")` | `IMPROVING` (very large positive). |
+| 18 | `trend_delta = Decimal("-1000000")` | `DECLINING` (very large negative). |
+| 19 | 25%-better 7-day-vs-28-day ratio expressed as ROAS vs. as CPA, carried through `CampaignInput` → `calculate_campaign_metrics` → `classify_campaign_trend` | Both produce `trend_delta = 0.25` and both classify as `IMPROVING` — KPI origin established via the real Stage 1/3 path, not asserted on `CampaignMetrics` alone. |
+| 20 | `data/sample_campaigns.csv` validated, then each campaign run through `calculate_campaign_metrics` → `classify_campaign_trend`, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); `G001`/`M001`/`G003` = `STABLE`, `G002` = `IMPROVING`; exact `trend_delta` values match Stage 3's documented outputs. |
+| 21 | `CampaignTrendClass.model_fields` | Contains no `performance_band`, `confidence`, `tracking_status`, `pacing_ratio`, `recommendation_action`, `reason_code`, `score`, `eligibility`, or `allocation` field. |
+| 22 | `src/classification.py` imports | Still does not import `CampaignInput`, `CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `Confidence`, `ReasonCode`, or any later-stage module (AST-verified). |
+| 23 | `classify_campaign_trend` body | Does not call `classify_campaign_performance` (AST-verified); reads only `metrics.campaign_id` and `metrics.trend_delta` (AST-verified). |
+| 24 | Any result | No `float` anywhere; no arithmetic or quantisation performed on `trend_delta` (input value unchanged after the call). |
+| 25 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected for both a stable value and the exact negative boundary `Decimal("-0.10")` — classification is comparison-only and needs no local context. |
+| 26 | `classify_campaign_performance` (Stage 5) | Unchanged behaviour after the Stage 6 additions — regression-checked. |
 
 ## Allocation Scenarios
 

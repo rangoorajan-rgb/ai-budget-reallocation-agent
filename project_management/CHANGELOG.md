@@ -174,3 +174,43 @@ All notable changes to this project are documented in this file.
   (frozen Stage 5 classification rule; trend/confidence/tracking interpretation and final
   recommendation explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (22 concrete Stage 5 scenarios).
+
+- Sprint 1, Development Stage 6: added `TrendDirection` enum (`IMPROVING`, `STABLE`,
+  `DECLINING`) and `CampaignTrendClass` (frozen, immutable, `extra="forbid"`:
+  `campaign_id`, `trend_direction` only) and `classify_campaign_trend(metrics:
+  CampaignMetrics) -> CampaignTrendClass` to `src/classification.py`, alongside but fully
+  separate from Stage 5's `PerformanceBand`/`CampaignPerformanceClass`/
+  `classify_campaign_performance`, which are unmodified. Classifies `trend_delta` only,
+  using the existing frozen `TREND_THRESHOLD`, with the threshold magnitude belonging to
+  the directional band in both directions (`>= TREND_THRESHOLD` → `IMPROVING`;
+  `<= TREND_THRESHOLD.copy_negate()` → `DECLINING`; otherwise `STABLE`) — consistent
+  with Stage 5's threshold-entry equality convention. The negative boundary is built via
+  `.copy_negate()` (exact sign-inversion, no rounding, no new constant). Direct `Decimal`
+  comparison only — no arithmetic, quantisation, `float`, or local `decimal` context;
+  `trend_delta` itself is never touched. Reads only `campaign_id`/`trend_delta` from
+  `CampaignMetrics`; does not import `CampaignInput`, `CampaignPacing`, `ReviewSetup`,
+  `RecommendationAction`, `Confidence`, or `ReasonCode`, and never calls
+  `classify_campaign_performance`. `src/constants.py`, `src/models.py`,
+  `src/validation.py`, `src/metrics.py`, and `src/pacing.py` are unchanged.
+- Sprint 1, Development Stage 6: `tests/test_trend_classification.py` (29 tests)
+  covering result-model shape/immutability, exact threshold-boundary equality behaviour
+  (all 11 boundary/large-magnitude values), `campaign_id` propagation, CPA/ROAS
+  normalisation-independence established through the full `CampaignInput` →
+  `calculate_campaign_metrics` → `classify_campaign_trend` path, integration with
+  `validate_campaign_csv` + `calculate_campaign_metrics` over `data/sample_campaigns.csv`
+  (order preserved; `G001`/`M001`/`G003` = `STABLE`, `G002` = `IMPROVING`), and scope
+  boundaries (no out-of-scope field; AST-verified import restrictions and
+  no-call-to-`classify_campaign_performance` check; AST-verified `metrics`
+  attribute-access restricted to `campaign_id`/`trend_delta`; no float; comparison-only
+  with no arithmetic side effects; unaffected by a mutated global `Decimal` context,
+  including at the exact negative boundary). `tests/test_classification.py` (Stage 5)
+  re-run unchanged and confirmed still passing (23 tests) — no regression. Full suite:
+  246 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29
+  Stage 6).
+- Updated `docs/DATA_DICTIONARY.md` (`TrendDirection`/`CampaignTrendClass` fields,
+  explicitly distinguished from `PerformanceBand`/`RecommendationAction`/`ReasonCode`;
+  `trend_delta`'s dimensionless relative-ratio unit clarified), `docs/DECISION_RULES.md`
+  (frozen Stage 6 trend-classification rule; confidence/tracking/pacing interpretation
+  and the trend-to-`ReasonCode` mapping explicitly re-confirmed as pending later
+  stages), and `docs/TEST_SCENARIOS.md` (26 concrete Stage 6 scenarios, including a
+  synthetic `DECLINING` case since no sample campaign has a negative `trend_delta`).

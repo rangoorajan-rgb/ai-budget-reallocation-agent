@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, and 5 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, and 6 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -131,10 +131,41 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 5 (and not yet started)
+## Development Stage 6 — Neutral Deterministic Trend Classification (complete)
 
-- Trend classification (`trend_delta` vs. `TREND_THRESHOLD`), conversion-volume
-  confidence, tracking-status interpretation, `NOT_ASSESSABLE` behaviour.
+- [x] `src/classification.py` (additions only — Stage 5's `PerformanceBand`/
+      `CampaignPerformanceClass`/`classify_campaign_performance` unmodified) —
+      `TrendDirection` enum (`IMPROVING`, `STABLE`, `DECLINING`) and
+      `CampaignTrendClass` (frozen, `extra="forbid"`: `campaign_id`, `trend_direction`)
+      and `classify_campaign_trend(metrics: CampaignMetrics) -> CampaignTrendClass`.
+      `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`,
+      `src/pacing.py` unchanged.
+- [x] Classifies `trend_delta` only, using the existing frozen `TREND_THRESHOLD`:
+      `>= TREND_THRESHOLD` → `IMPROVING`; `<= TREND_THRESHOLD.copy_negate()` →
+      `DECLINING`; otherwise `STABLE`. Reaching either threshold magnitude enters the
+      directional band, consistent with Stage 5's threshold-entry policy. Negative
+      boundary built via `.copy_negate()` — no new constant, no arithmetic on it.
+- [x] Direct `Decimal` comparison only — no arithmetic, quantisation, `float`
+      conversion, or local `decimal` context; `trend_delta` itself is never touched.
+- [x] Depends only on `CampaignMetrics.campaign_id`/`trend_delta` — no `CampaignInput`,
+      `CampaignPacing`, `ReviewSetup`, `CampaignPerformanceClass`, or `PerformanceBand`;
+      no `platform`/`kpi_type` branching; independent of Stage 5's classification.
+- [x] No confidence, tracking interpretation, pacing interpretation, combined
+      performance-and-trend judgement, `RecommendationAction`, `Confidence`,
+      `ReasonCode`, constraints, scoring, allocation, conservation, or later-stage logic.
+- [x] `tests/test_trend_classification.py` — 29 tests, all passing.
+      `tests/test_classification.py` (Stage 5) re-run unchanged and still passing (23
+      tests) — Stage 5 behaviour confirmed intact. `tests/test_models.py` (Stage 1),
+      `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage 3), and
+      `tests/test_pacing.py` (Stage 4) unchanged and still passing.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 6 (and not yet started)
+
+- Conversion-volume confidence (including conversion-window choice), tracking-status
+  interpretation, `NOT_ASSESSABLE` behaviour, pacing interpretation.
+- Combined campaign judgements (trend + performance + confidence + tracking + pacing).
 - Protected/test campaign constraints, eligibility, scoring, final `RecommendationAction`
   assignment, `ReasonCode` assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
@@ -142,7 +173,7 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 6 (not started, scope not yet frozen): candidates include trend classification,
-conversion-volume confidence, and tracking-status interpretation — each has unresolved
-formula/boundary questions of its own (see `DECISIONS.md`) and requires its own dependency
-and decision-readiness inspection before being frozen, not file-list order.
+Stage 7 (not started, scope not yet frozen): candidates include conversion-volume
+confidence and tracking-status interpretation — each has unresolved formula/boundary
+questions of its own (see `DECISIONS.md`) and requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order.

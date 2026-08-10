@@ -1,15 +1,24 @@
-"""Deterministic, neutral performance classification for calculated campaign metrics.
+"""Deterministic, neutral performance and trend classification for calculated campaign
+metrics.
 
 Implements Sprint 1 — Development Stage 5: for one already-calculated `CampaignMetrics`
 instance, classifies `weighted_performance_ratio` into one neutral `PerformanceBand`
 using the existing frozen `INCREASE_THRESHOLD`/`MAINTAIN_THRESHOLD` constants. This is a
 descriptive performance classification only — it is not a recommendation, decision,
-constraint, score, eligibility result, or budget action. Trend classification,
-conversion-volume confidence, tracking-status interpretation, and any final
-`RecommendationAction`/`ReasonCode` assignment are all explicitly deferred to later
-stages. Depends only on `CampaignMetrics.campaign_id`/`weighted_performance_ratio` — never
-`CampaignInput`, `CampaignPacing`, `ReviewSetup`, or any KPI-type-specific branching
-(Stage 3 has already direction-normalised CPA and ROAS).
+constraint, score, eligibility result, or budget action.
+
+Also implements Sprint 1 — Development Stage 6: for the same kind of already-calculated
+`CampaignMetrics` instance, classifies `trend_delta` into one neutral `TrendDirection`
+using the existing frozen `TREND_THRESHOLD` constant. This is descriptive evidence only
+— it is independent of `PerformanceBand`/`CampaignPerformanceClass` and is not a
+confidence assessment, tracking assessment, pacing interpretation, constraint,
+eligibility decision, score, recommendation, reason code, or proposed allocation.
+
+Conversion-volume confidence, tracking-status interpretation, pacing interpretation, and
+any final `RecommendationAction`/`ReasonCode` assignment or combined campaign judgement
+are all explicitly deferred to later stages. Depends only on `CampaignMetrics` —
+never `CampaignInput`, `CampaignPacing`, `ReviewSetup`, or any KPI-type-specific/
+platform-specific branching (Stage 3 has already direction-normalised CPA and ROAS).
 """
 
 from decimal import Decimal
@@ -17,7 +26,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 
-from src.constants import INCREASE_THRESHOLD, MAINTAIN_THRESHOLD
+from src.constants import INCREASE_THRESHOLD, MAINTAIN_THRESHOLD, TREND_THRESHOLD
 from src.metrics import CampaignMetrics
 
 
@@ -67,4 +76,55 @@ def classify_campaign_performance(
     return CampaignPerformanceClass(
         campaign_id=metrics.campaign_id,
         performance_band=performance_band,
+    )
+
+
+class TrendDirection(str, Enum):
+    """Neutral trend-direction vocabulary. Descriptive evidence only — not a
+    recommendation or reason code."""
+
+    IMPROVING = "IMPROVING"
+    STABLE = "STABLE"
+    DECLINING = "DECLINING"
+
+
+class CampaignTrendClass(BaseModel):
+    """Neutral, descriptive trend classification for one campaign.
+
+    Independent of `PerformanceBand`/`CampaignPerformanceClass`. Not a confidence
+    assessment, tracking assessment, pacing interpretation, constraint, eligibility
+    decision, score, recommendation, reason code, or proposed allocation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    trend_direction: TrendDirection
+
+
+def classify_campaign_trend(
+    metrics: CampaignMetrics,
+) -> CampaignTrendClass:
+    """Classify one campaign's `trend_delta` into a neutral trend direction.
+
+    Reaching the threshold magnitude in either direction enters that directional band,
+    consistent with the threshold-entry policy approved for `PerformanceBand`:
+    `>= TREND_THRESHOLD` is `IMPROVING`, `<= -TREND_THRESHOLD` is `DECLINING`, otherwise
+    `STABLE`. The negative boundary is `TREND_THRESHOLD.copy_negate()` — an exact
+    sign-inversion with no rounding and no dependence on the active `Decimal` context.
+    Direct `Decimal` comparison only — no arithmetic or quantisation is performed on
+    `trend_delta`.
+    """
+    negative_trend_threshold = TREND_THRESHOLD.copy_negate()
+
+    if metrics.trend_delta >= TREND_THRESHOLD:
+        trend_direction = TrendDirection.IMPROVING
+    elif metrics.trend_delta <= negative_trend_threshold:
+        trend_direction = TrendDirection.DECLINING
+    else:
+        trend_direction = TrendDirection.STABLE
+
+    return CampaignTrendClass(
+        campaign_id=metrics.campaign_id,
+        trend_direction=trend_direction,
     )

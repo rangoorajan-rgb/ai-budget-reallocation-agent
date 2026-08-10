@@ -1,10 +1,10 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 5 (adds neutral deterministic performance classification to
-> the Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
-> validation reporting, Stage 3 metric facts, and Stage 4 pacing facts). Trend
-> classification, conversion-volume confidence, tracking interpretation, and other
-> derived/decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 6 (adds neutral deterministic trend classification to the
+> Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
+> validation reporting, Stage 3 metric facts, Stage 4 pacing facts, and Stage 5
+> performance classification). Conversion-volume confidence, tracking interpretation, and
+> other derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -169,10 +169,48 @@ Stage 5.
 | `campaign_id` | string | Copied unchanged from the source `CampaignMetrics`. |
 | `performance_band` | enum (`PerformanceBand`) | The classified band, per the table above. |
 
+## Campaign Trend Classification Fields (`src/classification.py`)
+
+Produced by `classify_campaign_trend(metrics: CampaignMetrics) -> CampaignTrendClass`,
+one result per already-calculated `CampaignMetrics` instance. `CampaignTrendClass` is
+frozen (immutable) and rejects unknown fields (`extra="forbid"`). This is **descriptive
+evidence only** — it is independent of `PerformanceBand`/`CampaignPerformanceClass` and
+is not a confidence assessment, tracking assessment, pacing interpretation, constraint,
+eligibility decision, score, `RecommendationAction`, `ReasonCode`, or proposed
+allocation. Depends only on `CampaignMetrics.campaign_id`/`trend_delta` — never
+`CampaignInput`, `CampaignPacing`, `ReviewSetup`, `platform`, or `kpi_type`.
+
+`trend_delta` itself (`src/metrics.py`) is a dimensionless *relative* `Decimal` ratio, not
+a percentage-point value: `Decimal("0.10")` means a 10% relative change between the
+7-day and 28-day normalised performance ratios, not "10 percentage points."
+
+### `TrendDirection` (enum)
+
+| Member | Value | Meaning |
+|--------|-------|---------|
+| `IMPROVING` | `"IMPROVING"` | `trend_delta >= TREND_THRESHOLD` (`0.10`). |
+| `STABLE` | `"STABLE"` | `-TREND_THRESHOLD < trend_delta < TREND_THRESHOLD` (strictly between `-0.10` and `0.10`). |
+| `DECLINING` | `"DECLINING"` | `trend_delta <= -TREND_THRESHOLD` (`-0.10`). |
+
+This is deliberately descriptive evidence, not `RecommendationAction` or `ReasonCode` —
+`TrendDirection` never appears interchangeably with either, and neither is assigned
+anywhere in Stage 6.
+
+### `CampaignTrendClass`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignMetrics`. |
+| `trend_direction` | enum (`TrendDirection`) | The classified direction, per the table above. |
+
+`CampaignTrendClass` is a separate, independent result model from
+`CampaignPerformanceClass` — the two are never combined, and neither is required to
+construct the other.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (trend classification, conversion-volume confidence,
-> tracking interpretation, constraints, scoring, allocation).
+> Pending a later Sprint 1 stage (conversion-volume confidence, tracking interpretation,
+> constraints, scoring, allocation).
 
 ## Export Fields
 

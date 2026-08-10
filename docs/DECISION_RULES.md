@@ -1,9 +1,9 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 5. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 6. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, and the
-> frozen neutral performance-classification rule. Trend classification, conversion-volume
+> frozen neutral performance- and trend-classification rules. Conversion-volume
 > confidence, tracking interpretation, constraint, scoring, and allocation rules are
 > pending later Sprint 1 stages.
 
@@ -267,6 +267,60 @@ recalculates it.
   Stage 5 creates no precedence or override rule for those later considerations; it
   simply does not consider them.
 
+## Deterministic Trend Classification Rules (Sprint 1, Development Stage 6)
+
+These rules govern the trend-classification additions to `src/classification.py`, which
+classify one already-calculated `CampaignMetrics` instance's `trend_delta` into a neutral
+`TrendDirection`. Stage 6 is **descriptive evidence only** — it is not a confidence
+assessment, tracking assessment, pacing interpretation, constraint, eligibility decision,
+score, `RecommendationAction`, `ReasonCode`, or proposed allocation, and it is
+independent of `PerformanceBand`/`CampaignPerformanceClass` (Stage 5). `CampaignMetrics`
+(`src/metrics.py`) remains the sole authoritative source of `trend_delta`;
+`src/classification.py` never recalculates it.
+
+- **Classification input.** `CampaignMetrics.campaign_id` and `CampaignMetrics.trend_delta`
+  are the only inputs read. No other `CampaignMetrics` field (`performance_ratio_7d`,
+  `performance_ratio_28d`, `weighted_performance_ratio`), and no `CampaignInput`,
+  `CampaignPacing`, `ReviewSetup`, or `CampaignPerformanceClass`/`PerformanceBand`, is
+  used.
+- **Threshold conditions and equality behaviour**, using the existing frozen
+  `TREND_THRESHOLD = Decimal("0.10")`:
+  ```
+  trend_delta >= TREND_THRESHOLD                → IMPROVING
+  -TREND_THRESHOLD < trend_delta < TREND_THRESHOLD → STABLE
+  trend_delta <= -TREND_THRESHOLD               → DECLINING
+  ```
+  Reaching either threshold magnitude enters that directional band — consistent with the
+  threshold-entry policy approved for `PerformanceBand` in Stage 5
+  (`trend_delta == TREND_THRESHOLD` is `IMPROVING`; `trend_delta == -TREND_THRESHOLD` is
+  `DECLINING`).
+- **Negative-boundary construction.** The negative boundary is
+  `TREND_THRESHOLD.copy_negate()` — an exact sign-inversion with no rounding and no
+  dependence on the active `Decimal` context. No new negative-threshold constant was
+  added to `src/constants.py`, and the boundary is never computed by multiplying by
+  `Decimal("-1")`, converting through `float`, or recalculating from campaign data.
+- **Direct Decimal comparison only.** No arithmetic or quantisation is performed on
+  `trend_delta` — classification only compares an already-computed `Decimal` against
+  `TREND_THRESHOLD` and its exact negation, so no local `decimal` context is required.
+- **Platform and KPI independence.** The classification depends only on `trend_delta` —
+  never `platform` or `kpi_type` — and contains no KPI-specific or platform-specific
+  branching, since Stage 3 has already direction-normalised CPA and ROAS so that
+  `trend_delta`'s sign has identical meaning for both: positive always means improving,
+  negative always means declining.
+- **Independent of PerformanceBand.** `TrendDirection`/`CampaignTrendClass` is a separate
+  result from `PerformanceBand`/`CampaignPerformanceClass` — the two are never combined,
+  and `classify_campaign_trend` never calls `classify_campaign_performance` or vice
+  versa. `CampaignPerformanceClass` and `PerformanceBand` are unmodified by Stage 6.
+- **Neutral vocabulary, not a recommendation or reason code.** `TrendDirection`
+  (`IMPROVING`/`STABLE`/`DECLINING`) is deliberately descriptive evidence, distinct from
+  `RecommendationAction` and `ReasonCode` — despite `ReasonCode` having matching member
+  names (`RECENT_TREND_IMPROVING`/`STABLE`/`DECLINING`), `TrendDirection` is never
+  assigned to or confused with `ReasonCode`, and neither `RecommendationAction`,
+  `Confidence`, nor `ReasonCode` is imported anywhere in `src/classification.py`.
+- **No precedence over unresolved considerations.** A campaign receives a numerical
+  trend direction regardless of its conversion volume, tracking reliability, or pacing —
+  Stage 6 creates no precedence or override rule for those later considerations.
+
 ## Pending
 
 - **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
@@ -274,10 +328,12 @@ recalculates it.
   "overspending," "under-delivering," "over-delivering," or "at risk" — any status,
   label, or recommendation built from Stage 4's pacing facts — is deferred entirely to a
   later classification/constraints stage. Stage 4 returns numbers only.
-- **Trend interpretation.** How `trend_delta` (Stage 3 fact) is compared against
-  `TREND_THRESHOLD` to determine `RECENT_TREND_IMPROVING` / `STABLE` / `DECLINING` — this
-  interpretation, and any resulting `ReasonCode`, is explicitly deferred to the later
-  classification stage.
+- **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
+  `trend_delta` into a neutral `TrendDirection` (see above) — but a `TrendDirection` is
+  not a `ReasonCode`. Whether/how `TrendDirection.IMPROVING`/`STABLE`/`DECLINING` maps to
+  `ReasonCode.RECENT_TREND_IMPROVING`/`STABLE`/`DECLINING`, and how trend combines with
+  `PerformanceBand`, confidence, or tracking into any final judgement, remains pending a
+  later stage.
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
   `MAINTAIN_THRESHOLD` classify `weighted_performance_ratio` into a neutral
   `PerformanceBand` (see above) — but a `PerformanceBand` is not a `RecommendationAction`.

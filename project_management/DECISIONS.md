@@ -413,3 +413,52 @@ KPI-specific branching. A campaign receives a numerical performance band regardl
 its trend, conversion volume, or tracking reliability — Stage 5 creates no precedence or
 override rule for those later considerations.
 **Status:** Frozen.
+
+## 2026-08-10 — Stage 6 is neutral trend classification, independent of PerformanceBand
+
+**Decision:** Sprint 1, Development Stage 6 adds neutral trend classification to
+`src/classification.py`, as an *addition* alongside Stage 5's performance
+classification — not a modification of it. `CampaignPerformanceClass` and
+`PerformanceBand` are unmodified. Confidence, tracking interpretation, pacing
+interpretation, and every combined campaign judgement remain deferred, for the same
+reasons established when Stage 5 was scoped narrower than "classification": each has its
+own unresolved formula or boundary question that would require inventing a rule to
+resolve now.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 6: TrendDirection and CampaignTrendClass, separate from PerformanceBand
+
+**Decision:** `TrendDirection` (`str, Enum`: `IMPROVING`, `STABLE`, `DECLINING`) and
+`CampaignTrendClass` (frozen, immutable; `extra="forbid"`; exactly `campaign_id`,
+`trend_direction`) are defined in `src/classification.py`, alongside but fully separate
+from `PerformanceBand`/`CampaignPerformanceClass`. Despite `ReasonCode` having matching
+member names (`RECENT_TREND_IMPROVING`/`STABLE`/`DECLINING`), `TrendDirection` is not
+`ReasonCode` and is never assigned to it; `RecommendationAction`, `Confidence`, and
+`ReasonCode` remain unimported by `src/classification.py`. The sole public function is
+`classify_campaign_trend(metrics: CampaignMetrics) -> CampaignTrendClass`; it accepts
+only an already-calculated `CampaignMetrics` instance (no `CampaignInput`,
+`CampaignPacing`, `ReviewSetup`, `CampaignPerformanceClass`, raw mapping, or unvalidated
+dict) and reads only `campaign_id` and `trend_delta` from it — no other `CampaignMetrics`
+field. There is no batch-calculation function, and `classify_campaign_trend` never calls
+`classify_campaign_performance` (or vice versa).
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 6: exact threshold conditions, equality behaviour, and negative-boundary construction
+
+**Decision:** Trend classification applies directly to `CampaignMetrics.trend_delta`
+using the existing frozen `TREND_THRESHOLD`, with the threshold magnitude itself
+belonging to the directional band in both directions (equality Policy A, chosen for
+consistency with Stage 5's identical "reaching the threshold qualifies" convention):
+```
+trend_delta >= TREND_THRESHOLD                → IMPROVING
+-TREND_THRESHOLD < trend_delta < TREND_THRESHOLD → STABLE
+trend_delta <= -TREND_THRESHOLD               → DECLINING
+```
+The negative boundary is constructed as `TREND_THRESHOLD.copy_negate()` — an exact
+sign-inversion with no rounding and no dependence on the active `Decimal` context — never
+a new constant, `Decimal("-1")` multiplication, `float` conversion, or recalculation from
+campaign data. No arithmetic or quantisation is performed on `trend_delta` itself;
+classification is comparison-only. The calculation is platform- and KPI-independent by
+construction, since Stage 3 already direction-normalised CPA and ROAS so that
+`trend_delta`'s sign has identical meaning for both.
+**Status:** Frozen.
