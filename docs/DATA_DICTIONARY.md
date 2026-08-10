@@ -1,8 +1,9 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 2 (adds deterministic validation reporting to the Stage 1
-> enumerations, numerical constants, core input models, and CSV schema). Derived and
-> export fields are pending later stages.
+> Sprint 1, Development Stage 3 (adds deterministic performance-ratio metric facts to the
+> Stage 1 enumerations, numerical constants, core input models, CSV schema, and Stage 2
+> validation reporting). Pacing, classification, and other derived/decision fields, plus
+> export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -88,9 +89,29 @@ schema — these are the shapes returned to describe validation outcomes.
 `ValidationReport` intentionally has no `review_id` field: invalid raw review input may not
 contain a usable review ID.
 
+## Campaign Metrics Fields (`src/metrics.py`)
+
+Produced by `calculate_campaign_metrics(campaign: CampaignInput) -> CampaignMetrics`, one
+result per already-validated campaign. `CampaignMetrics` is frozen (immutable) and rejects
+unknown fields (`extra="forbid"`). These are calculated **facts only** — none of them is a
+classification, recommendation, confidence level, or trend label.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `performance_ratio_7d` | Decimal (unquantised) | Direction-normalised ratio of 7-day actual performance to target. `> 1` = better than target, `= 1` = exactly at target, `< 1` = worse than target — this meaning is identical for `CPA` and `ROAS`. |
+| `performance_ratio_28d` | Decimal (unquantised) | Same as above, using the 28-day actual. |
+| `weighted_performance_ratio` | Decimal (unquantised) | `performance_ratio_7d * SEVEN_DAY_WEIGHT + performance_ratio_28d * TWENTY_EIGHT_DAY_WEIGHT` — a single blended performance fact weighted toward the more stable 28-day window. |
+| `trend_delta` | Decimal (unquantised) | `(performance_ratio_7d - performance_ratio_28d) / performance_ratio_28d` — the relative change of recent (7-day) performance versus the 28-day comparison. Positive = recent performance better than the 28-day baseline; negative = worse; zero = unchanged. Not yet classified as improving/stable/declining — see `docs/DECISION_RULES.md`. |
+
+None of the four calculated fields is quantised to a fixed number of decimal places (no
+`CURRENCY_QUANTUM` applied — these are ratios, not money) and none is ever a `float`. The
+calculation is platform-independent — it depends only on `kpi_type`, `kpi_target`,
+`kpi_actual_7d`, and `kpi_actual_28d`, never on `platform`.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (metrics, pacing, classification, scoring, allocation).
+> Pending a later Sprint 1 stage (pacing, classification, scoring, allocation).
 
 ## Export Fields
 

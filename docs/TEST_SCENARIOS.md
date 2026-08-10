@@ -1,7 +1,8 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 2 populates the Validation Scenarios section below, backed
-> by `tests/test_validation.py` (44 tests). Metric, Allocation, and Approval/Audit
+> Sprint 1, Development Stage 3 populates the Metric Calculation Scenarios section below,
+> backed by `tests/test_metrics.py` (28 tests), in addition to the Stage 2 Validation
+> Scenarios (`tests/test_validation.py`, 44 tests). Allocation and Approval/Audit
 > scenarios are pending later stages.
 
 ## Validation Scenarios
@@ -80,7 +81,39 @@ warning-level rules. "Report" means the `ValidationReport` returned by
 
 ## Metric Calculation Scenarios
 
-> Pending a later Sprint 1 stage.
+All scenarios below use `calculate_campaign_metrics(campaign: CampaignInput) ->
+CampaignMetrics` from `src/metrics.py`. Every result is a **fact only** — none of these
+scenarios produces a classification, recommendation, confidence level, or trend label.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignMetrics` field set | Exactly `campaign_id`, `performance_ratio_7d`, `performance_ratio_28d`, `weighted_performance_ratio`, `trend_delta`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignMetrics` instance | Rejected (`frozen=True`). |
+| 4 | All four calculated fields | Each is a `Decimal`, never a `float`. |
+| 5 | ROAS, target 4, actual 5 (7d) / 4 (28d) | `performance_ratio_7d = 1.25`, `performance_ratio_28d = 1`. |
+| 6 | ROAS below target | Both ratios `< 1`. |
+| 7 | ROAS exactly at target | Both ratios `= 1`. |
+| 8 | CPA, target 20, actual 16 (7d) / 20 (28d) | `performance_ratio_7d = 1.25`, `performance_ratio_28d = 1`. |
+| 9 | CPA worse than target (higher actual) | Both ratios `< 1`. |
+| 10 | CPA exactly at target | Both ratios `= 1`. |
+| 11 | 25% outperformance expressed as ROAS vs. as CPA | Both produce `performance_ratio_7d = 1.25` — direction normalisation makes CPA and ROAS comparable. |
+| 12 | Better vs. worse actual, for both KPI types | Higher `performance_ratio_7d` consistently corresponds to the better actual, for both CPA and ROAS. |
+| 13 | `ratio_7d = 1.25`, `ratio_28d = 1` | `weighted_performance_ratio = 1.10`. |
+| 14 | `ratio_7d = 0.80`, `ratio_28d = 1` | `weighted_performance_ratio = 0.92`. |
+| 15 | `ratio_7d == ratio_28d` | `weighted_performance_ratio` equals that same value (unchanged by weighting). |
+| 16 | Arbitrary distinct ratios | `weighted_performance_ratio` matches `ratio_7d * SEVEN_DAY_WEIGHT + ratio_28d * TWENTY_EIGHT_DAY_WEIGHT` computed independently from the frozen constants. |
+| 17 | `ratio_7d = 1.25`, `ratio_28d = 1` | `trend_delta = 0.25`. |
+| 18 | `ratio_7d = 0.80`, `ratio_28d = 1` | `trend_delta = -0.20`. |
+| 19 | `ratio_7d == ratio_28d` | `trend_delta = 0` exactly. |
+| 20 | `ratio_7d = 1.44`, `ratio_28d = 1.24` | `trend_delta = 0.20 / 1.24` (not `0.20`) — proves the formula is relative, not a simple subtraction. |
+| 21 | Repeating division (e.g. ROAS target 3, actual 1) | Result matches an independently-computed `Decimal` under `prec=28`/`ROUND_HALF_UP`, to all 28 significant digits. |
+| 22 | Global `decimal` context mutated to `prec=2`/`ROUND_DOWN` before calling the function | Result is unaffected — still matches the `prec=28`/`ROUND_HALF_UP` expectation, proving `localcontext()` isolation. |
+| 23 | Any ratio with a non-terminating decimal expansion | Not quantised to 2 decimal places; differs from its own `.quantize(Decimal("0.01"))`. |
+| 24 | All four `CampaignMetrics` fields | None is a `float`, under any input. |
+| 25 | `data/sample_campaigns.csv` validated via `validate_campaign_csv`, then all 4 valid campaigns passed to `calculate_campaign_metrics` | `campaign_id` order preserved (`G001`, `M001`, `G002`, `G003`); each of the four ratios/weighted ratio/trend delta matches hand-calculation exactly. |
+| 26 | `CampaignMetrics.model_fields` | Contains no `recommendation_action`, `confidence`, `reason_code`, `trend_label`/`trend`, `score`, `budget`, or raw KPI/conversion field. |
+| 27 | `calculate_campaign_metrics(not_a_campaign_input)` | Raises a normal Python `AttributeError` (no silent coercion, no broad exception handling). |
 
 ## Allocation Scenarios
 

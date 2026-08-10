@@ -204,3 +204,72 @@ type's `AfterValidator`, which `src/models.py` cannot be changed to fix — `src
 catches that specific exception type and reports one safe, generic issue instead of
 leaking the internal exception. No other exception type is broadly suppressed.
 **Status:** Frozen.
+
+## 2026-08-10 — Stage 3 is metric calculation, chosen by dependency order not file-list order
+
+**Decision:** `src/metrics.py` is Sprint 1, Development Stage 3, selected because every
+one of the nine frozen numerical constants operates on `CampaignInput` KPI/conversion
+fields (not budget-pacing fields), `MASTER_PROJECT_PLAN.md`'s Sprint 2 goal sentence names
+"metric" logic but not pacing, and classification's `ReasonCode` members that depend on a
+computed ratio/trend fact structurally require metrics to exist first. `src/pacing.py` has
+no frozen constants prepared for it and remains unstarted with unresolved scope.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 3: CampaignMetrics lives in src/metrics.py; facts only, five fields
+
+**Decision:** `CampaignMetrics` (frozen, immutable; `extra="forbid"`) is defined in
+`src/metrics.py`, not `src/models.py` — following the Stage 2 precedent of keeping
+`src/models.py` scoped to exactly `ReviewSetup` and `CampaignInput`. It has exactly five
+fields: `campaign_id`, `performance_ratio_7d`, `performance_ratio_28d`,
+`weighted_performance_ratio`, `trend_delta`. It carries no KPI type, raw KPI value,
+conversions, confidence, trend label, recommendation action, reason code, score, or
+budget field — Stage 3 calculates facts only and never classifies, scores, recommends, or
+assigns confidence. The sole public function is `calculate_campaign_metrics(campaign:
+CampaignInput) -> CampaignMetrics`; it accepts only an already-validated `CampaignInput`
+instance (no raw mapping, CSV row, or unvalidated dict) and there is no batch-calculation
+function in this stage — a caller iterates over validated campaigns itself.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 3: direction-normalised ratio, weighted blend, and trend-delta formulas
+
+**Decision:** For `KPIType.ROAS`: `performance_ratio = kpi_actual / kpi_target`. For
+`KPIType.CPA`: `performance_ratio = kpi_target / kpi_actual`. Computed once per window
+(7-day, 28-day). By construction, `> 1` always means better than target and `< 1` always
+means worse than target, identically for both KPI types — this uniformity is why a single
+threshold pair can later apply to both. `weighted_performance_ratio =
+performance_ratio_7d * SEVEN_DAY_WEIGHT + performance_ratio_28d *
+TWENTY_EIGHT_DAY_WEIGHT`, using the existing frozen weights unchanged.
+`trend_delta = (performance_ratio_7d - performance_ratio_28d) / performance_ratio_28d` —
+a *relative*, not absolute, delta. The calculation is platform-independent (depends only
+on `kpi_type`, `kpi_target`, `kpi_actual_7d`, `kpi_actual_28d`, never `platform`).
+`INCREASE_THRESHOLD`, `MAINTAIN_THRESHOLD`, and `TREND_THRESHOLD` are not applied in
+`src/metrics.py` — comparing facts against them to produce a classification is reserved
+for a later stage.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 3: Decimal precision-28/ROUND_HALF_UP local context; no quantisation
+
+**Decision:** Every calculation in `calculate_campaign_metrics` runs inside an explicit
+`decimal.localcontext()` with `prec=28` and `rounding=ROUND_HALF_UP`, so the result is
+identical regardless of any global `Decimal` context a caller may have mutated. No
+calculated field is quantised to a fixed number of decimal places — ratios are not
+currency, so `CURRENCY_QUANTUM` is never applied to them, and no new rounding or ratio
+constant was added to `src/constants.py`. `float()` is never called and no `Decimal` is
+ever constructed from a `float`. `CampaignInput` already guarantees `kpi_target > 0`,
+`kpi_actual_7d > 0`, and `kpi_actual_28d > 0`, so `src/metrics.py` performs no zero-guard,
+broad exception handling, or sentinel-value logic, and calling it with something other
+than a `CampaignInput` is left to fail with a normal Python type-contract error rather
+than being silently coerced.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 3 excludes confidence, trend labels, and every later-stage decision
+
+**Decision:** `src/metrics.py` does not use `MINIMUM_CONVERSIONS` or
+`HIGH_CONFIDENCE_CONVERSIONS`, and does not calculate or assign `Confidence`. It does not
+compare `trend_delta` to `TREND_THRESHOLD` and does not return `IMPROVING`/`STABLE`/
+`DECLINING` or any new trend enum. Which conversion window controls confidence, the exact
+threshold boundaries, tracking-status effects, and `NOT_ASSESSABLE` behaviour are all
+explicitly deferred to a later classification stage. Pacing, classification, constraints,
+scoring, allocation, conservation, Gemini, Streamlit, approval, audit, and export logic
+remain entirely out of scope for Stage 3.
+**Status:** Frozen.

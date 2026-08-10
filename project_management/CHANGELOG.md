@@ -71,3 +71,31 @@ All notable changes to this project are documented in this file.
 - Updated `docs/DATA_DICTIONARY.md` (`ValidationIssue`/`ValidationReport` fields),
   `docs/DECISION_RULES.md` (frozen Stage 2 validation rules and `ValidationCode` table),
   and `docs/TEST_SCENARIOS.md` (43 concrete Stage 2 scenarios).
+
+- Sprint 1, Development Stage 3: implemented `src/metrics.py` — `CampaignMetrics` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `performance_ratio_7d`,
+  `performance_ratio_28d`, `weighted_performance_ratio`, `trend_delta` — facts only, no
+  KPI type, raw KPI values, conversions, confidence, trend label, recommendation action,
+  reason code, score, or budget field) and `calculate_campaign_metrics(campaign:
+  CampaignInput) -> CampaignMetrics`. Direction-normalised performance ratio:
+  `kpi_actual / kpi_target` for `ROAS`, `kpi_target / kpi_actual` for `CPA`, so `> 1`
+  always means better than target for both KPI types. Weighted performance ratio using
+  the existing frozen `SEVEN_DAY_WEIGHT`/`TWENTY_EIGHT_DAY_WEIGHT`; relative trend delta
+  between the two normalised ratios. `INCREASE_THRESHOLD`, `MAINTAIN_THRESHOLD`, and
+  `TREND_THRESHOLD` are deliberately not applied — Stage 3 calculates facts only. Every
+  calculation runs inside an explicit `decimal.localcontext()` (`prec=28`,
+  `ROUND_HALF_UP`), isolated from a mutated global context; no quantisation, no `float`,
+  no `CURRENCY_QUANTUM`, no new rounding/ratio constant. `src/constants.py`,
+  `src/models.py`, and `src/validation.py` are unchanged.
+- Sprint 1, Development Stage 3: `tests/test_metrics.py` (28 tests) covering result-model
+  shape/immutability, ROAS and CPA ratio calculation, direction-normalisation parity
+  between KPI types, the weighted-ratio and trend-delta formulas (including a relative-
+  not-subtractive trend proof), Decimal precision-28/ROUND_HALF_UP behaviour (including a
+  mutated-global-context isolation proof), integration with `validate_campaign_csv` over
+  `data/sample_campaigns.csv` (exact hand-calculated values, order preserved), and scope
+  boundaries (no recommendation/confidence/reason-code/trend-label/budget field). Full
+  suite: 164 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignMetrics` fields), `docs/DECISION_RULES.md`
+  (frozen Stage 3 metric-calculation rules; trend interpretation and conversion-volume
+  confidence explicitly re-confirmed as pending classification), and
+  `docs/TEST_SCENARIOS.md` (27 concrete Stage 3 scenarios).

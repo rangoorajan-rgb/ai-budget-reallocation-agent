@@ -1,8 +1,9 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 2. Records the frozen enumerations, frozen numerical
-> constants, and the frozen deterministic validation rules. Calculation and allocation
-> rules (how these enumerations and constants are used to classify, score, constrain, and
+> Sprint 1, Development Stage 3. Records the frozen enumerations, frozen numerical
+> constants, the frozen deterministic validation rules, and the frozen deterministic
+> metric-calculation rules. Classification, pacing, constraint, scoring, and allocation
+> rules (how these facts and constants are used to classify, score, constrain, and
 > reallocate budget) are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
@@ -117,14 +118,65 @@ re-implements a rule they already enforce.
   `INVALID_CAMPAIGN_FIELD`) instead of leaking the internal exception. No other exception
   types are broadly suppressed.
 
+## Deterministic Metric Calculation Rules (Sprint 1, Development Stage 3)
+
+These rules govern `src/metrics.py`, which calculates performance-ratio **facts** for an
+already-validated `CampaignInput`. Stage 3 calculates facts only — it never classifies,
+scores, recommends, or assigns confidence. `CampaignInput` (`src/models.py`) remains the
+sole authoritative source of the input guarantees these formulas rely on (`kpi_target > 0`,
+`kpi_actual_7d > 0`, `kpi_actual_28d > 0`); `src/metrics.py` never re-validates them.
+
+- **Direction-normalised performance ratio.** For `KPIType.ROAS` (higher actual is
+  better): `ratio = kpi_actual / kpi_target`. For `KPIType.CPA` (lower actual is better):
+  `ratio = kpi_target / kpi_actual`. Computed once for the 7-day window
+  (`performance_ratio_7d`) and once for the 28-day window (`performance_ratio_28d`).
+- **Uniform meaning across KPI types.** By construction, a ratio `> 1` always means
+  performance better than target, `= 1` means exactly at target, and `< 1` means worse
+  than target — identically for `CPA` and `ROAS`. **Higher ratio always means better
+  performance for both KPI types.** This uniformity is the reason a single pair of
+  thresholds (`INCREASE_THRESHOLD`, `MAINTAIN_THRESHOLD`) can later apply to both.
+- **Weighted performance ratio.** `weighted_performance_ratio = performance_ratio_7d *
+  SEVEN_DAY_WEIGHT + performance_ratio_28d * TWENTY_EIGHT_DAY_WEIGHT`, using the existing
+  frozen `SEVEN_DAY_WEIGHT = Decimal("0.40")` and `TWENTY_EIGHT_DAY_WEIGHT =
+  Decimal("0.60")` — a single blended performance fact, weighted toward the longer,
+  more stable 28-day window.
+- **Relative trend delta.** `trend_delta = (performance_ratio_7d -
+  performance_ratio_28d) / performance_ratio_28d` — the *relative* (not absolute)
+  change of the 7-day ratio versus the 28-day ratio. Positive means recent performance is
+  better than the 28-day comparison; negative means worse; zero means unchanged.
+  `trend_delta` is a numerical fact only — it is never compared against
+  `TREND_THRESHOLD` and never turned into an `IMPROVING`/`STABLE`/`DECLINING` label
+  inside `src/metrics.py`.
+- **Decimal precision and rounding.** Every calculation runs inside an explicit
+  `decimal.localcontext()` with `prec=28` and `rounding=ROUND_HALF_UP`, so behaviour is
+  identical regardless of any global `Decimal` context a caller may have mutated. No
+  result is quantised to a fixed number of decimal places (unlike currency fields, no
+  `RATIO_QUANTUM`-style constant exists, and `CURRENCY_QUANTUM` is never applied to a
+  ratio) — exact terminating results stay numerically exact, and repeating divisions are
+  rounded only by the 28-significant-digit local context.
+- **Platform independence.** The calculation depends only on `kpi_type`, `kpi_target`,
+  `kpi_actual_7d`, and `kpi_actual_28d` — never on `platform`. The same formulas apply
+  identically to Google Ads and Meta Ads campaigns.
+- **No zero-denominator or missing-data handling needed.** `CampaignInput` already
+  guarantees `kpi_target > 0`, `kpi_actual_7d > 0`, `kpi_actual_28d > 0`, and that all
+  three are present — `src/metrics.py` performs no zero-guard, exception handling, or
+  sentinel-value logic, and duplicates none of these validators.
+
 ## Pending
 
-- How `TREND_THRESHOLD`, `SEVEN_DAY_WEIGHT`, and `TWENTY_EIGHT_DAY_WEIGHT` combine to assess
-  recent performance trend.
-- How `INCREASE_THRESHOLD` and `MAINTAIN_THRESHOLD` classify a campaign's KPI performance
-  into a `RecommendationAction`.
-- How `MINIMUM_CONVERSIONS` and `HIGH_CONFIDENCE_CONVERSIONS` map to `Confidence` levels.
+- **Trend interpretation.** How `trend_delta` (Stage 3 fact) is compared against
+  `TREND_THRESHOLD` to determine `RECENT_TREND_IMPROVING` / `STABLE` / `DECLINING` — this
+  interpretation, and any resulting `ReasonCode`, is explicitly deferred to the later
+  classification stage.
+- How `INCREASE_THRESHOLD` and `MAINTAIN_THRESHOLD` classify a campaign's performance
+  ratio (Stage 3 fact) into a `RecommendationAction`.
+- **Conversion-volume confidence.** How `MINIMUM_CONVERSIONS` and
+  `HIGH_CONFIDENCE_CONVERSIONS` map `conversions_7d`/`conversions_28d` to `Confidence`
+  levels — including which conversion window controls confidence, exact threshold
+  boundaries, tracking-status effects, and `NOT_ASSESSABLE` behaviour — remains pending
+  classification. Stage 3 does not use either constant.
 - How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
   budget change.
 - The full set of `ReasonCode` trigger conditions.
+- Pacing rules (no frozen constants exist for pacing yet).
 - Allocation and conservation rules.
