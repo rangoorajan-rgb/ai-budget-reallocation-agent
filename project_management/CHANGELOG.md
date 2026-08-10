@@ -99,3 +99,41 @@ All notable changes to this project are documented in this file.
   (frozen Stage 3 metric-calculation rules; trend interpretation and conversion-volume
   confidence explicitly re-confirmed as pending classification), and
   `docs/TEST_SCENARIOS.md` (27 concrete Stage 3 scenarios).
+
+- Sprint 1, Development Stage 4: implemented `src/pacing.py` — `CampaignPacing` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `elapsed_days`, `total_period_days`,
+  `elapsed_fraction`, `expected_spend`, `spend_variance`, `pacing_ratio`,
+  `remaining_budget`, `projected_end_of_period_spend` — facts only, no pacing status,
+  label, classification, confidence, recommendation, reason code, score, eligibility, or
+  allocation field) and `calculate_campaign_pacing(review: ReviewSetup, campaign:
+  CampaignInput) -> CampaignPacing`. Inclusive date counting
+  (`total_period_days = (period_end - period_start).days + 1`, avoiding a zero
+  denominator for the already-valid one-day-period case); `elapsed_days` clamped to
+  `[0, total_period_days]` since `review_date` has no frozen relationship to the period
+  boundaries. Linear expected-spend assumption; `pacing_ratio` computed from the
+  unquantised internal expected spend so penny rounding cannot distort it; public
+  monetary fields quantised to the existing `CURRENCY_QUANTUM`. `pacing_ratio`/
+  `projected_end_of_period_spend` are `None` only on their exact zero-denominator
+  condition (`current_budget = 0.00` or `elapsed_days = 0` / `elapsed_fraction = 0`) —
+  never a `0/0` sentinel. `remaining_budget` is structurally non-negative given the
+  already-frozen `spend_to_date <= current_budget`. Every calculation runs inside an
+  explicit `decimal.localcontext()` (`prec=28`, `ROUND_HALF_UP`), isolated from a mutated
+  global context; no `float`, no new pacing/ratio/rounding/date constant.
+  `src/constants.py`, `src/models.py`, `src/validation.py`, and `src/metrics.py` are
+  unchanged; `src/pacing.py` imports neither `CampaignMetrics` nor any later-stage
+  module, and never uses `platform`, `kpi_type`, KPI values, or performance/trend/
+  conversion-volume constants — Stage 4 is independent of Stage 3.
+- Sprint 1, Development Stage 4: `tests/test_pacing.py` (30 tests) covering result-model
+  shape/immutability, inclusive date arithmetic and clamping (first/middle/last day,
+  before/after the period, one-day periods, a leap-year February), the exact-on-pace/
+  below-pace/above-pace worked examples, zero-denominator `None` behaviour, Decimal
+  precision-28/ROUND_HALF_UP behaviour (including a mutated-global-context isolation
+  proof and a proof that `pacing_ratio` uses the unquantised expected spend), integration
+  with `validate_campaign_csv` over `data/sample_campaigns.csv` (exact hand-calculated
+  values, order preserved), and scope boundaries (no performance/status/confidence/
+  recommendation/reason-code/score field; no `CampaignMetrics` import). Full suite: 194
+  tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignPacing` fields), `docs/DECISION_RULES.md`
+  (frozen Stage 4 pacing-calculation rules; pacing interpretation explicitly confirmed as
+  pending a later classification/constraints stage), and `docs/TEST_SCENARIOS.md` (30
+  concrete Stage 4 scenarios).

@@ -1,9 +1,9 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 3 (adds deterministic performance-ratio metric facts to the
-> Stage 1 enumerations, numerical constants, core input models, CSV schema, and Stage 2
-> validation reporting). Pacing, classification, and other derived/decision fields, plus
-> export fields, are pending later stages.
+> Sprint 1, Development Stage 4 (adds deterministic calendar/spend-pacing facts to the
+> Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
+> validation reporting, and Stage 3 metric facts). Classification and other derived/
+> decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -109,9 +109,38 @@ None of the four calculated fields is quantised to a fixed number of decimal pla
 calculation is platform-independent — it depends only on `kpi_type`, `kpi_target`,
 `kpi_actual_7d`, and `kpi_actual_28d`, never on `platform`.
 
+## Campaign Pacing Fields (`src/pacing.py`)
+
+Produced by `calculate_campaign_pacing(review: ReviewSetup, campaign: CampaignInput) ->
+CampaignPacing`, one result per campaign within its review period. `CampaignPacing` is
+frozen (immutable) and rejects unknown fields (`extra="forbid"`). These are calculated
+**facts only** — none of them is a pacing status, label, classification, confidence
+level, or recommendation. Independent of Stage 3: depends only on
+`ReviewSetup.review_date`/`period_start`/`period_end` and
+`CampaignInput.campaign_id`/`current_budget`/`spend_to_date` — never `platform`,
+`kpi_type`, KPI actuals/targets, or `CampaignMetrics`.
+
+| Field | Type | Units | Meaning |
+|-------|------|-------|---------|
+| `campaign_id` | string | — | Copied unchanged from the source `CampaignInput`. |
+| `elapsed_days` | int | days | Inclusive days from `period_start` through `review_date`, clamped to `[0, total_period_days]`. `0` if `review_date` is before `period_start`; `total_period_days` if on or after `period_end`. |
+| `total_period_days` | int | days | Inclusive day count of the review period: `(period_end - period_start).days + 1`. Always `>= 1`. |
+| `elapsed_fraction` | Decimal (unquantised) | ratio, `0` to `1` | `elapsed_days / total_period_days`. Not quantised to fixed decimal places. |
+| `expected_spend` | Decimal (currency, quantised to `0.01`) | currency | Linear-delivery expected spend: `current_budget * elapsed_fraction`, quantised for the public result. |
+| `spend_variance` | Decimal (currency, quantised to `0.01`) | currency | `spend_to_date - (unquantised) expected_spend`. Positive = ahead of linear pace, negative = behind. No interpretation of good/bad. |
+| `pacing_ratio` | Decimal (unquantised) or `None` | ratio | `spend_to_date / (unquantised) expected_spend`. `> 1` = spending faster than linear pace, `= 1` = exactly on pace, `< 1` = slower. **`None`** only when the unquantised expected spend is zero (i.e. `elapsed_days = 0` or `current_budget = 0.00`) — never a `0/0` sentinel. |
+| `remaining_budget` | Decimal (currency, quantised to `0.01`) | currency | `current_budget - spend_to_date`. Cannot be negative — `CampaignInput` already guarantees `spend_to_date <= current_budget`. |
+| `projected_end_of_period_spend` | Decimal (currency, quantised to `0.01`) or `None` | currency | Linear extrapolation: `spend_to_date / elapsed_fraction`, quantised. **`None`** only when `elapsed_fraction = 0` (before the period starts). Equals `spend_to_date` on the last day or after the period ends. |
+
+`pacing_ratio` is computed from the **unquantised** `expected_spend` internally (not the
+quantised public `expected_spend` field), so penny rounding never distorts the ratio.
+All calculations run inside an explicit `decimal.localcontext()` (`prec=28`,
+`ROUND_HALF_UP`), independent of any global `Decimal` context a caller may have mutated.
+No field is ever a `float`.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (pacing, classification, scoring, allocation).
+> Pending a later Sprint 1 stage (classification, scoring, allocation).
 
 ## Export Fields
 

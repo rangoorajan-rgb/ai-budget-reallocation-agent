@@ -1,7 +1,8 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 3 populates the Metric Calculation Scenarios section below,
-> backed by `tests/test_metrics.py` (28 tests), in addition to the Stage 2 Validation
+> Sprint 1, Development Stage 4 populates the Pacing Calculation Scenarios section below,
+> backed by `tests/test_pacing.py` (30 tests), in addition to the Stage 3 Metric
+> Calculation Scenarios (`tests/test_metrics.py`, 28 tests) and the Stage 2 Validation
 > Scenarios (`tests/test_validation.py`, 44 tests). Allocation and Approval/Audit
 > scenarios are pending later stages.
 
@@ -114,6 +115,45 @@ scenarios produces a classification, recommendation, confidence level, or trend 
 | 25 | `data/sample_campaigns.csv` validated via `validate_campaign_csv`, then all 4 valid campaigns passed to `calculate_campaign_metrics` | `campaign_id` order preserved (`G001`, `M001`, `G002`, `G003`); each of the four ratios/weighted ratio/trend delta matches hand-calculation exactly. |
 | 26 | `CampaignMetrics.model_fields` | Contains no `recommendation_action`, `confidence`, `reason_code`, `trend_label`/`trend`, `score`, `budget`, or raw KPI/conversion field. |
 | 27 | `calculate_campaign_metrics(not_a_campaign_input)` | Raises a normal Python `AttributeError` (no silent coercion, no broad exception handling). |
+
+## Pacing Calculation Scenarios
+
+All scenarios below use `calculate_campaign_pacing(review: ReviewSetup, campaign:
+CampaignInput) -> CampaignPacing` from `src/pacing.py`. Every result is a **fact only**
+— none of these scenarios produces a pacing status, label, or recommendation.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignPacing` field set | Exactly the 9 approved fields. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignPacing` instance | Rejected (`frozen=True`). |
+| 4 | `elapsed_days`, `total_period_days` | Both `int`. |
+| 5 | All present calculated numerical fields | Each is a `Decimal`, never a `float`. |
+| 6 | `pacing_ratio`/`projected_end_of_period_spend` constructed directly as `None` | Accepted. |
+| 7 | Period 1–31 August, `review_date = 1 August` | `elapsed_days = 1`, `total_period_days = 31`, `elapsed_fraction = 1/31`. |
+| 8 | `review_date = 10 August` | `elapsed_days = 10`, `elapsed_fraction = 10/31`. |
+| 9 | `review_date = 31 August` | `elapsed_days = 31 = total_period_days`, `elapsed_fraction = 1`. |
+| 10 | `review_date` before `period_start` | `elapsed_days = 0`, `elapsed_fraction = 0`. |
+| 11 | `review_date` after `period_end` | `elapsed_days = total_period_days`, `elapsed_fraction = 1`. |
+| 12 | One-day period, reviewed on that day | `elapsed_days = 1`, `total_period_days = 1`, `elapsed_fraction = 1`. |
+| 13 | February 2028 (leap year), period 1–29 Feb | `total_period_days = 29`. |
+| 14 | 10-day period, day 5, budget 1000.00, spend 500.00 | `expected_spend=500.00`, `spend_variance=0.00`, `pacing_ratio=1`, `remaining_budget=500.00`, `projected=1000.00`. |
+| 15 | Same, spend 400.00 (below pace) | `expected_spend=500.00`, `spend_variance=-100.00`, `pacing_ratio=0.8`, `remaining_budget=600.00`, `projected=800.00`. |
+| 16 | Same, spend 600.00 (above pace) | `expected_spend=500.00`, `spend_variance=100.00`, `pacing_ratio=1.2`, `remaining_budget=400.00`, `projected=1200.00`. |
+| 17 | Zero spend, active period | `pacing_ratio = 0`, `projected_end_of_period_spend = 0.00`. |
+| 18 | `current_budget = 0.00` | `expected_spend=0.00`, `spend_variance=0.00`, `pacing_ratio=None`, `remaining_budget=0.00`, `projected=0.00` (elapsed_fraction nonzero). |
+| 19 | `review_date` before the period | `expected_spend=0.00`, `pacing_ratio=None`, `projected_end_of_period_spend=None`. |
+| 20 | `spend_to_date == current_budget` | `remaining_budget = 0.00`. |
+| 21 | Spend above `current_budget` | Not constructible — `CampaignInput` already forbids it; not a Stage 4 case. |
+| 22 | Repeating `elapsed_fraction` (e.g. `10/31`) | Matches an independently-computed `Decimal` under `prec=28`/`ROUND_HALF_UP` to all 28 significant digits. |
+| 23 | `expected_spend`, `spend_variance`, `remaining_budget`, `projected_end_of_period_spend` | Each equals its own `.quantize(Decimal("0.01"))` (already 2 d.p.). |
+| 24 | `pacing_ratio` vs. a ratio computed from the *quantised* `expected_spend` | Differ — proves `pacing_ratio` uses the unquantised internal value. |
+| 25 | Global `decimal` context mutated to `prec=2`/`ROUND_DOWN` before calling the function | Result unaffected — still matches `prec=28`/`ROUND_HALF_UP`, proving `localcontext()` isolation. |
+| 26 | All present numerical fields | None is a `float`, under any input. |
+| 27 | `data/sample_campaigns.csv` validated via `validate_campaign_csv`, paired with one constructed `ReviewSetup` (10 elapsed of 31 days) | Campaign order preserved (`G001`, `M001`, `G002`, `G003`); every field matches hand-calculation exactly. |
+| 28 | `CampaignPacing.model_fields` | Contains no performance ratio, pacing status/label, `RecommendationAction`, `Confidence`, `ReasonCode`, score, eligibility, or allocation field. |
+| 29 | `src/pacing.py` source | Does not import `CampaignMetrics`, `src.metrics`, or `src.classification`. |
+| 30 | `calculate_campaign_pacing(None, None)` | Raises a normal Python `AttributeError` (no silent coercion, no broad exception handling). |
 
 ## Allocation Scenarios
 

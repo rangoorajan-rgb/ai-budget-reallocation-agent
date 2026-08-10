@@ -273,3 +273,90 @@ explicitly deferred to a later classification stage. Pacing, classification, con
 scoring, allocation, conservation, Gemini, Streamlit, approval, audit, and export logic
 remain entirely out of scope for Stage 3.
 **Status:** Frozen.
+
+## 2026-08-10 — Stage 4 is campaign pacing, confirmed by weighing mixed dependency evidence
+
+**Decision:** `src/pacing.py` is Sprint 1, Development Stage 4. Constants-readiness
+evidence alone favoured classification (5 of 9 frozen constants are classification-domain,
+and `CampaignMetrics` newly satisfies its prerequisite), but pacing was confirmed instead
+because `README.md`'s "Proposed Solution" explicitly names pacing as one of exactly two
+co-equal assessment axes ("performance against goals and pacing") — the strongest single
+piece of product-intent evidence in the repository, and one that never mentions
+"classification" at all — because pacing's required inputs were already fully available
+from Stage 1 alone with no Stage 3 dependency, and because pacing's open questions were
+comparatively few, tractable calendar/currency conventions rather than the large web of
+interacting business decisions (which ratio, confidence-tier formula, trend-label
+boundaries, `RecommendationAction`/`Confidence` interaction, protected-campaign boundary,
+20 `ReasonCode` triggers) that classification would have required to freeze safely.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 4: CampaignPacing lives in src/pacing.py; facts only, nine fields
+
+**Decision:** `CampaignPacing` (frozen, immutable; `extra="forbid"`) is defined in
+`src/pacing.py`, not `src/models.py`, following the Stage 2/3 precedent. It has exactly
+nine fields: `campaign_id`, `elapsed_days`, `total_period_days`, `elapsed_fraction`,
+`expected_spend`, `spend_variance`, `pacing_ratio`, `remaining_budget`,
+`projected_end_of_period_spend`. It carries no pacing status, label, classification,
+confidence, recommendation action, reason code, score, eligibility, or allocation field —
+Stage 4 calculates facts only. The sole public function is
+`calculate_campaign_pacing(review: ReviewSetup, campaign: CampaignInput) ->
+CampaignPacing`; it accepts only already-validated `ReviewSetup`/`CampaignInput`
+instances (no raw mapping, CSV row, or unvalidated dict), and there is no batch-
+calculation function — a caller iterates over validated campaigns itself. `src/pacing.py`
+does not import `CampaignMetrics` or any later-stage module, and uses only
+`ReviewSetup.review_date`/`period_start`/`period_end` and
+`CampaignInput.campaign_id`/`current_budget`/`spend_to_date` — never `platform`,
+`kpi_type`, KPI values, or performance/trend/conversion-volume constants.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 4: inclusive date counting and elapsed-day clamping
+
+**Decision:** `total_period_days = (period_end - period_start).days + 1` (inclusive of
+both boundary days), chosen specifically because `ReviewSetup` already permits
+`period_start == period_end` (a valid one-day review period) and exclusive counting would
+make that case's `total_period_days = 0`, an unavoidable zero denominator. Since
+`ReviewSetup` places no frozen constraint between `review_date` and the period
+boundaries, `elapsed_days` is calculated as `raw_elapsed_days = (review_date -
+period_start).days + 1` then clamped: `elapsed_days = min(max(raw_elapsed_days, 0),
+total_period_days)`. A `review_date` before `period_start` yields `elapsed_days = 0`; on
+`period_start` yields `1`; on or after `period_end` yields `total_period_days`. This
+clamping is Stage 4 calculation behaviour only — no cross-field validation was added or
+modified on `ReviewSetup`.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 4: linear expected-spend, variance, pacing-ratio, remaining-budget, and projection formulas
+
+**Decision:** `elapsed_fraction = Decimal(elapsed_days) / Decimal(total_period_days)`,
+unquantised. Linear delivery is assumed: `raw_expected_spend = current_budget *
+elapsed_fraction` (unquantised, used internally); the public `expected_spend =
+raw_expected_spend.quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)`.
+`spend_variance = (spend_to_date - raw_expected_spend).quantize(CURRENCY_QUANTUM,
+rounding=ROUND_HALF_UP)` — positive means ahead of linear pace, negative means behind,
+with no good/bad interpretation attached. `pacing_ratio = spend_to_date /
+raw_expected_spend` when `raw_expected_spend != 0` (deliberately using the *unquantised*
+expected spend so penny rounding cannot distort the ratio), else `None` — this occurs
+exactly when `elapsed_days = 0` or `current_budget = Decimal("0.00")` (and since
+`spend_to_date <= current_budget` is already frozen, a zero budget also forces zero
+spend); never a `0/0` sentinel. `remaining_budget = (current_budget -
+spend_to_date).quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)` — structurally cannot
+be negative given the already-frozen `spend_to_date <= current_budget`, so no new
+validation was added for it. `projected_end_of_period_spend = (spend_to_date /
+elapsed_fraction).quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)` when
+`elapsed_fraction != 0`, else `None` (before the period starts) — a factual linear
+extrapolation only, never labelled as an expected overspend/underspend/risk.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 4: Decimal precision-28/ROUND_HALF_UP local context; quantisation policy
+
+**Decision:** Every calculation in `calculate_campaign_pacing` runs inside an explicit
+`decimal.localcontext()` with `prec=28` and `rounding=ROUND_HALF_UP`, identical to Stage
+3's pattern, independent of any global `Decimal` context a caller may have mutated.
+`expected_spend`, `spend_variance`, `remaining_budget`, and
+`projected_end_of_period_spend` are quantised to the existing `CURRENCY_QUANTUM`
+(`Decimal("0.01")`) since they represent money; `elapsed_fraction` and `pacing_ratio` are
+not quantised, since they are ratios. No new pacing, ratio, rounding, or date constant
+was added to `src/constants.py`. `float()` is never called and no `Decimal` is ever
+constructed from a `float`. Calling `calculate_campaign_pacing` with something other than
+`ReviewSetup`/`CampaignInput` instances is left to fail with a normal Python
+type-contract error rather than being silently coerced.
+**Status:** Frozen.

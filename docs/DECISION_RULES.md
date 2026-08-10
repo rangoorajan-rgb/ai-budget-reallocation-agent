@@ -1,10 +1,11 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 3. Records the frozen enumerations, frozen numerical
-> constants, the frozen deterministic validation rules, and the frozen deterministic
-> metric-calculation rules. Classification, pacing, constraint, scoring, and allocation
-> rules (how these facts and constants are used to classify, score, constrain, and
-> reallocate budget) are pending later Sprint 1 stages.
+> Sprint 1, Development Stage 4. Records the frozen enumerations, frozen numerical
+> constants, the frozen deterministic validation rules, the frozen deterministic
+> metric-calculation rules, and the frozen deterministic pacing-calculation rules.
+> Classification, constraint, scoring, and allocation rules (how these facts and
+> constants are used to classify, score, constrain, and reallocate budget) are pending
+> later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -162,8 +163,76 @@ sole authoritative source of the input guarantees these formulas rely on (`kpi_t
   three are present — `src/metrics.py` performs no zero-guard, exception handling, or
   sentinel-value logic, and duplicates none of these validators.
 
+## Deterministic Pacing Calculation Rules (Sprint 1, Development Stage 4)
+
+These rules govern `src/pacing.py`, which calculates calendar and linear spend-pacing
+**facts** for one already-validated `ReviewSetup` and one already-validated
+`CampaignInput`. Stage 4 calculates facts only — it never classifies, labels, or assigns
+a pacing status. `ReviewSetup` and `CampaignInput` (`src/models.py`) remain the sole
+authoritative source of the input guarantees these formulas rely on
+(`spend_to_date <= current_budget`, `period_end >= period_start`); `src/pacing.py` never
+re-validates them. Stage 4 is independent of Stage 3: it never imports `CampaignMetrics`
+and never uses `platform`, `kpi_type`, KPI actuals/targets, or any performance/trend/
+conversion-volume constant.
+
+- **Inclusive date counting.** `total_period_days = (period_end - period_start).days + 1`
+  — both boundary days count, so a valid one-day review period (`period_start ==
+  period_end`, already permitted by `ReviewSetup`) gives `total_period_days = 1`, never a
+  zero denominator.
+- **Elapsed-day clamping.** `raw_elapsed_days = (review_date - period_start).days + 1`,
+  then `elapsed_days = min(max(raw_elapsed_days, 0), total_period_days)`. `ReviewSetup`
+  places no frozen constraint between `review_date` and the period boundaries, so a
+  review dated before or after the period is valid input; clamping is Stage 4
+  calculation behaviour only and does not change what `ReviewSetup` accepts.
+  - `review_date` before `period_start` → `elapsed_days = 0`.
+  - `review_date == period_start` → `elapsed_days = 1`.
+  - `review_date == period_end` or after → `elapsed_days = total_period_days`.
+- **Elapsed fraction.** `elapsed_fraction = Decimal(elapsed_days) /
+  Decimal(total_period_days)`, in `[0, 1]`. Not quantised to fixed decimal places.
+- **Linear expected-spend assumption.** `raw_expected_spend = current_budget *
+  elapsed_fraction` (unquantised, used internally for ratio calculations); the public
+  `expected_spend = raw_expected_spend.quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)`.
+- **Spend variance.** `spend_variance = (spend_to_date -
+  raw_expected_spend).quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)`. Positive means
+  ahead of linear pace, negative means behind — Stage 4 does not say whether either is
+  good or bad.
+- **Pacing ratio.** When `raw_expected_spend != 0`: `pacing_ratio = spend_to_date /
+  raw_expected_spend` (unquantised — deliberately computed from the *unquantised* expected
+  spend so penny rounding cannot distort the ratio). `> 1` means spending faster than
+  linear pace, `= 1` means exactly on pace, `< 1` means slower — a numerical meaning only,
+  not a status. When `raw_expected_spend == 0` (which happens when `elapsed_days = 0` or
+  `current_budget = 0.00`; since `spend_to_date <= current_budget` is already frozen, a
+  zero budget also means zero spend): `pacing_ratio = None`. Never a `0/0` sentinel.
+- **Remaining budget.** `remaining_budget = (current_budget -
+  spend_to_date).quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)`. Cannot be negative —
+  guaranteed by the already-frozen `spend_to_date <= current_budget` — so Stage 4
+  duplicates no additional validation for this.
+- **Projected end-of-period spend.** When `elapsed_fraction != 0`:
+  `projected_end_of_period_spend = (spend_to_date /
+  elapsed_fraction).quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)` — a factual linear
+  extrapolation only, never labelled as an expected overspend/underspend/risk. Equals
+  `spend_to_date` on the last day or after the period. When `elapsed_fraction == 0`
+  (before the period starts): `projected_end_of_period_spend = None`.
+- **Decimal precision and rounding.** Every calculation runs inside an explicit
+  `decimal.localcontext()` with `prec=28` and `rounding=ROUND_HALF_UP`, independent of any
+  global `Decimal` context a caller may have mutated.
+- **Quantisation policy.** `expected_spend`, `spend_variance`, `remaining_budget`, and
+  `projected_end_of_period_spend` are quantised to `CURRENCY_QUANTUM` (`Decimal("0.01")`)
+  since they represent money. `elapsed_fraction` and `pacing_ratio` are **not** quantised
+  to any fixed number of decimal places — they are ratios, not currency. No new pacing,
+  ratio, rounding, or date constant was added to `src/constants.py`; the existing
+  `CURRENCY_QUANTUM` is reused as-is.
+- **Platform and KPI independence.** The calculation depends only on
+  `review_date`/`period_start`/`period_end` and `current_budget`/`spend_to_date` — never
+  on `platform` or `kpi_type`, and never on any Stage 3 `CampaignMetrics` output.
+
 ## Pending
 
+- **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
+  `projected_end_of_period_spend` means a campaign is "on pace," "underspending,"
+  "overspending," "under-delivering," "over-delivering," or "at risk" — any status,
+  label, or recommendation built from Stage 4's pacing facts — is deferred entirely to a
+  later classification/constraints stage. Stage 4 returns numbers only.
 - **Trend interpretation.** How `trend_delta` (Stage 3 fact) is compared against
   `TREND_THRESHOLD` to determine `RECENT_TREND_IMPROVING` / `STABLE` / `DECLINING` — this
   interpretation, and any resulting `ReasonCode`, is explicitly deferred to the later
@@ -178,5 +247,4 @@ sole authoritative source of the input guarantees these formulas rely on (`kpi_t
 - How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
   budget change.
 - The full set of `ReasonCode` trigger conditions.
-- Pacing rules (no frozen constants exist for pacing yet).
 - Allocation and conservation rules.
