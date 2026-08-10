@@ -1,7 +1,8 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 1 (frozen enumerations, frozen numerical constants, core
-> input models, CSV schema). Derived and export fields are pending later stages.
+> Sprint 1, Development Stage 2 (adds deterministic validation reporting to the Stage 1
+> enumerations, numerical constants, core input models, and CSV schema). Derived and
+> export fields are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -57,6 +58,35 @@ Captured once per review via `src/models.py::ReviewSetup`, not uploaded as CSV.
 
 Both `ReviewSetup` and `CampaignInput` reject any field not in the lists above
 (`extra="forbid"`).
+
+## Validation Report Fields (`src/validation.py`)
+
+Produced by `validate_review_setup()` and `validate_campaign_csv()`. Not part of the CSV
+schema — these are the shapes returned to describe validation outcomes.
+
+### `ValidationIssue`
+
+| Field | Type | Description |
+|-------|------|--------------|
+| `severity` | enum (`ValidationSeverity`) | Always `ERROR` for every issue Stage 2 produces. |
+| `code` | enum (`ValidationCode`) | One of `INVALID_REVIEW_FIELD`, `EMPTY_FILE`, `INVALID_HEADER`, `NO_CAMPAIGN_ROWS`, `MALFORMED_ROW`, `INVALID_CAMPAIGN_FIELD`, `DUPLICATE_CAMPAIGN_ID`. |
+| `field` | string or `None` | Affected field name (dotted if nested), or `None` for file-level/model-level issues with no single field. |
+| `message` | string | Human-readable description. Never a raw stack trace or internal exception representation. |
+| `row_number` | integer or `None` | Physical one-based CSV line number (header is line 1, first data row is line 2), or `None` for file-level and `ReviewSetup` issues. |
+| `campaign_id` | string or `None` | Trimmed `campaign_id` for the affected row, when it could be read; otherwise `None`. |
+
+### `ValidationReport`
+
+| Field | Type | Description |
+|-------|------|--------------|
+| `issues` | list of `ValidationIssue` | All issues found, in the order encountered. |
+| `valid_campaigns` | list of `CampaignInput` | Successfully validated, non-duplicate campaigns, in original CSV order. |
+| `error_count` | integer (computed) | Count of `ERROR`-severity issues. Derived from `issues` on every access; not settable independently. |
+| `warning_count` | integer (computed) | Count of `WARNING`-severity issues. Derived from `issues`; always `0` for current Stage 2 outcomes. |
+| `is_valid` | boolean (computed) | `True` only when `error_count == 0`. Derived from `issues`; not settable independently. |
+
+`ValidationReport` intentionally has no `review_id` field: invalid raw review input may not
+contain a usable review ID.
 
 ## Derived Fields
 

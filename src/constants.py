@@ -84,6 +84,19 @@ class ValidationSeverity(str, Enum):
     WARNING = "WARNING"
 
 
+class ValidationCode(str, Enum):
+    """Stable codes identifying the kind of input-validation issue found. Distinct from
+    `ReasonCode`, which explains recommendation/allocation outcomes, not input validation."""
+
+    INVALID_REVIEW_FIELD = "INVALID_REVIEW_FIELD"
+    EMPTY_FILE = "EMPTY_FILE"
+    INVALID_HEADER = "INVALID_HEADER"
+    NO_CAMPAIGN_ROWS = "NO_CAMPAIGN_ROWS"
+    MALFORMED_ROW = "MALFORMED_ROW"
+    INVALID_CAMPAIGN_FIELD = "INVALID_CAMPAIGN_FIELD"
+    DUPLICATE_CAMPAIGN_ID = "DUPLICATE_CAMPAIGN_ID"
+
+
 class ReasonCode(str, Enum):
     """Stable, traceable reason codes explaining a recommendation or constraint outcome."""
 
