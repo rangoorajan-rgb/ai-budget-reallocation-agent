@@ -1,9 +1,10 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 4 (adds deterministic calendar/spend-pacing facts to the
-> Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
-> validation reporting, and Stage 3 metric facts). Classification and other derived/
-> decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 5 (adds neutral deterministic performance classification to
+> the Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
+> validation reporting, Stage 3 metric facts, and Stage 4 pacing facts). Trend
+> classification, conversion-volume confidence, tracking interpretation, and other
+> derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -138,9 +139,40 @@ All calculations run inside an explicit `decimal.localcontext()` (`prec=28`,
 `ROUND_HALF_UP`), independent of any global `Decimal` context a caller may have mutated.
 No field is ever a `float`.
 
+## Campaign Performance Classification Fields (`src/classification.py`)
+
+Produced by `classify_campaign_performance(metrics: CampaignMetrics) ->
+CampaignPerformanceClass`, one result per already-calculated `CampaignMetrics` instance.
+`CampaignPerformanceClass` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is a **descriptive performance classification only** — it is
+**not** a `RecommendationAction`, decision, constraint, score, eligibility result, or
+budget action. Depends only on `CampaignMetrics.campaign_id`/`weighted_performance_ratio`
+— never `CampaignInput`, `CampaignPacing`, `ReviewSetup`, `platform`, or `kpi_type`.
+
+### `PerformanceBand` (enum)
+
+| Member | Value | Meaning |
+|--------|-------|---------|
+| `ABOVE_TARGET` | `"ABOVE_TARGET"` | `weighted_performance_ratio >= INCREASE_THRESHOLD` (`1.15`). |
+| `ON_TARGET` | `"ON_TARGET"` | `MAINTAIN_THRESHOLD <= weighted_performance_ratio < INCREASE_THRESHOLD` (`0.90` to just under `1.15`). |
+| `BELOW_TARGET` | `"BELOW_TARGET"` | `weighted_performance_ratio < MAINTAIN_THRESHOLD` (below `0.90`). |
+
+This is a deliberately neutral vocabulary, intentionally distinct from
+`RecommendationAction` (`INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`) — `PerformanceBand` never
+appears interchangeably with it, and no `RecommendationAction` is assigned anywhere in
+Stage 5.
+
+### `CampaignPerformanceClass`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignMetrics`. |
+| `performance_band` | enum (`PerformanceBand`) | The classified band, per the table above. |
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (classification, scoring, allocation).
+> Pending a later Sprint 1 stage (trend classification, conversion-volume confidence,
+> tracking interpretation, constraints, scoring, allocation).
 
 ## Export Fields
 

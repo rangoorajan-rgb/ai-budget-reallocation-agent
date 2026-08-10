@@ -1,10 +1,11 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 4 populates the Pacing Calculation Scenarios section below,
-> backed by `tests/test_pacing.py` (30 tests), in addition to the Stage 3 Metric
-> Calculation Scenarios (`tests/test_metrics.py`, 28 tests) and the Stage 2 Validation
-> Scenarios (`tests/test_validation.py`, 44 tests). Allocation and Approval/Audit
-> scenarios are pending later stages.
+> Sprint 1, Development Stage 5 populates the Performance Classification Scenarios
+> section below, backed by `tests/test_classification.py` (23 tests), in addition to the
+> Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3
+> Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2
+> Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
+> Approval/Audit scenarios are pending later stages.
 
 ## Validation Scenarios
 
@@ -154,6 +155,39 @@ CampaignInput) -> CampaignPacing` from `src/pacing.py`. Every result is a **fact
 | 28 | `CampaignPacing.model_fields` | Contains no performance ratio, pacing status/label, `RecommendationAction`, `Confidence`, `ReasonCode`, score, eligibility, or allocation field. |
 | 29 | `src/pacing.py` source | Does not import `CampaignMetrics`, `src.metrics`, or `src.classification`. |
 | 30 | `calculate_campaign_pacing(None, None)` | Raises a normal Python `AttributeError` (no silent coercion, no broad exception handling). |
+
+## Performance Classification Scenarios
+
+All scenarios below use `classify_campaign_performance(metrics: CampaignMetrics) ->
+CampaignPerformanceClass` from `src/classification.py`. Every result is a **neutral
+descriptive classification only** — none of these scenarios produces a
+`RecommendationAction`, `Confidence`, `ReasonCode`, trend label, tracking interpretation,
+score, eligibility, or allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `PerformanceBand` members | Exactly `ABOVE_TARGET`, `ON_TARGET`, `BELOW_TARGET`. |
+| 2 | `CampaignPerformanceClass` field set | Exactly `campaign_id`, `performance_band`. |
+| 3 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate a `CampaignPerformanceClass` instance | Rejected (`frozen=True`). |
+| 5 | `performance_band` | Always a `PerformanceBand` instance. |
+| 6 | `classify_campaign_performance({"weighted_performance_ratio": ...})` (dict, not `CampaignMetrics`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 7 | `weighted_performance_ratio = Decimal("1.1500000000000000000000000001")` | `ABOVE_TARGET`. |
+| 8 | `weighted_performance_ratio = Decimal("1.15")` (exactly `INCREASE_THRESHOLD`) | `ABOVE_TARGET` — the threshold belongs to the higher band. |
+| 9 | `weighted_performance_ratio = Decimal("1.1499999999999999999999999999")` | `ON_TARGET`. |
+| 10 | `weighted_performance_ratio = Decimal("1.00")` | `ON_TARGET`. |
+| 11 | `weighted_performance_ratio = Decimal("0.9000000000000000000000000001")` | `ON_TARGET`. |
+| 12 | `weighted_performance_ratio = Decimal("0.90")` (exactly `MAINTAIN_THRESHOLD`) | `ON_TARGET` — the threshold belongs to the higher band. |
+| 13 | `weighted_performance_ratio = Decimal("0.8999999999999999999999999999")` | `BELOW_TARGET`. |
+| 14 | `weighted_performance_ratio = Decimal("0.50")` | `BELOW_TARGET`. |
+| 15 | `campaign_id` on the result | Copied exactly from the source `CampaignMetrics`. |
+| 16 | 25%-better-than-target expressed as ROAS vs. as CPA, carried through `CampaignInput` → `calculate_campaign_metrics` → `classify_campaign_performance` | Both produce `weighted_performance_ratio = 1.25` and both classify as `ABOVE_TARGET` — KPI origin established via the real Stage 1/3 path, not asserted on `CampaignMetrics` alone (which carries no `kpi_type`). |
+| 17 | `data/sample_campaigns.csv` validated, then each campaign run through `calculate_campaign_metrics` → `classify_campaign_performance`, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); bands: `G001=ON_TARGET`, `M001=ON_TARGET`, `G002=ABOVE_TARGET`, `G003=ON_TARGET`. |
+| 18 | `CampaignPerformanceClass.model_fields` | Contains no `recommendation_action`, `confidence`, `reason_code`, trend/tracking/pacing field, `score`, `eligibility`, or `allocation` field. |
+| 19 | `src/classification.py` imports | Does not import `CampaignInput`, `CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `Confidence`, `ReasonCode`, or any later-stage module (verified via AST import inspection). |
+| 20 | Any result | No `float` anywhere. |
+| 21 | Classification call | Performs no arithmetic — input `Decimal` value is unchanged after the call. |
+| 22 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — classification is comparison-only and needs no local context. |
 
 ## Allocation Scenarios
 

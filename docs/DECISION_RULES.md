@@ -1,11 +1,11 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 4. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 5. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
-> metric-calculation rules, and the frozen deterministic pacing-calculation rules.
-> Classification, constraint, scoring, and allocation rules (how these facts and
-> constants are used to classify, score, constrain, and reallocate budget) are pending
-> later Sprint 1 stages.
+> metric-calculation rules, the frozen deterministic pacing-calculation rules, and the
+> frozen neutral performance-classification rule. Trend classification, conversion-volume
+> confidence, tracking interpretation, constraint, scoring, and allocation rules are
+> pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -226,6 +226,47 @@ conversion-volume constant.
   `review_date`/`period_start`/`period_end` and `current_budget`/`spend_to_date` — never
   on `platform` or `kpi_type`, and never on any Stage 3 `CampaignMetrics` output.
 
+## Deterministic Performance Classification Rules (Sprint 1, Development Stage 5)
+
+These rules govern `src/classification.py`, which classifies one already-calculated
+`CampaignMetrics` instance into a neutral `PerformanceBand`. Stage 5 is a **descriptive
+classification only** — it is not a `RecommendationAction`, decision, constraint, score,
+eligibility result, or budget action. `CampaignMetrics` (`src/metrics.py`) remains the
+sole authoritative source of `weighted_performance_ratio`; `src/classification.py` never
+recalculates it.
+
+- **Classification input.** `weighted_performance_ratio` (from `CampaignMetrics`) is the
+  sole input. No other `CampaignMetrics` field (`performance_ratio_7d`,
+  `performance_ratio_28d`, `trend_delta`), and no `CampaignInput`, `CampaignPacing`, or
+  `ReviewSetup` field, is used.
+- **Threshold conditions and equality behaviour**, using the existing frozen
+  `INCREASE_THRESHOLD = Decimal("1.15")` and `MAINTAIN_THRESHOLD = Decimal("0.90")`:
+  ```
+  weighted_performance_ratio >= INCREASE_THRESHOLD               → ABOVE_TARGET
+  MAINTAIN_THRESHOLD <= weighted_performance_ratio < INCREASE_THRESHOLD → ON_TARGET
+  weighted_performance_ratio < MAINTAIN_THRESHOLD                → BELOW_TARGET
+  ```
+  The threshold value itself belongs to the higher band: `weighted_performance_ratio ==
+  INCREASE_THRESHOLD` is `ABOVE_TARGET`; `weighted_performance_ratio ==
+  MAINTAIN_THRESHOLD` is `ON_TARGET`.
+- **Direct Decimal comparison only.** No arithmetic, quantisation, or `float` conversion
+  is performed — classification only compares an already-computed `Decimal` against the
+  two existing constants, so no local `decimal` context is required (unlike Stages 3–4,
+  which perform division/multiplication).
+- **Platform and KPI independence.** The classification depends only on
+  `weighted_performance_ratio` — never `platform` or `kpi_type` — and contains no
+  KPI-specific branching, since Stage 3 has already direction-normalised CPA and ROAS so
+  that a higher ratio always means better performance for both.
+- **Neutral vocabulary, not a recommendation.** `PerformanceBand`
+  (`ABOVE_TARGET`/`ON_TARGET`/`BELOW_TARGET`) is deliberately distinct from
+  `RecommendationAction` (`INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`) and is never assigned to
+  or confused with it. `RecommendationAction`, `Confidence`, and `ReasonCode` are not
+  imported or assigned anywhere in `src/classification.py`.
+- **No precedence over unresolved considerations.** A campaign receives a numerical
+  performance band regardless of its trend, conversion volume, or tracking reliability —
+  Stage 5 creates no precedence or override rule for those later considerations; it
+  simply does not consider them.
+
 ## Pending
 
 - **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
@@ -237,8 +278,13 @@ conversion-volume constant.
   `TREND_THRESHOLD` to determine `RECENT_TREND_IMPROVING` / `STABLE` / `DECLINING` — this
   interpretation, and any resulting `ReasonCode`, is explicitly deferred to the later
   classification stage.
-- How `INCREASE_THRESHOLD` and `MAINTAIN_THRESHOLD` classify a campaign's performance
-  ratio (Stage 3 fact) into a `RecommendationAction`.
+- **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
+  `MAINTAIN_THRESHOLD` classify `weighted_performance_ratio` into a neutral
+  `PerformanceBand` (see above) — but a `PerformanceBand` is not a `RecommendationAction`.
+  `RecommendationAction` has a fourth member, `HOLD`, that cannot be derived from
+  performance ratio thresholds alone; assigning a final `RecommendationAction` requires
+  combining `PerformanceBand` with trend, confidence, tracking, and eligibility/
+  constraint considerations that remain pending later stages.
 - **Conversion-volume confidence.** How `MINIMUM_CONVERSIONS` and
   `HIGH_CONFIDENCE_CONVERSIONS` map `conversions_7d`/`conversions_28d` to `Confidence`
   levels — including which conversion window controls confidence, exact threshold

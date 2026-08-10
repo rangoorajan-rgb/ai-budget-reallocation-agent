@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, and 4 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, and 5 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -105,16 +105,44 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 4 (and not yet started)
+## Development Stage 5 — Neutral Deterministic Performance Classification (complete)
 
-- Pacing/performance interpretation (status, label, or recommendation from any Stage 3
-  or Stage 4 fact), classification, conversion-volume confidence, tracking-status
-  interpretation, constraints, scoring, allocation, conservation.
+- [x] `src/classification.py` — `PerformanceBand` enum (`ABOVE_TARGET`, `ON_TARGET`,
+      `BELOW_TARGET`; deliberately distinct from `RecommendationAction`) and
+      `CampaignPerformanceClass` (frozen, `extra="forbid"`: `campaign_id`,
+      `performance_band`) and `classify_campaign_performance(metrics: CampaignMetrics)
+      -> CampaignPerformanceClass`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py` unchanged.
+- [x] Classifies `weighted_performance_ratio` only, using the existing frozen
+      `INCREASE_THRESHOLD`/`MAINTAIN_THRESHOLD`: `>= INCREASE_THRESHOLD` →
+      `ABOVE_TARGET`; `>= MAINTAIN_THRESHOLD` (and `< INCREASE_THRESHOLD`) →
+      `ON_TARGET`; otherwise `BELOW_TARGET`. Each threshold belongs to the higher band.
+- [x] Direct `Decimal` comparison only — no arithmetic, quantisation, `float`
+      conversion, or local `decimal` context.
+- [x] Depends only on `CampaignMetrics.campaign_id`/`weighted_performance_ratio` — no
+      `CampaignInput`, `CampaignPacing`, or `ReviewSetup`; no `platform`/`kpi_type`
+      branching (Stage 3 already normalised CPA/ROAS direction).
+- [x] No trend classification, conversion-volume confidence, tracking interpretation,
+      `NOT_ASSESSABLE` behaviour, `RecommendationAction`, `Confidence`, `ReasonCode`,
+      constraints, scoring, allocation, conservation, or later-stage logic.
+- [x] `tests/test_classification.py` — 23 tests, all passing. `tests/test_models.py`
+      (Stage 1), `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage 3),
+      and `tests/test_pacing.py` (Stage 4) unchanged and still passing.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 5 (and not yet started)
+
+- Trend classification (`trend_delta` vs. `TREND_THRESHOLD`), conversion-volume
+  confidence, tracking-status interpretation, `NOT_ASSESSABLE` behaviour.
+- Protected/test campaign constraints, eligibility, scoring, final `RecommendationAction`
+  assignment, `ReasonCode` assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 5 (not started, scope not yet frozen): the next deterministic-engine module —
-requires the same dependency-order inspection used to select Stages 3 and 4, not
-file-list order.
+Stage 6 (not started, scope not yet frozen): candidates include trend classification,
+conversion-volume confidence, and tracking-status interpretation — each has unresolved
+formula/boundary questions of its own (see `DECISIONS.md`) and requires its own dependency
+and decision-readiness inspection before being frozen, not file-list order.

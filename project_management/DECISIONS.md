@@ -360,3 +360,56 @@ constructed from a `float`. Calling `calculate_campaign_pacing` with something o
 `ReviewSetup`/`CampaignInput` instances is left to fail with a normal Python
 type-contract error rather than being silently coerced.
 **Status:** Frozen.
+
+## 2026-08-10 — Stage 5 is neutral performance classification, narrower than "classification"
+
+**Decision:** Sprint 1, Development Stage 5 is scoped to *neutral performance
+classification only* — not the full "classification" responsibility named in
+`MASTER_PROJECT_PLAN.md`. Trend classification, conversion-volume confidence, and
+tracking-status interpretation are each deferred to a later stage, because each has its
+own unresolved formula or boundary question (trend's equality-boundary convention;
+confidence's conversion-window choice and the structural gap between two thresholds and
+four `Confidence` tiers; tracking's undefined precedence relative to a numerical
+performance class) that cannot be safely frozen without inventing a rule. Splitting
+avoids silently choosing among multiple plausible formulas for any of those three.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 5: PerformanceBand and CampaignPerformanceClass, in src/classification.py
+
+**Decision:** `PerformanceBand` (`str, Enum`: `ABOVE_TARGET`, `ON_TARGET`,
+`BELOW_TARGET`) and `CampaignPerformanceClass` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id`, `performance_band`) are defined in `src/classification.py`, not
+`src/models.py`, following the Stage 2/3/4 precedent. `PerformanceBand` is deliberately a
+neutral vocabulary distinct from `RecommendationAction` — it is never assigned to or
+confused with `RecommendationAction`, `Confidence`, or `ReasonCode`, none of which is
+imported by `src/classification.py`. This is because `RecommendationAction` has a fourth
+member, `HOLD`, that cannot be derived from a performance-ratio threshold split alone, so
+treating a performance band as if it were already a final recommendation would
+misrepresent a single-factor, provisional judgement as a multi-factor decision. The sole
+public function is `classify_campaign_performance(metrics: CampaignMetrics) ->
+CampaignPerformanceClass`; it accepts only an already-calculated `CampaignMetrics`
+instance (no `CampaignInput`, `CampaignPacing`, `ReviewSetup`, raw mapping, or
+unvalidated dict), and there is no batch-calculation function — a caller iterates over
+calculated metrics itself.
+**Status:** Frozen.
+
+## 2026-08-10 — Stage 5: exact threshold conditions and equality behaviour
+
+**Decision:** Classification applies directly to `CampaignMetrics.weighted_performance_ratio`
+using the existing frozen `INCREASE_THRESHOLD` and `MAINTAIN_THRESHOLD`, with the
+threshold value itself belonging to the higher band:
+```
+weighted_performance_ratio >= INCREASE_THRESHOLD               → ABOVE_TARGET
+MAINTAIN_THRESHOLD <= weighted_performance_ratio < INCREASE_THRESHOLD → ON_TARGET
+weighted_performance_ratio < MAINTAIN_THRESHOLD                → BELOW_TARGET
+```
+No other `CampaignMetrics` field (`performance_ratio_7d`, `performance_ratio_28d`,
+`trend_delta`) is used. Classification performs direct `Decimal` comparison only — no
+arithmetic, quantisation, `float` conversion, or local `decimal` context, since no
+computation is performed. The calculation is platform- and KPI-independent by
+construction, since Stage 3 already direction-normalised CPA and ROAS so that a higher
+ratio always means better performance for both; `src/classification.py` contains no
+KPI-specific branching. A campaign receives a numerical performance band regardless of
+its trend, conversion volume, or tracking reliability — Stage 5 creates no precedence or
+override rule for those later considerations.
+**Status:** Frozen.

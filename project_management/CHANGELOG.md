@@ -137,3 +137,40 @@ All notable changes to this project are documented in this file.
   (frozen Stage 4 pacing-calculation rules; pacing interpretation explicitly confirmed as
   pending a later classification/constraints stage), and `docs/TEST_SCENARIOS.md` (30
   concrete Stage 4 scenarios).
+
+- Sprint 1, Development Stage 5: implemented `src/classification.py` — `PerformanceBand`
+  enum (`ABOVE_TARGET`, `ON_TARGET`, `BELOW_TARGET` — deliberately distinct from
+  `RecommendationAction`) and `CampaignPerformanceClass` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `performance_band` only) and
+  `classify_campaign_performance(metrics: CampaignMetrics) -> CampaignPerformanceClass`.
+  Classifies `weighted_performance_ratio` only, using the existing frozen
+  `INCREASE_THRESHOLD`/`MAINTAIN_THRESHOLD`, with the threshold value belonging to the
+  higher band (`>= INCREASE_THRESHOLD` → `ABOVE_TARGET`; `>= MAINTAIN_THRESHOLD` →
+  `ON_TARGET`; otherwise `BELOW_TARGET`). Direct `Decimal` comparison only — no
+  arithmetic, quantisation, `float`, or local `decimal` context. Depends only on
+  `CampaignMetrics`; does not import `CampaignInput`, `CampaignPacing`, `ReviewSetup`,
+  `RecommendationAction`, `Confidence`, or `ReasonCode`, and contains no KPI-specific
+  branching (Stage 3 already normalised CPA/ROAS direction). Scoped deliberately
+  narrower than "classification" as named in `MASTER_PROJECT_PLAN.md`: trend
+  classification, conversion-volume confidence, and tracking-status interpretation are
+  each deferred to a later stage, since each has its own unresolved formula/boundary
+  question that would otherwise require inventing a rule. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, and `src/pacing.py` are
+  unchanged.
+- Sprint 1, Development Stage 5: `tests/test_classification.py` (23 tests) covering
+  result-model shape/immutability, exact threshold-boundary equality behaviour (all 8
+  boundary values one `Decimal` increment either side of both thresholds),
+  `campaign_id` propagation, CPA/ROAS normalisation-independence established through the
+  full `CampaignInput` → `calculate_campaign_metrics` → `classify_campaign_performance`
+  path (not asserted on `CampaignMetrics` alone), integration with
+  `validate_campaign_csv` + `calculate_campaign_metrics` over `data/sample_campaigns.csv`
+  (order preserved, exact bands `G001=ON_TARGET`, `M001=ON_TARGET`, `G002=ABOVE_TARGET`,
+  `G003=ON_TARGET`), and scope boundaries (no out-of-scope field; AST-verified import
+  restrictions; no float; comparison-only with no arithmetic side effects; unaffected by
+  a mutated global `Decimal` context). Full suite: 217 tests passing (92 Stage 1 + 44
+  Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5).
+- Updated `docs/DATA_DICTIONARY.md` (`PerformanceBand`/`CampaignPerformanceClass`
+  fields, explicitly distinguished from `RecommendationAction`), `docs/DECISION_RULES.md`
+  (frozen Stage 5 classification rule; trend/confidence/tracking interpretation and final
+  recommendation explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (22 concrete Stage 5 scenarios).
