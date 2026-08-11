@@ -587,3 +587,72 @@ All notable changes to this project are documented in this file.
   static-bound intersection, effective constraints, protected/test handling, and
   eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (29 concrete Stage 12 scenarios).
+
+- Sprint 1, Development Stage 13: added `CampaignTestFloorRoom` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `room_to_test_floor: Decimal | None` only) and
+  `calculate_campaign_test_floor_room(campaign: CampaignInput) ->
+  CampaignTestFloorRoom` to `src/constraints.py`, alongside but fully separate from
+  Stage 10's `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage
+  11's `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+  and Stage 12's `CampaignRawPercentageMovementCap`/
+  `calculate_campaign_raw_percentage_movement_cap`, all unmodified. Calculates a raw,
+  informational test-floor distance: `room_to_test_floor = current_budget -
+  test_budget_floor` for test campaigns (`is_test_campaign=True`); `None` for
+  non-test campaigns — an explicit "not applicable" statement, never a fallback,
+  never `Decimal("0.00")`, never an error; a valid non-test `CampaignInput` never
+  raises. Explicitly not the effective floor, not an alternative or additional
+  minimum, not permissible decrease, not an effective directional constraint, and
+  never combined with `minimum_budget`, Stage 10's static room, or Stage 12's raw
+  percentage movement cap — this approval fixes only the raw distance formula, not
+  the eventual effective-floor precedence. Reads only `campaign_id`,
+  `is_test_campaign`, `current_budget`, `test_budget_floor` — `minimum_budget`,
+  `maximum_budget`, `is_protected`, `campaign_max_change_percentage`, `platform`,
+  `kpi_type`, `ReviewSetup`, and every Stage 3–9/Stage 10–12 result are all
+  deliberately never read. **Decimal policy:** subtraction runs inside a fixed local
+  `decimal.localcontext()` (`prec=28`, `ROUND_HALF_UP`), matching Stage 10's
+  established policy rather than Stage 12's operand-derived policy — subtracting two
+  already-quantised `Currency` values never needs more significant digits than the
+  larger operand already has (verified empirically before implementation against the
+  largest value `Currency` can hold under the default global context, 28 significant
+  digits, with all whole-number digits preserved). Neither operand nor the result is
+  re-quantised. The global `Decimal` context is never mutated and is unaffected by
+  the call. `src/constants.py`, `src/models.py`, `src/validation.py`,
+  `src/metrics.py`, `src/pacing.py`, and `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 13: extended `tests/test_constraints.py` with 35 new
+  tests (all 84 existing Stage 10/11/12 tests preserved unchanged; 119 tests total)
+  covering result-model shape/immutability/`campaign_id` copying/two-decimal-place
+  preservation, incompatible-input rejection (`AttributeError`, no silent coercion),
+  exact calculation (ordinary subtraction, zero floor, floor below/equal-to/above
+  `minimum_budget`, floor equal to `current_budget` returning `Decimal("0.00")`, no
+  float conversion, no `.quantize()` call), non-test behaviour (`None` returned
+  without raising, without substituting zero, without reconstructing
+  `CampaignInput`), Decimal-context behaviour (mutated global context does not affect
+  results, the global context's `prec`/`rounding` are unchanged after the function
+  returns, and extreme-valid-currency tests preserving significant whole-number
+  digits at the 28-significant-digit ceiling), independence (AST-verified
+  restriction to reading only the four authorised fields, AST-verified no reference
+  to `ReviewSetup`/`review`, AST-verified no call to Stage 10/11/12/3–9 functions,
+  `minimum_budget`/`maximum_budget`/`is_protected`/platform/KPI/
+  `campaign_max_change_percentage` independence, no combination with Stage 10–12
+  results), and integration with `validate_campaign_csv` over
+  `data/sample_campaigns.csv` (order preserved; `G001`/`M001`/`G002`
+  (`is_test_campaign=False`) = `None`, `G003` (`is_test_campaign=True`,
+  `test_budget_floor=300.00`) = `Decimal("900.00")`; Stages 10, 11, and 12's existing
+  sample results independently re-verified via separate calls, never combined or
+  intersected). `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage
+  2), `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this
+  stage. Full suite: 460 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30
+  Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 119
+  Stage 10/11/12/13 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignTestFloorRoom` fields; exact
+  subtraction rule; non-test `None` behaviour; confirmation the result is
+  informational only and does not decide the effective floor),
+  `docs/DECISION_RULES.md` (frozen Stage 13 test-floor distance calculation rule;
+  effective-floor precedence, static-bound/raw-cap/test-floor intersection, and
+  protected-campaign handling explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (24 concrete Stage 13 scenarios).

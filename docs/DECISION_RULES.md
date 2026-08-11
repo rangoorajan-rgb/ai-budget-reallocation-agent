@@ -1,16 +1,17 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 12. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 13. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
 > tracking-assessability-classification rules, the frozen neutral pacing-interpretation
 > rules, the frozen static budget-bound calculation rules, the frozen applicable-
-> change-percentage resolution rule, and the frozen raw percentage-based monetary
-> movement-cap calculation rule. Combined assessment, `Confidence.NOT_ASSESSABLE`
-> ownership, static-bound intersection, effective constraints, protected/test
-> handling, eligibility, scoring, and allocation rules are pending later Sprint 1
-> stages.
+> change-percentage resolution rule, the frozen raw percentage-based monetary
+> movement-cap calculation rule, and the frozen test-floor distance calculation rule.
+> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, effective-floor
+> precedence, static-bound/raw-cap intersection, effective constraints,
+> protected-campaign handling, eligibility, scoring, and allocation rules are pending
+> later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -722,6 +723,64 @@ re-validates or re-resolves them.
   allocation field — it is strictly a raw, informational monetary fact, consumed by a
   later, still-undesigned effective-constraint stage.
 
+## Deterministic Test-Floor Distance Calculation Rules (Sprint 1, Development Stage 13)
+
+These rules govern the addition to `src/constraints.py` that calculates, for one
+already-validated `CampaignInput`, a raw test-floor distance fact. Stage 13 is a
+**raw, informational fact only** — it is not the effective floor, not an alternative
+or additional minimum, not permissible decrease, not an effective directional
+constraint, and is never combined with `minimum_budget`, Stage 10's static room, or
+Stage 12's raw percentage movement cap. `CampaignInput` remains the sole authoritative
+source of `is_test_campaign`/`current_budget`/`test_budget_floor`;
+`src/constraints.py` never re-validates or reconstructs it.
+
+- **Calculation input.** `campaign.campaign_id`, `campaign.is_test_campaign`,
+  `campaign.current_budget`, and `campaign.test_budget_floor` are the only fields
+  read. No other field is read — in particular, `minimum_budget`, `maximum_budget`,
+  `is_protected`, `campaign_max_change_percentage`, `platform`, and `kpi_type` are
+  never read, and no `ReviewSetup` field, `CampaignStaticBudgetRoom`,
+  `CampaignApplicableChangePercentage`, or `CampaignRawPercentageMovementCap` (Stages
+  10–12) is ever read or called.
+- **Exact formula and non-test behaviour:**
+  ```
+  is_test_campaign == True  → room_to_test_floor = current_budget - test_budget_floor
+  is_test_campaign == False → room_to_test_floor = None
+  ```
+  `test_budget_floor` is never read for arithmetic when `is_test_campaign` is `False`
+  — the function returns `None` before reaching the subtraction. `None` is an
+  **explicit statement that the fact does not apply** — never a fallback value, never
+  `Decimal("0.00")`, never an error. A valid non-test `CampaignInput` never raises.
+- **Zero behaviour.** `current_budget == test_budget_floor` produces
+  `Decimal("0.00")` — a legitimate, unaltered test-floor distance, not an error,
+  eligibility decision, or permission judgement.
+- **No new rounding or quantisation.** `current_budget` and `test_budget_floor` are
+  both already-quantised `Currency` values (2 decimal places); the subtraction is
+  computed inside a fixed local `decimal.localcontext()` (`prec=28`,
+  `rounding=ROUND_HALF_UP`, matching Stage 10's established policy) and the result is
+  **not** re-quantised — the exact two-decimal-place exponent produced by subtracting
+  two already-quantised values is preserved as-is. Unlike Stage 12's multiplication,
+  no operand-derived precision is required: subtracting two values never needs more
+  significant digits than the larger operand already has, so a fixed `prec=28`
+  context safely supports every already-valid `Currency` value (confirmed by testing
+  the largest value `Currency` can hold under the default global context — 28
+  significant digits — both alone and against a non-zero floor, with all significant
+  whole-number digits preserved exactly).
+- **Separation from Stages 10–12.** `calculate_campaign_test_floor_room` never reads
+  `room_to_static_maximum`, `room_to_static_minimum`,
+  `applicable_max_change_percentage`, or `raw_percentage_movement_cap`, and never
+  calls `calculate_campaign_static_budget_room`,
+  `resolve_campaign_applicable_change_percentage`, or
+  `calculate_campaign_raw_percentage_movement_cap` (or vice versa).
+- **Protection independence.** `is_protected` is never read; changing it while
+  holding the four authorised fields constant never changes the result. This does not
+  approve any protected-campaign movement mechanism.
+- **Effective-floor precedence remains undecided.** This approval fixes only the raw
+  distance formula above — it does **not** decide whether the eventual effective
+  floor is `minimum_budget`, `test_budget_floor`, `max(minimum_budget,
+  test_budget_floor)`, or another formulation. That precedence, the static-bound/
+  raw-cap intersection, and protected-campaign handling all remain pending later
+  stages.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -747,15 +806,17 @@ re-validates or re-resolves them.
   status relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-
   assessment stage, which must preserve Stage 7's, Stage 8's, and Stage 9's independent
   results rather than overwriting any of them.
-- **Effective constraints, protected/test handling, eligibility.** Stage 10 resolved
-  the static budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`),
+- **Effective constraints, protected handling, eligibility.** Stage 10 resolved the
+  static budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`),
   Stage 11 resolved which percentage applies to a campaign
-  (`applicable_max_change_percentage`), and Stage 12 resolved the raw percentage-based
-  monetary cap (`raw_percentage_movement_cap`, see above), but `is_protected`,
-  `is_test_campaign`, and `test_budget_floor` are still never applied anywhere — no rule
-  computes the campaign's *effective* permissible budget movement (i.e. the
-  intersection of the raw cap with Stage 10's static room, adjusted for protection and
-  test floors), and no eligibility concept is defined anywhere in the repository. Both
+  (`applicable_max_change_percentage`), Stage 12 resolved the raw percentage-based
+  monetary cap (`raw_percentage_movement_cap`), and Stage 13 resolved the raw
+  test-floor distance (`room_to_test_floor`, see above), but `is_protected` is still
+  never applied anywhere, the effective-floor precedence (`minimum_budget` vs.
+  `test_budget_floor` vs. their combination) remains undecided, and no rule computes
+  the campaign's *effective* permissible budget movement (i.e. the intersection of the
+  raw cap with Stage 10's static room and Stage 13's test floor, adjusted for
+  protection). No eligibility concept is defined anywhere in the repository. All
   remain pending later stages.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.

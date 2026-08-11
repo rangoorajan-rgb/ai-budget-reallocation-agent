@@ -954,3 +954,87 @@ file required modification for Stage 12 — no approved AST-narrowing exception 
 needed, since `CURRENCY_QUANTUM` was not previously forbidden and no new out-of-scope
 name needed importing.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 13 is a raw, informational test-floor distance fact only
+
+**Decision:** Sprint 1, Development Stage 13 adds a narrow, deterministic test-floor
+distance calculation to `src/constraints.py`, as an *addition* alongside Stage 10's
+`CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage 11's
+`CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+and Stage 12's `CampaignRawPercentageMovementCap`/
+`calculate_campaign_raw_percentage_movement_cap` — not a modification of any of them.
+For one already-validated `CampaignInput`, it calculates `current_budget -
+test_budget_floor` for test campaigns only. This is explicitly **not** the effective
+floor, **not** an alternative or additional minimum, **not** permissible decrease,
+**not** an effective directional constraint, and is **never** combined with
+`minimum_budget`, Stage 10's static room, or Stage 12's raw percentage movement cap.
+This approval fixes only the raw distance formula — it does **not** decide whether the
+eventual effective floor is `minimum_budget`, `test_budget_floor`, `max(minimum_budget,
+test_budget_floor)`, or another formulation; that precedence remains an open decision
+for a later stage.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 13: exact model, function, four authorised fields, and non-test None behaviour
+
+**Decision:** `CampaignTestFloorRoom` (frozen, immutable; `extra="forbid"`; exactly
+`campaign_id: str`, `room_to_test_floor: Decimal | None`) is defined in
+`src/constraints.py`, alongside but fully separate from `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, and `CampaignRawPercentageMovementCap`. The sole
+public function is `calculate_campaign_test_floor_room(campaign: CampaignInput) ->
+CampaignTestFloorRoom`; it reads only `campaign.campaign_id`,
+`campaign.is_test_campaign`, `campaign.current_budget`, and
+`campaign.test_budget_floor` — never `minimum_budget`, `maximum_budget`,
+`is_protected`, `campaign_max_change_percentage`, `platform`, `kpi_type`,
+`ReviewSetup`, or any Stage 3–9/Stage 10–12 result, and never calls
+`calculate_campaign_static_budget_room`,
+`resolve_campaign_applicable_change_percentage`, or
+`calculate_campaign_raw_percentage_movement_cap`. Exact rule:
+```
+is_test_campaign == True  → room_to_test_floor = current_budget - test_budget_floor
+is_test_campaign == False → room_to_test_floor = None
+```
+For a non-test campaign, the function returns `room_to_test_floor=None` without
+raising an error, without revalidating or reconstructing `CampaignInput`, and without
+any new business-rule validator — `None` is an explicit statement that the fact does
+not apply, never a fallback value, never `Decimal("0.00")`, never an error.
+`test_budget_floor` is never read for arithmetic when `is_test_campaign` is `False`
+(the function returns before reaching the subtraction). Zero is a legitimate result:
+`current_budget == test_budget_floor` produces `Decimal("0.00")`, not an error,
+eligibility decision, or permission judgement.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 13: Decimal policy (fixed prec=28, not Stage 12's operand-derived policy)
+
+**Decision:** The subtraction runs inside a fixed local `decimal.localcontext()`
+(`prec=28`, `rounding=ROUND_HALF_UP`), matching Stage 10's established defensive
+policy — **not** Stage 12's operand-derived precision policy, since subtracting two
+already-quantised `Currency` values never needs more significant digits than the
+larger operand already has (unlike Stage 12's multiplication, whose result can need
+more digits than either operand alone). This was verified empirically before
+implementation: `current_budget` at the maximum digit count `Currency` can hold under
+the default global context (`Decimal("99999999999999999999999999.99")`, 28
+significant digits) subtracted against both `Decimal("0.00")` and a non-zero floor
+produces an exact result with every significant whole-number digit preserved, under
+fixed `prec=28`. Neither operand is re-quantised before the subtraction, and the
+result is not re-quantised afterward — the two-decimal-place exponent already
+produced by subtracting two already-quantised values is preserved exactly. The global
+`Decimal` context is never mutated and is unaffected by the function call
+(regression-tested, including confirming the global context's `prec`/`rounding` are
+unchanged after the function returns).
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 13: separation from Stages 10–12, protection independence, and deferred precedence
+
+**Decision:** `calculate_campaign_test_floor_room` never reads
+`room_to_static_maximum`, `room_to_static_minimum`, `applicable_max_change_percentage`,
+or `raw_percentage_movement_cap`, and never calls any Stage 10–12 function (or vice
+versa) — the four facts are never combined into one result or one call.
+`is_protected` is never read — changing it while holding the four authorised fields
+constant never changes the result; this does not approve any protected-campaign
+movement mechanism. The effective-floor precedence, the static-room/raw-cap/test-floor
+intersection (now a genuine three-way combination once Stage 13 exists), and
+protected-campaign handling all remain deferred to later stages. No existing test file
+required modification for Stage 13 — no approved AST-narrowing exception was needed,
+since Stage 13 introduces no new import beyond what `src/constraints.py` already had
+available.
+**Status:** Frozen.

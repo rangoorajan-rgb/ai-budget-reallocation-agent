@@ -1,13 +1,14 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 12 populates the Raw Percentage Movement-Cap Scenarios
-> section below, backed by the Stage 12 additions to `tests/test_constraints.py`
-> (which now holds 84 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12), in
-> addition to the Applicable Change-Percentage Resolution Scenarios (Stage 11, below),
-> the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
-> Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the Stage
-> 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30 tests),
-> the Stage 7 Conversion-Volume Confidence Classification Scenarios
+> Sprint 1, Development Stage 13 populates the Test-Floor Room Scenarios section
+> below, backed by the Stage 13 additions to `tests/test_constraints.py` (which now
+> holds 119 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13), in
+> addition to the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the
+> Applicable Change-Percentage Resolution Scenarios (Stage 11, below), the Static
+> Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation
+> Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking
+> Assessability Scenarios (`tests/test_tracking_assessment.py`, 30 tests), the Stage 7
+> Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
 > Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
 > Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
@@ -457,6 +458,42 @@ reason code, or an allocation outcome.
 | 27 | Non-test campaign vs. test campaign with a `test_budget_floor`, otherwise identical | Same `raw_percentage_movement_cap` — `is_test_campaign`/`test_budget_floor` never read. |
 | 28 | `CampaignRawPercentageMovementCap.model_fields` / result attributes | Contains no `room_to_static_maximum`, `room_to_static_minimum`, `effective_minimum_budget`, `effective_maximum_budget`, `permissible_movement`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
 | 29 | `data/sample_campaigns.csv` validated, `default_max_change_percentage=Decimal("0.20")` `ReviewSetup` fixture, each campaign's applicable percentage resolved via Stage 11 then passed to Stage 12, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); `G001 = 600.00`, `M001 = 375.00`, `G002 = 1000.00`, `G003 = 240.00`. Stage 10's static-room results for all four independently re-verified via separate calls in the same test, never intersected or combined with Stage 12's results. None of the four figures is described as a permissible movement. |
+
+## Test-Floor Room Scenarios
+
+All scenarios below use `calculate_campaign_test_floor_room(campaign: CampaignInput)
+-> CampaignTestFloorRoom` from `src/constraints.py`. Every result is a **raw,
+informational test-floor distance fact only** — none of these scenarios produces the
+effective floor, an alternative or additional minimum, permissible decrease, an
+effective directional constraint, or any combination with `minimum_budget`, Stage
+10's static room, or Stage 12's raw percentage movement cap.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignTestFloorRoom` field set | Exactly `campaign_id`, `room_to_test_floor`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignTestFloorRoom` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 5 | Test campaign, ordinary case (`current_budget=1200.00`, `test_budget_floor=300.00`) | `room_to_test_floor = 900.00`. |
+| 6 | Test campaign, `test_budget_floor=Decimal("0.00")` | `room_to_test_floor = current_budget` exactly. |
+| 7 | Test campaign, floor below `minimum_budget` | `room_to_test_floor` computed by the formula alone — `minimum_budget` never read or compared. |
+| 8 | Test campaign, floor equal to `minimum_budget` | Same. |
+| 9 | Test campaign, floor above `minimum_budget` (e.g. G003's actual shape) | Same. |
+| 10 | Test campaign, floor equal to `current_budget` | `room_to_test_floor = Decimal("0.00")` — a legitimate result, not an error or eligibility judgement. |
+| 11 | Non-test campaign (`is_test_campaign=False`, `test_budget_floor=None`) | `room_to_test_floor = None` — an explicit "not applicable" statement, never `Decimal("0.00")`, never an error. |
+| 12 | `calculate_campaign_test_floor_room(None)` / dict input (not `CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 13 | Extreme valid `current_budget` (`Decimal("99999999999999999999999999.99")`, 28 significant digits — the largest `Currency` can hold under the default global context), `test_budget_floor=Decimal("1.00")` | Exact result with every significant whole-number digit preserved; the same extreme budget against `test_budget_floor=Decimal("0.00")` returns the full extreme budget exactly. |
+| 14 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function | Result unaffected — calculation runs inside its own fixed `localcontext()` (`prec=28`, `ROUND_HALF_UP`); the global context's `prec`/`rounding` remain exactly as the caller set them after the function returns. |
+| 15 | `calculate_campaign_test_floor_room` source | Reads only `campaign.campaign_id`/`campaign.is_test_campaign`/`campaign.current_budget`/`campaign.test_budget_floor` (AST-verified); never references `ReviewSetup` or a `review` name (AST-verified); calls none of `calculate_campaign_static_budget_room`/`resolve_campaign_applicable_change_percentage`/`calculate_campaign_raw_percentage_movement_cap`/Stage 3–9 functions (AST-verified); contains no `.quantize(...)` call and no `float(` conversion (AST/source-verified). |
+| 16 | `minimum_budget` varied, all other authorised fields identical | Same `room_to_test_floor` — never read. |
+| 17 | `maximum_budget` varied, all other authorised fields identical | Same `room_to_test_floor` — never read. |
+| 18 | `is_protected=False` vs. `is_protected=True`, otherwise identical | Same `room_to_test_floor` — never read. |
+| 19 | Google Ads vs. Meta Ads, otherwise identical | Same `room_to_test_floor`. |
+| 20 | CPA vs. ROAS, otherwise identical | Same `room_to_test_floor`. |
+| 21 | `campaign_max_change_percentage` varied, otherwise identical | Same `room_to_test_floor` — never read. |
+| 22 | `calculate_campaign_static_budget_room` and `calculate_campaign_test_floor_room` called on the same campaign | Both succeed independently; the test-floor result contains no `room_to_static_maximum`/`room_to_static_minimum`/`applicable_max_change_percentage`/`raw_percentage_movement_cap` field. |
+| 23 | `CampaignTestFloorRoom.model_fields` / result attributes | Contains no `effective_floor`, `minimum_budget`, `room_to_static_maximum`, `room_to_static_minimum`, `raw_percentage_movement_cap`, `is_protected`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
+| 24 | `data/sample_campaigns.csv` validated, each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`/`M001`/`G002` (all `is_test_campaign=False`) → `room_to_test_floor=None`. `G003` (`is_test_campaign=True`, `test_budget_floor=300.00`, `current_budget=1200.00`) → `room_to_test_floor=Decimal("900.00")`. Stages 10, 11, and 12's existing sample results for all four independently re-verified via separate calls in the same test, never combined or intersected with Stage 13's result. `Decimal("900.00")` for G003 is never described as a permissible decrease. |
 
 ## Allocation Scenarios
 

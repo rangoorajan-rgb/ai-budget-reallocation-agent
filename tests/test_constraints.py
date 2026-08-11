@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, and 12).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, and 13).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -27,6 +27,13 @@ context independence, independence from Stage 10's static-room facts and from
 protected/test fields, and scope boundaries (no effective movement, static-bound
 intersection, eligibility, score, recommendation, reason code, allocation, or
 conservation field).
+
+Also covers Stage 13's CampaignTestFloorRoom construction/immutability, the exact
+current_budget - test_budget_floor formula for test campaigns, explicit None for
+non-test campaigns, zero behaviour, fixed-precision-28 Decimal-context independence,
+independence from minimum_budget/maximum_budget/is_protected and from Stage 10-12
+results, and scope boundaries (no effective floor, no effective movement, no
+eligibility/score/recommendation/reason-code/allocation/conservation field).
 """
 
 import ast
@@ -51,8 +58,10 @@ from src.constraints import (
     CampaignApplicableChangePercentage,
     CampaignRawPercentageMovementCap,
     CampaignStaticBudgetRoom,
+    CampaignTestFloorRoom,
     calculate_campaign_raw_percentage_movement_cap,
     calculate_campaign_static_budget_room,
+    calculate_campaign_test_floor_room,
     resolve_campaign_applicable_change_percentage,
 )
 from src.models import CampaignInput, ReviewSetup
@@ -1490,3 +1499,593 @@ def test_sample_campaigns_csv_raw_percentage_movement_cap_exact_values_and_order
         exp_max, exp_min = expected_room[room.campaign_id]
         assert room.room_to_static_maximum == exp_max
         assert room.room_to_static_minimum == exp_min
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — CampaignTestFloorRoom result model
+# ---------------------------------------------------------------------------
+
+
+def test_campaign_test_floor_room_accepts_exactly_two_fields():
+    assert set(CampaignTestFloorRoom.model_fields.keys()) == {
+        "campaign_id",
+        "room_to_test_floor",
+    }
+
+
+def test_campaign_test_floor_room_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignTestFloorRoom(
+            campaign_id="C001",
+            room_to_test_floor=Decimal("900.00"),
+            extra_field="not allowed",
+        )
+
+
+def test_campaign_test_floor_room_is_immutable():
+    result = calculate_campaign_test_floor_room(
+        _campaign(
+            is_test_campaign=True,
+            test_budget_floor=Decimal("300.00"),
+        )
+    )
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_test_floor_room_campaign_id_copied_exactly():
+    result = calculate_campaign_test_floor_room(
+        _campaign(
+            campaign_id="XYZ-1",
+            is_test_campaign=True,
+            test_budget_floor=Decimal("300.00"),
+        )
+    )
+    assert result.campaign_id == "XYZ-1"
+
+
+def test_test_campaign_result_is_decimal_never_float():
+    result = calculate_campaign_test_floor_room(
+        _campaign(is_test_campaign=True, test_budget_floor=Decimal("300.00"))
+    )
+    assert isinstance(result.room_to_test_floor, Decimal)
+    assert not isinstance(result.room_to_test_floor, float)
+
+
+def test_non_test_result_is_exactly_none_not_zero():
+    result = calculate_campaign_test_floor_room(
+        _campaign(is_test_campaign=False, test_budget_floor=None)
+    )
+    assert result.room_to_test_floor is None
+    assert result.room_to_test_floor != Decimal("0.00")
+
+
+def test_test_campaign_result_retains_exactly_two_decimal_places():
+    result = calculate_campaign_test_floor_room(
+        _campaign(is_test_campaign=True, test_budget_floor=Decimal("300.00"))
+    )
+    assert result.room_to_test_floor.as_tuple().exponent == -2
+
+
+def test_calculate_campaign_test_floor_room_rejects_incompatible_input():
+    with pytest.raises(AttributeError):
+        calculate_campaign_test_floor_room(None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        calculate_campaign_test_floor_room(  # type: ignore[arg-type]
+            {"is_test_campaign": True, "test_budget_floor": Decimal("300.00")}
+        )
+
+
+def test_test_floor_room_has_no_out_of_scope_fields():
+    field_names = set(CampaignTestFloorRoom.model_fields.keys())
+    forbidden = {
+        "effective_floor",
+        "minimum_budget",
+        "room_to_static_maximum",
+        "room_to_static_minimum",
+        "raw_percentage_movement_cap",
+        "is_protected",
+        "eligibility",
+        "blocked",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+    }
+    assert field_names.isdisjoint(forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — exact calculation
+# ---------------------------------------------------------------------------
+
+
+def test_ordinary_test_campaign_exact_subtraction():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("900.00")
+
+
+def test_test_floor_of_zero():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("0.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("0.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("1200.00")
+
+
+def test_test_floor_below_minimum_budget():
+    campaign = _campaign(
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("200.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("100.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("100.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("900.00")
+
+
+def test_test_floor_equal_to_minimum_budget():
+    campaign = _campaign(
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("200.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("200.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("200.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("800.00")
+
+
+def test_test_floor_above_minimum_budget():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("900.00")
+    assert campaign.test_budget_floor > campaign.minimum_budget
+
+
+def test_test_floor_equal_to_current_budget_returns_zero():
+    campaign = _campaign(
+        current_budget=Decimal("500.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("500.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("500.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("0.00")
+
+
+def test_no_float_conversion_in_test_floor_calculation():
+    source = inspect.getsource(calculate_campaign_test_floor_room)
+    assert "float(" not in source
+
+
+def test_no_quantize_call_in_test_floor_calculation():
+    source = inspect.getsource(calculate_campaign_test_floor_room)
+    tree = ast.parse(source)
+    quantize_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "quantize"
+    ]
+    assert len(quantize_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — non-test behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_valid_non_test_campaign_returns_none_without_raising():
+    campaign = _campaign(is_test_campaign=False, test_budget_floor=None)
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor is None
+    assert campaign.test_budget_floor is None
+    assert campaign.is_test_campaign is False
+
+
+def test_non_test_campaign_not_rejected_or_reconstructed():
+    campaign = _campaign(campaign_id="NON-TEST-1", is_test_campaign=False, test_budget_floor=None)
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.campaign_id == "NON-TEST-1"
+    assert isinstance(result, CampaignTestFloorRoom)
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — Decimal context and precision
+# ---------------------------------------------------------------------------
+
+
+def test_mutated_global_decimal_context_does_not_affect_test_floor_room():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 2
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        result = calculate_campaign_test_floor_room(campaign)
+        assert result.room_to_test_floor == Decimal("900.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_global_decimal_context_unchanged_after_test_floor_function_returns():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        calculate_campaign_test_floor_room(campaign)
+
+        assert decimal.getcontext().prec == 5
+        assert decimal.getcontext().rounding == decimal.ROUND_DOWN
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_extreme_valid_currency_operands_preserve_significant_digits():
+    extreme_current_budget = Decimal("9" * 26 + ".99")
+    campaign = _campaign(
+        campaign_id="EXTREME-TEST-1",
+        current_budget=extreme_current_budget,
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=extreme_current_budget,
+        spend_to_date=Decimal("0.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("1.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == Decimal("9" * 25 + "8.99")
+
+
+def test_extreme_valid_currency_floor_equal_to_zero_returns_full_budget():
+    extreme_current_budget = Decimal("9" * 26 + ".99")
+    campaign = _campaign(
+        campaign_id="EXTREME-TEST-2",
+        current_budget=extreme_current_budget,
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=extreme_current_budget,
+        spend_to_date=Decimal("0.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("0.00"),
+    )
+    result = calculate_campaign_test_floor_room(campaign)
+    assert result.room_to_test_floor == extreme_current_budget
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — independence
+# ---------------------------------------------------------------------------
+
+
+def test_minimum_budget_does_not_affect_test_floor_room():
+    percentage_shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    low_minimum = _campaign(campaign_id="C001", minimum_budget=Decimal("0.00"), **percentage_shared_kwargs)
+    high_minimum = _campaign(campaign_id="C001", minimum_budget=Decimal("300.00"), **percentage_shared_kwargs)
+    result_low = calculate_campaign_test_floor_room(low_minimum)
+    result_high = calculate_campaign_test_floor_room(high_minimum)
+    assert result_low.room_to_test_floor == result_high.room_to_test_floor
+
+
+def test_maximum_budget_does_not_affect_test_floor_room():
+    shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    narrow_maximum = _campaign(campaign_id="C001", maximum_budget=Decimal("1500.00"), **shared_kwargs)
+    wide_maximum = _campaign(campaign_id="C001", maximum_budget=Decimal("1000000.00"), **shared_kwargs)
+    result_narrow = calculate_campaign_test_floor_room(narrow_maximum)
+    result_wide = calculate_campaign_test_floor_room(wide_maximum)
+    assert result_narrow.room_to_test_floor == result_wide.room_to_test_floor
+
+
+def test_stage_10_12_results_neither_read_nor_called_for_test_floor_room():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    room = calculate_campaign_static_budget_room(campaign)
+    test_floor_room = calculate_campaign_test_floor_room(campaign)
+    assert isinstance(room, CampaignStaticBudgetRoom)
+    assert isinstance(test_floor_room, CampaignTestFloorRoom)
+    assert not hasattr(test_floor_room, "room_to_static_maximum")
+    assert not hasattr(test_floor_room, "room_to_static_minimum")
+    assert not hasattr(test_floor_room, "applicable_max_change_percentage")
+    assert not hasattr(test_floor_room, "raw_percentage_movement_cap")
+
+
+def test_is_protected_does_not_affect_test_floor_room():
+    shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    unprotected = _campaign(campaign_id="C001", is_protected=False, **shared_kwargs)
+    protected = _campaign(campaign_id="C001", is_protected=True, **shared_kwargs)
+    result_unprotected = calculate_campaign_test_floor_room(unprotected)
+    result_protected = calculate_campaign_test_floor_room(protected)
+    assert result_unprotected.room_to_test_floor == result_protected.room_to_test_floor
+
+
+def test_platform_does_not_affect_test_floor_room():
+    shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    google = _campaign(campaign_id="C001", platform=Platform.GOOGLE_ADS, **shared_kwargs)
+    meta = _campaign(campaign_id="C001", platform=Platform.META_ADS, **shared_kwargs)
+    result_google = calculate_campaign_test_floor_room(google)
+    result_meta = calculate_campaign_test_floor_room(meta)
+    assert result_google.room_to_test_floor == result_meta.room_to_test_floor
+
+
+def test_kpi_type_does_not_affect_test_floor_room():
+    shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    cpa = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.CPA,
+        kpi_target=Decimal("10.00"),
+        kpi_actual_7d=Decimal("10.00"),
+        kpi_actual_28d=Decimal("10.00"),
+        **shared_kwargs,
+    )
+    roas = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.ROAS,
+        kpi_target=Decimal("3.00"),
+        kpi_actual_7d=Decimal("3.00"),
+        kpi_actual_28d=Decimal("3.00"),
+        **shared_kwargs,
+    )
+    result_cpa = calculate_campaign_test_floor_room(cpa)
+    result_roas = calculate_campaign_test_floor_room(roas)
+    assert result_cpa.room_to_test_floor == result_roas.room_to_test_floor
+
+
+def test_campaign_max_change_percentage_does_not_affect_test_floor_room():
+    shared_kwargs = dict(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    no_override = _campaign(campaign_id="C001", campaign_max_change_percentage=None, **shared_kwargs)
+    with_override = _campaign(
+        campaign_id="C001", campaign_max_change_percentage=Decimal("0.05"), **shared_kwargs
+    )
+    result_no_override = calculate_campaign_test_floor_room(no_override)
+    result_with_override = calculate_campaign_test_floor_room(with_override)
+    assert result_no_override.room_to_test_floor == result_with_override.room_to_test_floor
+
+
+def test_test_floor_room_function_reads_only_four_authorised_fields():
+    source = inspect.getsource(calculate_campaign_test_floor_room)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    param_name = func_def.args.args[0].arg
+
+    accessed_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == param_name:
+                accessed_attrs.add(node.attr)
+
+    assert accessed_attrs == {"campaign_id", "is_test_campaign", "current_budget", "test_budget_floor"}
+
+
+def test_test_floor_room_does_not_reference_review_setup():
+    source = inspect.getsource(calculate_campaign_test_floor_room)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+
+
+def test_test_floor_room_does_not_call_stage_10_11_12_or_stage_3_to_9_functions():
+    source = inspect.getsource(calculate_campaign_test_floor_room)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "calculate_campaign_static_budget_room",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_raw_percentage_movement_cap",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_no_effective_floor_or_movement_output_for_test_floor_room():
+    result = calculate_campaign_test_floor_room(
+        _campaign(is_test_campaign=True, test_budget_floor=Decimal("300.00"))
+    )
+    for attr in (
+        "effective_floor",
+        "permissible_decrease",
+        "effective_movement",
+        "eligibility",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+        "blocked",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 13 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_test_floor_room_exact_values_and_order():
+    review = _review(default_max_change_percentage=Decimal("0.20"))
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    test_floor_results = [
+        calculate_campaign_test_floor_room(c) for c in report.valid_campaigns
+    ]
+    assert [r.campaign_id for r in test_floor_results] == ["G001", "M001", "G002", "G003"]
+
+    expected_is_test = {
+        "G001": False,
+        "M001": False,
+        "G002": False,
+        "G003": True,
+    }
+    expected_test_budget_floor = {
+        "G001": None,
+        "M001": None,
+        "G002": None,
+        "G003": Decimal("300.00"),
+    }
+    expected_room_to_test_floor = {
+        "G001": None,
+        "M001": None,
+        "G002": None,
+        "G003": Decimal("900.00"),
+    }
+    for campaign in report.valid_campaigns:
+        assert campaign.is_test_campaign == expected_is_test[campaign.campaign_id]
+        assert campaign.test_budget_floor == expected_test_budget_floor[campaign.campaign_id]
+    for result in test_floor_results:
+        assert result.room_to_test_floor == expected_room_to_test_floor[result.campaign_id]
+
+    g003 = next(c for c in report.valid_campaigns if c.campaign_id == "G003")
+    assert g003.current_budget == Decimal("1200.00")
+
+    # Retain and independently verify Stages 10-12's existing sample results via
+    # separate calls — none of Stage 10, 11, 12, or 13's results is combined or
+    # intersected here. Decimal("900.00") for G003 is a raw, informational
+    # test-floor distance only, never described as a permissible decrease.
+    room_results = [calculate_campaign_static_budget_room(c) for c in report.valid_campaigns]
+    expected_room = {
+        "G001": (Decimal("3000.00"), Decimal("2500.00")),
+        "M001": (Decimal("2500.00"), Decimal("2000.00")),
+        "G002": (Decimal("3000.00"), Decimal("4000.00")),
+        "G003": (Decimal("800.00"), Decimal("1100.00")),
+    }
+    for room in room_results:
+        exp_max, exp_min = expected_room[room.campaign_id]
+        assert room.room_to_static_maximum == exp_max
+        assert room.room_to_static_minimum == exp_min
+
+    percentages = [
+        resolve_campaign_applicable_change_percentage(review, c)
+        for c in report.valid_campaigns
+    ]
+    expected_applicable_percentage = {
+        "G001": Decimal("0.20"),
+        "M001": Decimal("0.15"),
+        "G002": Decimal("0.20"),
+        "G003": Decimal("0.20"),
+    }
+    for percentage in percentages:
+        assert (
+            percentage.applicable_max_change_percentage
+            == expected_applicable_percentage[percentage.campaign_id]
+        )
+
+    caps = [
+        calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+        for campaign, percentage in zip(report.valid_campaigns, percentages)
+    ]
+    expected_raw_cap = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("1000.00"),
+        "G003": Decimal("240.00"),
+    }
+    for cap in caps:
+        assert cap.raw_percentage_movement_cap == expected_raw_cap[cap.campaign_id]

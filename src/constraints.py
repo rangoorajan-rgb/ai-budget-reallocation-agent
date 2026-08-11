@@ -52,6 +52,23 @@ operation. Stage 12 is independent of Stage 10: it never reads `minimum_budget`,
 `calculate_campaign_static_budget_room`. It also ignores `is_protected`,
 `is_test_campaign`, and `test_budget_floor` — static-bound intersection, protection, and
 test-floor effects on the raw cap all remain pending a later effective-constraint stage.
+
+Also implements Sprint 1 — Development Stage 13: for one already-validated
+`CampaignInput`, calculates a raw, informational test-floor distance —
+`current_budget - test_budget_floor` — for test campaigns only
+(`is_test_campaign=True`); `room_to_test_floor` is `None` for non-test campaigns, an
+explicit statement that the fact does not apply, never a fallback or an error. This is
+**not** the effective floor, not an alternative or additional minimum, not permissible
+decrease, not an effective directional constraint, and is never combined with
+`minimum_budget`, Stage 10's static room, or Stage 12's raw percentage movement cap.
+Stage 13 reads only `campaign_id`, `is_test_campaign`, `current_budget`, and
+`test_budget_floor` — never `minimum_budget`, `maximum_budget`, `is_protected`,
+`campaign_max_change_percentage`, `platform`, `kpi_type`, or any Stage 3–9 result, and
+never imports or calls anything from Stages 10–12 or `ReviewSetup`. The subtraction runs
+inside a fixed local `decimal` context (`prec=28`, `ROUND_HALF_UP`, matching Stage 10's
+established policy) — unlike Stage 12's multiplication, subtracting two already-
+quantised `Currency` values never needs more significant digits than the larger
+operand already has, so no operand-derived precision is required here.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -201,4 +218,50 @@ def calculate_campaign_raw_percentage_movement_cap(
     return CampaignRawPercentageMovementCap(
         campaign_id=campaign.campaign_id,
         raw_percentage_movement_cap=raw_percentage_movement_cap,
+    )
+
+
+class CampaignTestFloorRoom(BaseModel):
+    """A raw, informational test-floor distance for one campaign.
+
+    Not the effective floor, not an alternative or additional minimum, not
+    permissible decrease, not an effective directional constraint, and never
+    combined with `minimum_budget`, Stage 10's static room, or Stage 12's raw
+    percentage movement cap.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    room_to_test_floor: Decimal | None
+
+
+def calculate_campaign_test_floor_room(
+    campaign: CampaignInput,
+) -> CampaignTestFloorRoom:
+    """Calculate one campaign's raw distance from `current_budget` to
+    `test_budget_floor`, for test campaigns only.
+
+    `room_to_test_floor = current_budget - test_budget_floor` when
+    `campaign.is_test_campaign` is `True` — guaranteed non-negative by
+    `CampaignInput`'s already-validated `test_budget_floor <= current_budget`
+    invariant, and `Decimal("0.00")` is a valid, unaltered outcome when
+    `current_budget == test_budget_floor`. For a non-test campaign,
+    `room_to_test_floor` is `None` — an explicit statement that the fact does not
+    apply, never a fallback value or an error.
+    """
+    if not campaign.is_test_campaign:
+        return CampaignTestFloorRoom(
+            campaign_id=campaign.campaign_id,
+            room_to_test_floor=None,
+        )
+
+    with localcontext() as ctx:
+        ctx.prec = 28
+        ctx.rounding = ROUND_HALF_UP
+        room_to_test_floor = campaign.current_budget - campaign.test_budget_floor
+
+    return CampaignTestFloorRoom(
+        campaign_id=campaign.campaign_id,
+        room_to_test_floor=room_to_test_floor,
     )

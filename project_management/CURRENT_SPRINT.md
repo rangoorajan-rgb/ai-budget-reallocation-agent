@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and 12 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and 13 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -433,12 +433,59 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 12 (and not yet started)
+## Development Stage 13 — Deterministic Test-Floor Distance Calculation (complete)
 
-- Static-bound intersection (reconciling the raw percentage cap with Stage 10's
-  `room_to_static_maximum`/`room_to_static_minimum`), separate effective
-  increase/decrease limits, the effective (final permissible) budget movement.
-- Protected-campaign rules, test-budget-floor enforcement.
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room`, Stage 11's
+      `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+      and Stage 12's `CampaignRawPercentageMovementCap`/
+      `calculate_campaign_raw_percentage_movement_cap` unmodified) —
+      `CampaignTestFloorRoom` (frozen, `extra="forbid"`: `campaign_id`,
+      `room_to_test_floor: Decimal | None`) and
+      `calculate_campaign_test_floor_room(campaign: CampaignInput) ->
+      CampaignTestFloorRoom`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`
+      unchanged.
+- [x] Exact formula: `room_to_test_floor = current_budget - test_budget_floor` for
+      test campaigns (`is_test_campaign=True`); `None` for non-test campaigns — an
+      explicit "not applicable" statement, never a fallback, never `Decimal("0.00")`,
+      never an error. A valid non-test `CampaignInput` never raises. Reads only
+      `campaign_id`, `is_test_campaign`, `current_budget`, `test_budget_floor` —
+      never `minimum_budget`, `maximum_budget`, `is_protected`,
+      `campaign_max_change_percentage`, `platform`, `kpi_type`, `ReviewSetup`, or any
+      Stage 3–9/Stage 10–12 result.
+- [x] Raw, informational fact only — explicitly not the effective floor, not an
+      alternative or additional minimum, not permissible decrease, not an effective
+      directional constraint, never combined with `minimum_budget`, Stage 10's static
+      room, or Stage 12's raw percentage movement cap. This approval does not decide
+      the eventual effective-floor precedence.
+- [x] Calculated inside a fixed local `decimal` context (`prec=28`,
+      `ROUND_HALF_UP`, matching Stage 10's established policy, not Stage 12's
+      operand-derived policy — subtraction of two already-quantised `Currency`
+      values never needs more significant digits than the larger operand already
+      has). Neither operand nor the result is re-quantised; the exact two-decimal
+      exponent is preserved. Confirmed safe for the largest value `Currency` can hold
+      under the default global context (28 significant digits), with all
+      significant whole-number digits preserved.
+- [x] `tests/test_constraints.py` extended (all 84 existing Stage 10/11/12 tests
+      preserved unchanged) with 35 new Stage 13 tests — 119 tests total, all passing.
+      `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+      `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 13 (and not yet started)
+
+- Effective-floor precedence (`minimum_budget` vs. `test_budget_floor` vs.
+  `max(minimum_budget, test_budget_floor)` vs. another formulation — still undecided).
+- Static-bound/raw-cap intersection, separate effective increase/decrease limits, the
+  effective (final permissible) budget movement.
+- Protected-campaign handling (mechanism still undecided).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
@@ -448,13 +495,12 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 13 (not started, scope not yet frozen): requires its own dependency and
+Stage 14 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. Candidates
-include test-campaign effective-floor calculation (blocked on a genuine ambiguity:
-whether the effective floor is `max(minimum_budget, test_budget_floor)` or whether
-`test_budget_floor` replaces `minimum_budget` entirely for test campaigns —
-`CampaignInput` validates no relationship between the two, so either is currently
-possible), protected-campaign handling (entirely undecided), and the static-bound/
-raw-percentage-cap intersection (which would need a frozen precedence rule that does
-not yet exist). A combined campaign assessment stage remains a live but not clearly
+include protected-campaign handling (the Data Dictionary states `is_protected` means
+"must never be reduced," but the implementation mechanism — gate vs. effective value,
+interaction with decreases only vs. broader effects — remains undecided), and the
+static-room/raw-cap/test-floor intersection (now a genuine three-way combination,
+since Stage 13 supplies the third decrease-side quantity — no combination formula is
+frozen anywhere). A combined campaign assessment stage remains a live but not clearly
 necessary candidate, as noted in the Stage 11 inspection.

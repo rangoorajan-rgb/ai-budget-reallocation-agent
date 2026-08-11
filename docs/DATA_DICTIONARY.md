@@ -1,15 +1,16 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 12 (adds a neutral, informational raw percentage-based
-> monetary movement-cap calculation to the Stage 1 enumerations, numerical constants,
-> core input models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts,
-> Stage 4 pacing facts, Stage 5 performance classification, Stage 6 trend
-> classification, Stage 7 conversion-volume confidence classification, Stage 8
-> tracking-based assessability, Stage 9 pacing interpretation, Stage 10 static
-> budget-bound facts, and Stage 11 applicable-change-percentage resolution). Combined
-> assessment, `Confidence.NOT_ASSESSABLE` ownership, static-bound intersection,
-> effective constraints, protected/test handling, eligibility, and other derived/
-> decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 13 (adds a neutral, informational test-floor distance
+> calculation to the Stage 1 enumerations, numerical constants, core input models, CSV
+> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
+> Stage 5 performance classification, Stage 6 trend classification, Stage 7
+> conversion-volume confidence classification, Stage 8 tracking-based assessability,
+> Stage 9 pacing interpretation, Stage 10 static budget-bound facts, Stage 11
+> applicable-change-percentage resolution, and Stage 12 raw percentage-based monetary
+> movement cap). Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
+> effective-floor precedence, static-bound/raw-cap intersection, effective constraints,
+> protected-campaign handling, eligibility, and other derived/decision fields, plus
+> export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -452,11 +453,51 @@ another, and none is modified by this addition. Whether/how the raw cap combines
 Stage 10's static room, protection, or test-budget-floor rules into any effective,
 permissible movement remains pending a later stage.
 
+## Campaign Test-Floor Room Fields (`src/constraints.py`)
+
+Produced by `calculate_campaign_test_floor_room(campaign: CampaignInput) ->
+CampaignTestFloorRoom`, one result per already-validated `CampaignInput`.
+`CampaignTestFloorRoom` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is a **raw, informational test-floor distance fact only** —
+it is **not** the effective floor, **not** an alternative or additional minimum,
+**not** permissible decrease, **not** an effective directional constraint, and is
+**never** combined with `minimum_budget`, Stage 10's static room, or Stage 12's raw
+percentage movement cap. Depends only on `CampaignInput.campaign_id`/
+`is_test_campaign`/`current_budget`/`test_budget_floor` — never `minimum_budget`,
+`maximum_budget`, `is_protected`, `campaign_max_change_percentage`, `platform`,
+`kpi_type`, `ReviewSetup`, or any Stage 3–9/Stage 10–12 result.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `room_to_test_floor` | Decimal or `None` | `current_budget - test_budget_floor` when `is_test_campaign` is `True`. Guaranteed `>= 0` by `CampaignInput`'s already-validated `test_budget_floor <= current_budget` invariant; `Decimal("0.00")` is a valid, unaltered outcome when `current_budget == test_budget_floor`. `None` when `is_test_campaign` is `False` — an explicit statement that the fact does not apply, never a fallback value, zero, or an error. |
+
+**Exact subtraction rule and non-test behaviour.** For a test campaign,
+`room_to_test_floor = current_budget - test_budget_floor`, computed inside a fixed
+local `decimal` context (`prec=28`, `ROUND_HALF_UP`, matching Stage 10's established
+policy — no operand-derived precision is needed, since subtracting two already-
+quantised `Currency` values never needs more significant digits than the larger
+operand already has). Neither operand is re-quantised, and the result is not
+re-quantised — the two-decimal-place exponent already produced by the subtraction is
+preserved exactly. For a non-test campaign, `calculate_campaign_test_floor_room`
+returns `room_to_test_floor=None` without raising an error and without any special
+validation.
+
+**The output is informational only and does not decide the effective floor.**
+`CampaignTestFloorRoom` is a separate, independent result model from
+`CampaignStaticBudgetRoom`, `CampaignApplicableChangePercentage`, and
+`CampaignRawPercentageMovementCap` — none of the four is required to construct
+another, and none is modified by this addition. Whether the eventual effective floor
+is `minimum_budget`, `test_budget_floor`, `max(minimum_budget, test_budget_floor)`, or
+another formulation remains an explicitly undecided later-stage question — this
+approval resolves only the raw distance fact, not that precedence.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, static-bound intersection, effective
-> constraints, protected/test handling, eligibility, scoring, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, effective-floor precedence, static-bound/
+> raw-cap intersection, effective constraints, protected-campaign handling,
+> eligibility, scoring, allocation).
 
 ## Export Fields
 
