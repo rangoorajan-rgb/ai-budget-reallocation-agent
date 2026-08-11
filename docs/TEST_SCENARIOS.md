@@ -1,8 +1,9 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 8 populates the Tracking Assessability Scenarios section
-> below, backed by `tests/test_tracking_assessment.py` (30 tests), in addition to the
-> Stage 7 Conversion-Volume Confidence Classification Scenarios
+> Sprint 1, Development Stage 9 populates the Pacing Interpretation Scenarios section
+> below, backed by `tests/test_pacing_interpretation.py` (33 tests), in addition to the
+> Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
+> tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
 > Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
 > Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
@@ -302,6 +303,47 @@ score, eligibility, or allocation outcome.
 | 19 | `Confidence.NOT_ASSESSABLE` | Never assigned or read by `assess_campaign_tracking`, across every `TrackingStatus` value. |
 | 20 | `classify_campaign_confidence`, `classify_campaign_performance`, `classify_campaign_trend` | Unchanged behaviour after the Stage 8 additions — regression-checked; Stage 7 continues returning only `HIGH`/`MEDIUM`/`LOW` regardless of `tracking_status`. |
 | 21 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — assessment is plain enum comparison, no `Decimal` involved at all. |
+
+## Pacing Interpretation Scenarios
+
+All scenarios below use `classify_campaign_pacing(pacing: CampaignPacing) ->
+CampaignPacingClass` from `src/pacing.py`. Every result is a **neutral, descriptive
+pacing classification only** — none of these scenarios produces a performance/trend/
+confidence classification, tracking-based assessability result, combined judgement,
+`RecommendationAction`, `ReasonCode`, score, eligibility, or allocation outcome, and
+none states whether overspending or underspending is desirable.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `PacingStatus` members | Exactly `UNDERSPENDING`, `ON_PACE`, `OVERSPENDING`, `NOT_AVAILABLE`, with exact values `"Under spending"`, `"On pace"`, `"Over spending"`, `"Not available"`. |
+| 2 | `PACING_LOWER_THRESHOLD`/`PACING_UPPER_THRESHOLD` | Exactly `Decimal("0.90")`/`Decimal("1.10")`; both `Decimal` instances, never `float`. |
+| 3 | `CampaignPacingClass` field set | Exactly `campaign_id`, `pacing_status`. |
+| 4 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 5 | Attempt to mutate a `CampaignPacingClass` instance | Rejected (`frozen=True`). |
+| 6 | `campaign_id` on the result | Copied exactly from the source `CampaignPacing`. |
+| 7 | `pacing_status` on the result | Always a `PacingStatus` instance. |
+| 8 | `classify_campaign_pacing(None)` / `classify_campaign_pacing({"pacing_ratio": ...})` (not `CampaignPacing`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 9 | `pacing_ratio = None` | `NOT_AVAILABLE`. |
+| 10 | `pacing_ratio = Decimal("0")` | `UNDERSPENDING`. |
+| 11 | `pacing_ratio = Decimal("0.8999")` (immediately below the lower threshold) | `UNDERSPENDING`. |
+| 12 | `pacing_ratio = Decimal("0.90")` (exactly the lower threshold) | `ON_PACE`. |
+| 13 | `pacing_ratio = Decimal("0.9001")` | `ON_PACE`. |
+| 14 | `pacing_ratio = Decimal("1.00")` | `ON_PACE`. |
+| 15 | `pacing_ratio = Decimal("1.0999")` | `ON_PACE`. |
+| 16 | `pacing_ratio = Decimal("1.10")` (exactly the upper threshold) | `ON_PACE`. |
+| 17 | `pacing_ratio = Decimal("1.1001")` (immediately above the upper threshold) | `OVERSPENDING`. |
+| 18 | `pacing_ratio = Decimal("1000000.00")` (very large valid value) | `OVERSPENDING`. |
+| 19 | `classify_campaign_pacing` source | Reads only `pacing.campaign_id`/`pacing.pacing_ratio` (AST-verified); contains no binary arithmetic operation (AST-verified); calls none of `classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`assess_campaign_tracking`/`calculate_campaign_pacing`/`calculate_campaign_metrics` (AST-verified). |
+| 20 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function, across `UNDERSPENDING`/`ON_PACE` (both boundaries)/`OVERSPENDING`/`NOT_AVAILABLE` | Every result unaffected — classification is plain `Decimal` comparison, no local context is used. |
+| 21 | Google Ads/CPA vs. Meta Ads/ROAS campaigns with equal `pacing_ratio` | Same `PacingStatus`. |
+| 22 | Protected vs. unprotected vs. test campaign with equal `pacing_ratio` | Same `PacingStatus` in all three. |
+| 23 | Same `pacing_ratio` with different `projected_end_of_period_spend` (including `None`) | Same `PacingStatus` — `projected_end_of_period_spend` is never read. |
+| 24 | Same `pacing_ratio` with widely different `spend_variance` (including negative) | Same `PacingStatus` — `spend_variance` is never read. |
+| 25 | `CampaignPacingClass.model_fields` | Contains no `pacing_ratio`, `spend_variance`, `expected_spend`, `elapsed_fraction`, `elapsed_days`, `total_period_days`, `remaining_budget`, `projected_end_of_period_spend`, `performance_band`, `trend_direction`, `confidence`, `tracking_status`, `is_assessable`, `score`, `reason_code`, `recommendation_action`, `constraint`, `eligibility`, or `allocation` field. |
+| 26 | `data/sample_campaigns.csv` validated, `CampaignPacing` calculated for each (`review_date=2026-08-10`, `period_start=2026-08-01`, `period_end=2026-08-31`, matching the existing Stage 4 fixture), then classified, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); `G001`, `M001`, `G002` = `OVERSPENDING` (`pacing_ratio` ≈ `2.9455`/`2.9760`/`3.0690`); `G003` = `UNDERSPENDING` (`pacing_ratio` ≈ `0.7750`) — asserted against the exact `CampaignPacing` result, not a hard-coded rounded approximation. |
+| 27 | Upstream `pacing_ratio = None` from zero elapsed time (`review_date` before `period_start`) | `NOT_AVAILABLE`. |
+| 28 | Upstream `pacing_ratio = None` from zero current budget (`current_budget = Decimal("0.00")`) | `NOT_AVAILABLE`. |
+| 29 | `classify_campaign_performance`, `classify_campaign_trend`, `classify_campaign_confidence`, `assess_campaign_tracking` | Unchanged behaviour after the Stage 9 additions — regression-checked. |
 
 ## Allocation Scenarios
 

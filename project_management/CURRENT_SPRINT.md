@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, and 8 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, and 9 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -240,20 +240,64 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 8 (and not yet started)
+## Development Stage 9 — Neutral Deterministic Pacing Interpretation (complete)
 
-- Combined confidence/tracking assessment, `Confidence.NOT_ASSESSABLE` ownership and
-  trigger, pacing interpretation.
-- Protected/test campaign constraints, eligibility, scoring, final `RecommendationAction`
-  assignment, `ReasonCode` assignment, allocation, conservation.
+- [x] `src/constants.py` — added `PACING_LOWER_THRESHOLD = Decimal("0.90")` and
+      `PACING_UPPER_THRESHOLD = Decimal("1.10")` (a symmetric ±10% on-pace tolerance
+      around `1.00`). No other constant changed.
+- [x] `src/pacing.py` (additions only — Stage 4's `CampaignPacing`/
+      `calculate_campaign_pacing` unmodified) — `PacingStatus` enum (`UNDERSPENDING =
+      "Under spending"`, `ON_PACE = "On pace"`, `OVERSPENDING = "Over spending"`,
+      `NOT_AVAILABLE = "Not available"`) and `CampaignPacingClass` (frozen,
+      `extra="forbid"`: `campaign_id`, `pacing_status`) and
+      `classify_campaign_pacing(pacing: CampaignPacing) -> CampaignPacingClass`.
+      `src/constants.py` (beyond the two new constants), `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/classification.py` unchanged.
+- [x] `pacing_ratio` is the sole classification input (plus `campaign_id` for result
+      identity) — `spend_variance`, `expected_spend`, `elapsed_fraction`,
+      `elapsed_days`, `total_period_days`, `remaining_budget`, and
+      `projected_end_of_period_spend` are never read; `CampaignInput`, `ReviewSetup`,
+      `CampaignMetrics`, and every Stage 5–8 result are never read.
+- [x] Exact precedence: `pacing_ratio is None` → `NOT_AVAILABLE`; `pacing_ratio <
+      PACING_LOWER_THRESHOLD` → `UNDERSPENDING`; `PACING_LOWER_THRESHOLD <= pacing_ratio
+      <= PACING_UPPER_THRESHOLD` → `ON_PACE` (closed, inclusive interval on both ends);
+      otherwise → `OVERSPENDING`. `NOT_AVAILABLE` is a pacing-data state only — never
+      `Confidence.NOT_ASSESSABLE`, `is_assessable=False`, `TrackingStatus.UNRELIABLE`,
+      `RecommendationAction.HOLD`, a reason code, or an eligibility outcome. The upstream
+      `None` cause (zero elapsed time vs. zero current budget) is never distinguished,
+      and `pacing_ratio` is never recalculated.
+- [x] Direct `Decimal` comparison only — no arithmetic, weighting, quantisation, or
+      `float` conversion; `PACING_LOWER_THRESHOLD`/`PACING_UPPER_THRESHOLD` are both
+      `Decimal`. `classify_campaign_pacing` never calls `classify_campaign_performance`,
+      `classify_campaign_trend`, `classify_campaign_confidence`, or
+      `assess_campaign_tracking` (or vice versa). Descriptive only — does not state
+      whether overspending or underspending is desirable.
+- [x] `tests/test_pacing_interpretation.py` — 33 tests, all passing. `tests/test_pacing.py`
+      (Stage 4, 30 tests), `tests/test_classification.py` (Stage 5, 23 tests),
+      `tests/test_trend_classification.py` (Stage 6, 29 tests),
+      `tests/test_confidence_classification.py` (Stage 7, 32 tests), and
+      `tests/test_tracking_assessment.py` (Stage 8, 30 tests) re-run and confirmed
+      passing — no regression, no existing test file required modification, no
+      approved exception needed this stage.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 9 (and not yet started)
+
+- Combined campaign assessment (performance + trend + confidence + tracking +
+  pacing status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
+- Constraints, protected/test campaign handling, eligibility, scoring, final
+  `RecommendationAction` assignment, `ReasonCode` assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 9 (not started, scope not yet frozen): requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order. Candidates
-include a combined confidence/tracking assessment stage (which would need to decide
-`Confidence.NOT_ASSESSABLE` ownership while preserving Stage 7's and Stage 8's
-independent results) and pacing interpretation (currently the least-evidenced candidate,
-with zero frozen pacing-specific numerical constants).
+Stage 10 (not started, scope not yet frozen): requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order. The live
+candidates are a combined campaign assessment stage (which would need to decide
+`Confidence.NOT_ASSESSABLE` ownership and a precedence rule while preserving Stage 7's,
+Stage 8's, and Stage 9's independent results) and constraints/protected-test
+handling/eligibility (each currently blocked on undecided interaction rules — no
+formula anywhere states how `is_protected`, `is_test_campaign`, `test_budget_floor`, or
+`campaign_max_change_percentage` constrain a budget change).

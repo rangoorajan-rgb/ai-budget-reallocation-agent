@@ -1,12 +1,13 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 8. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 9. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
-> metric-calculation rules, the frozen deterministic pacing-calculation rules, and the
-> frozen neutral performance-, trend-, conversion-volume-confidence-, and
-> tracking-assessability-classification rules. Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, constraint, scoring, and
-> allocation rules are pending later Sprint 1 stages.
+> metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
+> neutral performance-, trend-, conversion-volume-confidence-, and
+> tracking-assessability-classification rules, and the frozen neutral
+> pacing-interpretation rules. Combined assessment, `Confidence.NOT_ASSESSABLE`
+> ownership, constraint, protected/test handling, eligibility, scoring, and allocation
+> rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -40,10 +41,15 @@ other enums use their member name as the value.
 | `MINIMUM_CONVERSIONS` | `10` |
 | `HIGH_CONFIDENCE_CONVERSIONS` | `30` |
 | `CURRENCY_QUANTUM` | `Decimal("0.01")` |
+| `PACING_LOWER_THRESHOLD` | `Decimal("0.90")` |
+| `PACING_UPPER_THRESHOLD` | `Decimal("1.10")` |
 
-These constants are reserved names and values only. No pacing, classification, scoring,
-constraint, allocation, or conservation logic reads or applies them yet — that is pending
-later Sprint 1 stages.
+`PACING_LOWER_THRESHOLD`/`PACING_UPPER_THRESHOLD` are Stage 9's frozen pacing-status
+thresholds — a symmetric ±10% on-pace tolerance band around `1.00`, applied to
+`CampaignPacing.pacing_ratio` only (see the Stage 9 rules below). The remaining
+constants are reserved names and values only; no classification, constraint, scoring,
+allocation, or conservation logic reads or applies them yet — that is pending later
+Sprint 1 stages.
 
 ## Validation Codes (`src/constants.py`)
 
@@ -420,13 +426,70 @@ decision, a score, a recommendation, a reason code, or an allocation. `CampaignI
   relates to it is deferred to a later combined-assessment stage, which must preserve
   the independent Stage 7 conversion-volume result rather than overwriting it.
 
+## Deterministic Pacing Interpretation Rules (Sprint 1, Development Stage 9)
+
+These rules govern the pacing-interpretation addition to `src/pacing.py`, which
+classifies one already-calculated `CampaignPacing` instance's `pacing_ratio` into a
+neutral `PacingStatus`. Stage 9 is a **narrow, descriptive classification only** — it is
+not a judgement that overspending or underspending is desirable or undesirable, and it
+is not a performance classification, trend classification, conversion-volume confidence
+classification, tracking-based assessability result, combined campaign judgement,
+constraint, eligibility decision, score, recommendation, reason code, or allocation.
+`CampaignPacing` (`src/pacing.py`, Stage 4) remains the sole authoritative source of
+`pacing_ratio`; Stage 9 never recalculates it.
+
+- **`pacing_ratio` is the sole authoritative field.** `CampaignPacing.campaign_id` and
+  `CampaignPacing.pacing_ratio` are the only inputs read. `spend_variance`,
+  `expected_spend`, `elapsed_fraction`, `elapsed_days`, `total_period_days`,
+  `remaining_budget`, and `projected_end_of_period_spend` are never read — in
+  particular, `projected_end_of_period_spend` is explicitly excluded as a second pacing
+  signal, and is never compared against `current_budget`, `minimum_budget`, or
+  `maximum_budget`. No `CampaignInput`, `ReviewSetup`, or `CampaignMetrics` field is
+  read.
+- **Exact threshold conditions and equality behaviour**, using the newly frozen
+  `PACING_LOWER_THRESHOLD = Decimal("0.90")` and `PACING_UPPER_THRESHOLD =
+  Decimal("1.10")` — a symmetric ±10% on-pace tolerance around `1.00`:
+  ```
+  pacing_ratio is None                                          → NOT_AVAILABLE
+  pacing_ratio < PACING_LOWER_THRESHOLD                         → UNDERSPENDING
+  PACING_LOWER_THRESHOLD <= pacing_ratio <= PACING_UPPER_THRESHOLD → ON_PACE
+  pacing_ratio > PACING_UPPER_THRESHOLD                         → OVERSPENDING
+  ```
+  The `ON_PACE` interval is **closed and inclusive on both ends**: `pacing_ratio ==
+  PACING_LOWER_THRESHOLD` and `pacing_ratio == PACING_UPPER_THRESHOLD` are both
+  `ON_PACE`. This is a different equality convention from Stages 5–7's single-sided
+  "reaching the threshold enters the higher band" rule, because Stage 9's tolerance is a
+  two-sided band around a midpoint (`1.00`) rather than a ladder of ascending bands.
+- **`None` maps to `NOT_AVAILABLE`, unconditionally.** `pacing_ratio is None` is the
+  upstream `CampaignPacing` zero-denominator case (zero elapsed time or zero current
+  budget, per Stage 4's frozen rules). Stage 9 does not distinguish which upstream cause
+  produced the `None`, does not recalculate `pacing_ratio`, and does not substitute zero
+  for `None`. `PacingStatus.NOT_AVAILABLE` is a **pacing-data state only** — it is never
+  represented as, mapped to, or interchangeable with `Confidence.NOT_ASSESSABLE`,
+  `is_assessable=False`, `TrackingStatus.UNRELIABLE`, `RecommendationAction.HOLD`, a
+  reason code, or an eligibility outcome.
+- **No arithmetic, Decimal, or float conversion.** `pacing_ratio` is compared directly
+  against two existing `Decimal` constants — no addition, subtraction, multiplication,
+  division, quantisation, or `float` conversion is performed, so no local `decimal`
+  context is relevant and none is used.
+- **Platform and KPI independence.** The result depends only on `pacing_ratio` — the
+  same ratio produces the same `PacingStatus` for every platform, KPI type, and
+  protected/test state, since `CampaignPacing` itself is already platform/KPI-
+  independent (Stage 4).
+- **No override of performance, trend, confidence, or tracking.**
+  `classify_campaign_pacing` never calls `classify_campaign_performance`,
+  `classify_campaign_trend`, `classify_campaign_confidence`, or
+  `assess_campaign_tracking` (or vice versa); `CampaignPerformanceClass`,
+  `CampaignTrendClass`, `CampaignConfidenceClass`, and `CampaignTrackingAssessment` are
+  unmodified by Stage 9.
+- **Descriptive, not evaluative.** `PacingStatus` states a numerical relationship to
+  linear pace only — it does not say whether `OVERSPENDING` or `UNDERSPENDING` is good,
+  bad, expected, or a problem. Whether either is desirable, and any combined judgement
+  across pacing, performance, trend, confidence, and tracking assessability, remain
+  pending a later combined-assessment stage.
+
 ## Pending
 
-- **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
-  `projected_end_of_period_spend` means a campaign is "on pace," "underspending,"
-  "overspending," "under-delivering," "over-delivering," or "at risk" — any status,
-  label, or recommendation built from Stage 4's pacing facts — is deferred entirely to a
-  later classification/constraints stage. Stage 4 returns numbers only.
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
   `trend_delta` into a neutral `TrendDirection` (see above) — but a `TrendDirection` is
   not a `ReasonCode`. Whether/how `TrendDirection.IMPROVING`/`STABLE`/`DECLINING` maps to
@@ -441,13 +504,21 @@ decision, a score, a recommendation, a reason code, or an allocation. `CampaignI
   combining `PerformanceBand` with trend, confidence, tracking, and eligibility/
   constraint considerations that remain pending later stages.
 - **`NOT_ASSESSABLE` trigger and combined assessment.** Stage 7 resolved
-  `conversions_28d` → `Confidence.HIGH`/`MEDIUM`/`LOW`, and Stage 8 resolved
-  `tracking_status` → `is_assessable`/`CampaignTrackingAssessment` (see above) — but
-  neither assigns `Confidence.NOT_ASSESSABLE`, and no rule combines the two independent
-  results. Whether/how tracking-based assessability and conversion-volume confidence
-  relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-assessment
-  stage, which must preserve both Stage 7's and Stage 8's independent results rather
-  than overwriting either.
+  `conversions_28d` → `Confidence.HIGH`/`MEDIUM`/`LOW`, Stage 8 resolved
+  `tracking_status` → `is_assessable`/`CampaignTrackingAssessment`, and Stage 9 resolved
+  `pacing_ratio` → `PacingStatus`/`CampaignPacingClass` (see above) — but none of the
+  three assigns `Confidence.NOT_ASSESSABLE`, and no rule combines any of the three
+  independent results with each other or with `PerformanceBand`/`TrendDirection`.
+  Whether/how tracking-based assessability, conversion-volume confidence, and pacing
+  status relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-
+  assessment stage, which must preserve Stage 7's, Stage 8's, and Stage 9's independent
+  results rather than overwriting any of them.
+- **Constraints, protected/test handling, eligibility.** `is_protected`,
+  `is_test_campaign`, `test_budget_floor`, `campaign_max_change_percentage`, and
+  `default_max_change_percentage` are validated `CampaignInput`/`ReviewSetup` fields
+  (Stage 1) but no rule anywhere computes how they constrain a budget change, and no
+  eligibility concept is defined anywhere in the repository. Both remain pending later
+  stages.
 - How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
   budget change.
 - The full set of `ReasonCode` trigger conditions.

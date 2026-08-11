@@ -622,3 +622,82 @@ explicit approval, only `"TrackingStatus"` was removed from that one test's
 and still enforced. `tests/test_classification.py` and `tests/test_trend_classification.py`
 were not affected (neither ever forbade `TrackingStatus`) and were not modified.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 9 is deterministic pacing interpretation, using pacing_ratio only
+
+**Decision:** Sprint 1, Development Stage 9 adds a neutral pacing-status classification
+to `src/pacing.py`, as an *addition* alongside Stage 4's `CampaignPacing`/
+`calculate_campaign_pacing` — not a modification of either. `CampaignPacing` and its
+calculation formulas are unmodified. `CampaignPacing.pacing_ratio` is the sole
+classification input (plus `campaign_id` for result identity); `spend_variance`,
+`expected_spend`, `elapsed_fraction`, `elapsed_days`, `total_period_days`,
+`remaining_budget`, and `projected_end_of_period_spend` are never read by the
+classification function. `projected_end_of_period_spend` is explicitly excluded as a
+second pacing signal and is never compared against `current_budget`, `minimum_budget`,
+or `maximum_budget`. `CampaignInput`, `ReviewSetup`, `CampaignMetrics`, and every Stage
+5–8 result (`PerformanceBand`, `TrendDirection`, `Confidence`, `TrackingStatus`,
+`CampaignTrackingAssessment`, `is_assessable`) are never read, and `is_protected`/
+`is_test_campaign`/`test_budget_floor` are never read — Stage 9 remains fully
+independent of constraints, protected/test handling, eligibility, scoring,
+`RecommendationAction`, `ReasonCode`, and allocation, none of which is implemented or
+extended by this stage.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 9: approved ±10% on-pace tolerance and exact inclusive-boundary precedence
+
+**Decision:** Two new frozen constants are added to `src/constants.py`:
+`PACING_LOWER_THRESHOLD = Decimal("0.90")` and `PACING_UPPER_THRESHOLD =
+Decimal("1.10")` — a symmetric ±10% on-pace tolerance band around `1.00`, applied only
+to `CampaignPacing.pacing_ratio`. `PacingStatus` (`str, Enum`: `UNDERSPENDING = "Under
+spending"`, `ON_PACE = "On pace"`, `OVERSPENDING = "Over spending"`, `NOT_AVAILABLE =
+"Not available"`) is added to `src/pacing.py`, with exact precedence:
+```
+pacing_ratio is None                                            → NOT_AVAILABLE
+pacing_ratio < PACING_LOWER_THRESHOLD                            → UNDERSPENDING
+PACING_LOWER_THRESHOLD <= pacing_ratio <= PACING_UPPER_THRESHOLD  → ON_PACE
+pacing_ratio > PACING_UPPER_THRESHOLD                             → OVERSPENDING
+```
+The `ON_PACE` interval is **closed and inclusive on both ends** — `pacing_ratio ==
+PACING_LOWER_THRESHOLD` and `pacing_ratio == PACING_UPPER_THRESHOLD` are both
+`ON_PACE`. This is a deliberately different equality convention from Stages 5–7's
+single-sided "reaching the threshold enters the higher band" rule, because this
+threshold pair defines a two-sided tolerance band around a midpoint (`1.00`) rather than
+an ascending ladder of bands. Direct `Decimal` comparison only — no arithmetic,
+weighting, quantisation, or `float` conversion; `pacing_ratio` is never recalculated.
+`PacingStatus` is deliberately descriptive only: it never states whether `OVERSPENDING`
+or `UNDERSPENDING` is desirable, expected, or a problem — that judgement, if any, is
+deferred to a later stage.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 9: NOT_AVAILABLE is a pacing-data state only, never substituted for zero
+
+**Decision:** `pacing_ratio is None` (Stage 4's frozen zero-denominator case — zero
+elapsed time or zero current budget) maps unconditionally to
+`PacingStatus.NOT_AVAILABLE`. Stage 9 does not distinguish which upstream cause produced
+the `None`, does not recalculate `pacing_ratio`, and does not substitute `Decimal("0")`
+for `None`. `PacingStatus.NOT_AVAILABLE` is explicitly **not** interchangeable with, and
+must never be represented as, `Confidence.NOT_ASSESSABLE`, `is_assessable=False`,
+`TrackingStatus.UNRELIABLE`, `RecommendationAction.HOLD`, a reason code, or an
+eligibility outcome — it is a narrower, pacing-specific data-availability fact only.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 9: CampaignPacingClass, exactly two fields, independent of Stages 5–8
+
+**Decision:** `CampaignPacingClass` (frozen, immutable; `extra="forbid"`; exactly
+`campaign_id`, `pacing_status`) is defined in `src/pacing.py`, alongside but fully
+separate from `CampaignPacing`. The sole public function is
+`classify_campaign_pacing(pacing: CampaignPacing) -> CampaignPacingClass`; it accepts
+only an already-calculated `CampaignPacing` instance (no `CampaignInput`, `ReviewSetup`,
+`CampaignMetrics`, or any Stage 5–8 result) and reads only `pacing.campaign_id`/
+`pacing.pacing_ratio`. There is no batch-calculation function, no revalidation of
+upstream inputs, and no recalculation of any Stage 4 field.
+`classify_campaign_pacing` never calls `classify_campaign_performance`,
+`classify_campaign_trend`, `classify_campaign_confidence`, or
+`assess_campaign_tracking` (or vice versa); `CampaignPerformanceClass`,
+`CampaignTrendClass`, `CampaignConfidenceClass`, and `CampaignTrackingAssessment` are
+unmodified by Stage 9. Combined campaign assessment, `Confidence.NOT_ASSESSABLE`
+ownership, constraints, protected/test handling, eligibility, scoring,
+`RecommendationAction`, `ReasonCode`, and allocation remain deferred to later stages.
+No existing test file required modification for Stage 9 — no approved exception was
+needed, unlike Stages 7 and 8.
+**Status:** Frozen.

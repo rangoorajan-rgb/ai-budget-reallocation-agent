@@ -316,3 +316,60 @@ All notable changes to this project are documented in this file.
   `NOT_ASSESSABLE` trigger and combined assessment, and pacing interpretation, explicitly
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (21 concrete Stage
   8 scenarios).
+
+- Sprint 1, Development Stage 9: added `PACING_LOWER_THRESHOLD = Decimal("0.90")` and
+  `PACING_UPPER_THRESHOLD = Decimal("1.10")` to `src/constants.py` (a symmetric +/-10%
+  on-pace tolerance around `1.00`), and `PacingStatus` enum (`UNDERSPENDING = "Under
+  spending"`, `ON_PACE = "On pace"`, `OVERSPENDING = "Over spending"`, `NOT_AVAILABLE =
+  "Not available"`), `CampaignPacingClass` (frozen, immutable, `extra="forbid"`:
+  `campaign_id`, `pacing_status` only), and `classify_campaign_pacing(pacing:
+  CampaignPacing) -> CampaignPacingClass` to `src/pacing.py`, alongside but fully
+  separate from Stage 4's `CampaignPacing`/`calculate_campaign_pacing`, which are
+  unmodified. Classifies `pacing_ratio` only (`campaign_id` otherwise, for result
+  identity) — `spend_variance`, `expected_spend`, `elapsed_fraction`, `elapsed_days`,
+  `total_period_days`, `remaining_budget`, and `projected_end_of_period_spend` are never
+  read; `CampaignInput`, `ReviewSetup`, `CampaignMetrics`, and every Stage 5–8 result are
+  never read. Exact precedence: `pacing_ratio is None` → `NOT_AVAILABLE`; `<
+  PACING_LOWER_THRESHOLD` → `UNDERSPENDING`; `PACING_LOWER_THRESHOLD <= pacing_ratio <=
+  PACING_UPPER_THRESHOLD` → `ON_PACE` (closed, inclusive interval on both boundaries);
+  otherwise → `OVERSPENDING` — a deliberately different, two-sided equality convention
+  from Stages 5–7's single-sided threshold-entry rule. `PacingStatus.NOT_AVAILABLE` is a
+  pacing-data state only — never substituted for `Confidence.NOT_ASSESSABLE`,
+  `is_assessable=False`, `TrackingStatus.UNRELIABLE`, `RecommendationAction.HOLD`, a
+  reason code, or an eligibility outcome; the upstream `None` cause is never
+  distinguished and `pacing_ratio` is never recalculated. Direct `Decimal` comparison
+  only — no arithmetic, weighting, quantisation, or `float` conversion.
+  `classify_campaign_pacing` never calls `classify_campaign_performance`,
+  `classify_campaign_trend`, `classify_campaign_confidence`, or
+  `assess_campaign_tracking` (or vice versa). Descriptive only — does not judge whether
+  overspending or underspending is desirable. `src/models.py`, `src/validation.py`,
+  `src/metrics.py`, and `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 9: `tests/test_pacing_interpretation.py` (33 tests)
+  covering enum members/values, threshold constants (exact `Decimal`, never `float`),
+  result-model shape/immutability/`campaign_id` copying, incompatible-input rejection
+  (`AttributeError`, no silent coercion), exact boundary classification (immediately
+  below/at/immediately above both thresholds, `None`, zero, and a very large valid
+  value), independence (AST-verified restriction to reading only `campaign_id`/
+  `pacing_ratio`, AST-verified zero binary-arithmetic nodes, AST-verified no call to any
+  Stage 5–8 classifier, unaffected by a mutated global `Decimal` context across every
+  outcome, platform/KPI independence and protected/test independence proven through the
+  full `CampaignInput` → `calculate_campaign_pacing` → `classify_campaign_pacing` path,
+  independence from `projected_end_of_period_spend` and `spend_variance`), integration
+  with `validate_campaign_csv` + `calculate_campaign_pacing` over
+  `data/sample_campaigns.csv` at the existing Stage 4 review-period fixture (order
+  preserved; `G001`/`M001`/`G002` = `OVERSPENDING`, `G003` = `UNDERSPENDING`, asserted
+  against the exact calculated result, not a hard-coded rounded approximation), and two
+  upstream-`None` integration cases (zero elapsed time, zero current budget), both
+  `NOT_AVAILABLE`. `tests/test_pacing.py` (Stage 4, 30 tests), `tests/test_classification.py`
+  (Stage 5, 23 tests), `tests/test_trend_classification.py` (Stage 6, 29 tests),
+  `tests/test_confidence_classification.py` (Stage 7, 32 tests), and
+  `tests/test_tracking_assessment.py` (Stage 8, 30 tests) re-run and confirmed passing —
+  no behavioural regression, and no existing test file required modification this stage.
+  Full suite: 341 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23
+  Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9).
+- Updated `docs/DATA_DICTIONARY.md` (`PacingStatus`/`CampaignPacingClass` fields; exact
+  thresholds and inclusive `ON_PACE` interval), `docs/DECISION_RULES.md` (frozen Stage 9
+  pacing-interpretation rule; combined assessment, `Confidence.NOT_ASSESSABLE`
+  ownership, constraints, protected/test handling, and eligibility explicitly
+  re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (29 concrete Stage
+  9 scenarios).

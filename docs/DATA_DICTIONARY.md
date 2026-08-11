@@ -1,12 +1,13 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 8 (adds a narrow deterministic tracking-based
-> assessability fact to the Stage 1 enumerations, numerical constants, core input
-> models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing
-> facts, Stage 5 performance classification, Stage 6 trend classification, and Stage 7
-> conversion-volume confidence classification). Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, and other derived/
-> decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 9 (adds a neutral deterministic pacing-interpretation
+> classification to the Stage 1 enumerations, numerical constants, core input models, CSV
+> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage
+> 5 performance classification, Stage 6 trend classification, Stage 7 conversion-volume
+> confidence classification, and Stage 8 tracking-based assessability). Combined
+> assessment, `Confidence.NOT_ASSESSABLE` ownership, constraints, protected/test
+> handling, eligibility, and other derived/decision fields, plus export fields, are
+> pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -281,11 +282,57 @@ the four is required to construct another, and none is modified by this addition
 unmodified `Confidence` member whose trigger and ownership remain pending a later
 combined-assessment stage.
 
+## Campaign Pacing Interpretation Fields (`src/pacing.py`)
+
+Produced by `classify_campaign_pacing(pacing: CampaignPacing) -> CampaignPacingClass`,
+one result per already-calculated `CampaignPacing` instance. `CampaignPacingClass` is
+frozen (immutable) and rejects unknown fields (`extra="forbid"`). This is a **neutral,
+descriptive pacing classification only** — it is not a judgement that overspending or
+underspending is desirable or undesirable, and it is not a performance classification,
+trend classification, conversion-volume confidence classification, tracking-based
+assessability result, combined campaign judgement, constraint, eligibility decision,
+score, recommendation, reason code, or allocation. Depends only on
+`CampaignPacing.campaign_id`/`pacing_ratio` — never `spend_variance`, `expected_spend`,
+`elapsed_fraction`, `elapsed_days`, `total_period_days`, `remaining_budget`,
+`projected_end_of_period_spend`, `CampaignInput`, `ReviewSetup`, `CampaignMetrics`, or
+any Stage 5–8 result.
+
+### `PacingStatus` (enum)
+
+| Member | Value | Meaning |
+|--------|-------|---------|
+| `UNDERSPENDING` | `"Under spending"` | `pacing_ratio < PACING_LOWER_THRESHOLD` (`0.90`). |
+| `ON_PACE` | `"On pace"` | `PACING_LOWER_THRESHOLD <= pacing_ratio <= PACING_UPPER_THRESHOLD` (`0.90` to `1.10` inclusive — a closed, symmetric ±10% tolerance band around `1.00`). |
+| `OVERSPENDING` | `"Over spending"` | `pacing_ratio > PACING_UPPER_THRESHOLD` (`1.10`). |
+| `NOT_AVAILABLE` | `"Not available"` | `pacing_ratio is None` — a **pacing-data state only**, produced when the upstream `CampaignPacing` calculation could not compute a meaningful ratio (zero elapsed time or zero current budget). It is never `Confidence.NOT_ASSESSABLE`, `is_assessable=False`, `TrackingStatus.UNRELIABLE`, `RecommendationAction.HOLD`, a reason code, or an eligibility outcome. |
+
+The threshold values themselves belong to `ON_PACE`: `pacing_ratio == PACING_LOWER_THRESHOLD`
+and `pacing_ratio == PACING_UPPER_THRESHOLD` are both `ON_PACE` — the on-pace interval is
+closed and inclusive on both ends, unlike Stages 5–7's single-sided threshold-entry
+convention.
+
+### `CampaignPacingClass`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignPacing`. |
+| `pacing_status` | enum (`PacingStatus`) | The classified pacing status, per the table above. |
+
+`classify_campaign_pacing` reads only `pacing.campaign_id` and `pacing.pacing_ratio` —
+no other `CampaignPacing` field, and no `CampaignInput`, `ReviewSetup`, `CampaignMetrics`,
+or Stage 5–8 result. No arithmetic, quantisation, or `Decimal`/`float` conversion is
+performed; `pacing_ratio` is never recalculated. `CampaignPacingClass` is a separate,
+independent result model from `CampaignPerformanceClass`, `CampaignTrendClass`,
+`CampaignConfidenceClass`, and `CampaignTrackingAssessment` — none of the five is
+required to construct another, and none is modified by this addition. Whether/how
+pacing status combines with performance, trend, confidence, or tracking assessability
+into any final judgement remains pending a later combined-assessment stage.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (combined confidence/tracking assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, constraints, scoring,
-> allocation).
+> Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, constraints, protected/test handling,
+> eligibility, scoring, allocation).
 
 ## Export Fields
 
