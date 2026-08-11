@@ -1,12 +1,14 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 6 populates the Trend Classification Scenarios section
-> below, backed by `tests/test_trend_classification.py` (29 tests), in addition to the
-> Stage 5 Performance Classification Scenarios (`tests/test_classification.py`, 23
-> tests), the Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests),
-> the Stage 3 Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the
-> Stage 2 Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
-> Approval/Audit scenarios are pending later stages.
+> Sprint 1, Development Stage 7 populates the Conversion-Volume Confidence Classification
+> Scenarios section below, backed by `tests/test_confidence_classification.py` (32
+> tests), in addition to the Stage 6 Trend Classification Scenarios
+> (`tests/test_trend_classification.py`, 29 tests), the Stage 5 Performance
+> Classification Scenarios (`tests/test_classification.py`, 23 tests), the Stage 4
+> Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3 Metric
+> Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2 Validation
+> Scenarios (`tests/test_validation.py`, 44 tests). Allocation and Approval/Audit
+> scenarios are pending later stages.
 
 ## Validation Scenarios
 
@@ -226,6 +228,46 @@ interpretation, score, eligibility, or allocation outcome.
 | 24 | Any result | No `float` anywhere; no arithmetic or quantisation performed on `trend_delta` (input value unchanged after the call). |
 | 25 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected for both a stable value and the exact negative boundary `Decimal("-0.10")` — classification is comparison-only and needs no local context. |
 | 26 | `classify_campaign_performance` (Stage 5) | Unchanged behaviour after the Stage 6 additions — regression-checked. |
+
+## Conversion-Volume Confidence Classification Scenarios
+
+All scenarios below use `classify_campaign_confidence(campaign: CampaignInput) ->
+CampaignConfidenceClass` from `src/classification.py`. Every result is **descriptive
+conversion-volume evidence only**, independent of `PerformanceBand`/`TrendDirection` —
+none of these scenarios produces a tracking interpretation, assessability decision,
+pacing interpretation, `RecommendationAction`, `ReasonCode`, score, eligibility, or
+allocation outcome, and none ever assigns `Confidence.NOT_ASSESSABLE`.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `Confidence` members | Still exactly `HIGH`, `MEDIUM`, `LOW`, `NOT_ASSESSABLE` (unchanged, Stage 1). |
+| 2 | `CampaignConfidenceClass` field set | Exactly `campaign_id`, `confidence`. |
+| 3 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate a `CampaignConfidenceClass` instance | Rejected (`frozen=True`). |
+| 5 | `confidence` | Always a `Confidence` instance. |
+| 6 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 7 | `classify_campaign_confidence({"conversions_28d": 0})` (dict, not `CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | `conversions_28d = 0` | `LOW` — zero conversions is not special-cased. |
+| 9 | `conversions_28d = 1` | `LOW`. |
+| 10 | `conversions_28d = 9` (one below `MINIMUM_CONVERSIONS`) | `LOW`. |
+| 11 | `conversions_28d = 10` (exactly `MINIMUM_CONVERSIONS`) | `MEDIUM` — the threshold belongs to the higher band. |
+| 12 | `conversions_28d = 11` | `MEDIUM`. |
+| 13 | `conversions_28d = 29` (one below `HIGH_CONFIDENCE_CONVERSIONS`) | `MEDIUM`. |
+| 14 | `conversions_28d = 30` (exactly `HIGH_CONFIDENCE_CONVERSIONS`) | `HIGH` — the threshold belongs to the higher band. |
+| 15 | `conversions_28d = 31` | `HIGH`. |
+| 16 | `conversions_28d = 1000000` | `HIGH`. |
+| 17 | Two campaigns with the same `conversions_28d` but different valid `conversions_7d` | Same `Confidence` — `conversions_7d` has no effect. |
+| 18 | Conflicting-window example: `conversions_7d=5`, `conversions_28d=20` | `MEDIUM` — proves `conversions_28d` alone is authoritative (`conversions_7d=5` alone would suggest a lower band, but is never consulted). |
+| 19 | `classify_campaign_confidence` source | Reads only `campaign.campaign_id`/`campaign.conversions_28d` (AST-verified); never reads `conversions_7d`; contains no binary arithmetic operation (AST-verified) — no summing/averaging/weighting of the two windows. |
+| 20 | CPA vs. ROAS, and Google Ads vs. Meta Ads, with the same `conversions_28d` | Same `Confidence` in every combination. |
+| 21 | `data/sample_campaigns.csv` validated, then each `CampaignInput` classified directly (no `CampaignMetrics` calculated), iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); `G001` (155) / `M001` (210) / `G002` (520) = `HIGH`; `G003` (20) = `MEDIUM`. |
+| 22 | `CampaignConfidenceClass.model_fields` | Contains no `performance_band`, `trend_direction`, `tracking_status`, `pacing_ratio`, `recommendation_action`, `reason_code`, `score`, `eligibility`, `allocation`, `conversions_7d`, or `conversions_28d` field. |
+| 23 | `classify_campaign_confidence` result, for every boundary value tested | Never equals `Confidence.NOT_ASSESSABLE`. |
+| 24 | `src/classification.py` imports | Does not import `CampaignPacing`, `ReviewSetup`, `TrackingStatus`, `RecommendationAction`, or `ReasonCode` (AST-verified; `CampaignInput`/`Confidence` are now legitimately imported for Stage 7). |
+| 25 | `classify_campaign_confidence` body | Does not call `classify_campaign_performance` or `classify_campaign_trend` (AST-verified). |
+| 26 | Any result | No `float` or `Decimal` anywhere. |
+| 27 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — classification is plain integer comparison, no `Decimal` involved at all. |
+| 28 | `classify_campaign_performance` (Stage 5) and `classify_campaign_trend` (Stage 6) | Unchanged behaviour after the Stage 7 additions — regression-checked. |
 
 ## Allocation Scenarios
 

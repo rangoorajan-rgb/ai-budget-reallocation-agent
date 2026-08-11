@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, and 6 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, and 7 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -161,10 +161,51 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 6 (and not yet started)
+## Development Stage 7 — Neutral Deterministic Conversion-Volume Confidence Classification (complete)
 
-- Conversion-volume confidence (including conversion-window choice), tracking-status
-  interpretation, `NOT_ASSESSABLE` behaviour, pacing interpretation.
+- [x] `src/classification.py` (additions only — Stages 5/6's `PerformanceBand`/
+      `CampaignPerformanceClass`/`classify_campaign_performance` and `TrendDirection`/
+      `CampaignTrendClass`/`classify_campaign_trend` unmodified) —
+      `CampaignConfidenceClass` (frozen, `extra="forbid"`: `campaign_id`, `confidence`,
+      reusing the existing `Confidence` enum) and `classify_campaign_confidence(campaign:
+      CampaignInput) -> CampaignConfidenceClass`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py` unchanged.
+- [x] Classifies `conversions_28d` only (Policy B — the fuller, more stable window,
+      avoiding double-counting the nested `conversions_7d` period), using the existing
+      frozen `MINIMUM_CONVERSIONS`/`HIGH_CONFIDENCE_CONVERSIONS`: `>=
+      HIGH_CONFIDENCE_CONVERSIONS` → `HIGH`; `>= MINIMUM_CONVERSIONS` → `MEDIUM`;
+      otherwise (including zero) → `LOW`. Reaching either threshold enters the higher
+      band, consistent with Stages 5–6.
+- [x] `Confidence.NOT_ASSESSABLE` is never assigned by Stage 7 — a deliberate,
+      documented scope boundary, not an inferred rule from zero/low conversions,
+      tracking status, pacing, or protected/test status.
+- [x] Direct integer comparison only — no arithmetic, weighting, quantisation, or
+      `Decimal`/`float` conversion; `conversions_7d` is never read, summed, averaged, or
+      combined with `conversions_28d`.
+- [x] Depends only on `CampaignInput.campaign_id`/`conversions_28d` — no
+      `CampaignMetrics`, `CampaignPacing`, `ReviewSetup`, `CampaignPerformanceClass`,
+      `CampaignTrendClass`, `TrackingStatus`, `RecommendationAction`, or `ReasonCode`; no
+      platform/KPI branching.
+- [x] `tests/test_confidence_classification.py` — 32 tests, all passing.
+      `tests/test_classification.py` (Stage 5, 23 tests) and
+      `tests/test_trend_classification.py` (Stage 6, 29 tests) re-run and confirmed
+      passing. **One approved exception:** both files' pre-existing
+      `test_classification_module_does_not_import_out_of_scope_modules_or_enums` AST
+      checks were narrowed (removing `CampaignInput`/`Confidence`/`src.models` from
+      their forbidden-import sets only) because those checks were written when
+      `src/classification.py` legitimately had no reason to import either — Stage 7
+      requires both, per your explicit approval; every other forbidden import in both
+      tests (`CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `ReasonCode`, and
+      the remaining out-of-scope modules) is unchanged and still enforced.
+      `tests/test_models.py`, `tests/test_validation.py`, `tests/test_metrics.py`, and
+      `tests/test_pacing.py` unchanged and still passing.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 7 (and not yet started)
+
+- Tracking-status interpretation, `NOT_ASSESSABLE` trigger/precedence, pacing
+  interpretation.
 - Combined campaign judgements (trend + performance + confidence + tracking + pacing).
 - Protected/test campaign constraints, eligibility, scoring, final `RecommendationAction`
   assignment, `ReasonCode` assignment, allocation, conservation.
@@ -173,7 +214,6 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 7 (not started, scope not yet frozen): candidates include conversion-volume
-confidence and tracking-status interpretation — each has unresolved formula/boundary
-questions of its own (see `DECISIONS.md`) and requires its own dependency and
+Stage 8 (not started, scope not yet frozen): candidates include tracking-status
+interpretation and `NOT_ASSESSABLE` handling — each requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order.

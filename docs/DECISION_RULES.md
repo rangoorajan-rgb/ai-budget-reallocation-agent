@@ -1,11 +1,11 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 6. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 7. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, and the
-> frozen neutral performance- and trend-classification rules. Conversion-volume
-> confidence, tracking interpretation, constraint, scoring, and allocation rules are
-> pending later Sprint 1 stages.
+> frozen neutral performance-, trend-, and conversion-volume-confidence-classification
+> rules. Tracking interpretation, constraint, scoring, and allocation rules are pending
+> later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -321,6 +321,59 @@ independent of `PerformanceBand`/`CampaignPerformanceClass` (Stage 5). `Campaign
   trend direction regardless of its conversion volume, tracking reliability, or pacing —
   Stage 6 creates no precedence or override rule for those later considerations.
 
+## Deterministic Conversion-Volume Confidence Classification Rules (Sprint 1, Development Stage 7)
+
+These rules govern the confidence-classification addition to `src/classification.py`,
+which classifies one already-validated `CampaignInput` instance's `conversions_28d`
+count into the existing `Confidence` enum's `HIGH`/`MEDIUM`/`LOW` members. Stage 7 is
+**descriptive conversion-volume evidence only** — it is not a tracking interpretation,
+assessability decision, performance classification, trend classification, pacing
+interpretation, constraint, eligibility decision, score, recommendation, reason code, or
+allocation, and it is independent of `PerformanceBand`/`CampaignPerformanceClass` (Stage
+5) and `TrendDirection`/`CampaignTrendClass` (Stage 6). `CampaignInput` (`src/models.py`)
+remains the sole authoritative source of `conversions_28d`; `src/classification.py`
+never re-validates or recalculates it.
+
+- **Classification input.** `CampaignInput.campaign_id` and
+  `CampaignInput.conversions_28d` are the only inputs read. `conversions_7d` is never
+  read, combined, summed, averaged, or weighted with `conversions_28d` — `conversions_28d`
+  is the sole authority, since it is the fuller, more statistically stable evidence
+  window and using both would double-count the nested 7-day period (`conversions_7d <=
+  conversions_28d` is already a frozen `CampaignInput` invariant precisely because the
+  7-day window sits inside the 28-day window, not alongside it). `SEVEN_DAY_WEIGHT` and
+  `TWENTY_EIGHT_DAY_WEIGHT` (Stage 3, ratio-blending constants) are not reused here.
+- **Threshold conditions and equality behaviour**, using the existing frozen
+  `MINIMUM_CONVERSIONS = 10` and `HIGH_CONFIDENCE_CONVERSIONS = 30`:
+  ```
+  conversions_28d >= HIGH_CONFIDENCE_CONVERSIONS   → HIGH
+  conversions_28d >= MINIMUM_CONVERSIONS           → MEDIUM
+  otherwise (0–9)                                  → LOW
+  ```
+  Reaching either threshold enters the higher confidence band — consistent with the
+  threshold-entry policy approved for `PerformanceBand` (Stage 5) and `TrendDirection`
+  (Stage 6): `conversions_28d == 30` is `HIGH`; `conversions_28d == 10` is `MEDIUM`. Zero
+  conversions produces `LOW`, not a special-cased result.
+- **`Confidence.NOT_ASSESSABLE` is never assigned by Stage 7.** This is a deliberate
+  scope boundary, not a claim that the value is unreachable in general. It is never
+  inferred from zero conversions, low conversions, `TrackingStatus.WARNING`,
+  `TrackingStatus.UNRELIABLE`, zero spend, zero budget, `PerformanceBand`,
+  `TrendDirection`, `CampaignPacing`, or protected/test status. Its trigger and any
+  precedence rule remain deferred until tracking interpretation or a later combined-
+  assessment stage is formally approved.
+- **Direct integer comparison only.** No addition, subtraction, multiplication,
+  division, averaging, weighting, quantisation, or `Decimal`/`float` conversion is
+  performed — `conversions_28d` and both thresholds are plain `int`, so no local
+  `decimal` context is relevant and none is used.
+- **Platform and KPI independence.** The classification depends only on
+  `conversions_28d` — never `platform` or `kpi_type` — so the same count produces the
+  same `Confidence` for CPA and ROAS campaigns and for every platform.
+- **Independence from performance, trend, tracking, and pacing.** `CampaignConfidenceClass`
+  is a separate result from `CampaignPerformanceClass` and `CampaignTrendClass` — the
+  three are never combined, and `classify_campaign_confidence` never calls
+  `classify_campaign_performance` or `classify_campaign_trend` (or vice versa). It does
+  not read `tracking_status` or any `CampaignPacing` fact. `CampaignPerformanceClass`
+  and `CampaignTrendClass` are unmodified by Stage 7.
+
 ## Pending
 
 - **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
@@ -341,11 +394,10 @@ independent of `PerformanceBand`/`CampaignPerformanceClass` (Stage 5). `Campaign
   performance ratio thresholds alone; assigning a final `RecommendationAction` requires
   combining `PerformanceBand` with trend, confidence, tracking, and eligibility/
   constraint considerations that remain pending later stages.
-- **Conversion-volume confidence.** How `MINIMUM_CONVERSIONS` and
-  `HIGH_CONFIDENCE_CONVERSIONS` map `conversions_7d`/`conversions_28d` to `Confidence`
-  levels — including which conversion window controls confidence, exact threshold
-  boundaries, tracking-status effects, and `NOT_ASSESSABLE` behaviour — remains pending
-  classification. Stage 3 does not use either constant.
+- **`NOT_ASSESSABLE` trigger.** Stage 7 resolved how `MINIMUM_CONVERSIONS`/
+  `HIGH_CONFIDENCE_CONVERSIONS` map `conversions_28d` to `Confidence.HIGH`/`MEDIUM`/`LOW`
+  (see above) — but `Confidence.NOT_ASSESSABLE`'s trigger, and any tracking-status
+  effect on confidence, remain pending a later stage.
 - How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
   budget change.
 - The full set of `ReasonCode` trigger conditions.

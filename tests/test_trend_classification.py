@@ -250,6 +250,11 @@ def test_campaign_trend_class_has_no_out_of_scope_fields():
 
 
 def test_classification_module_does_not_import_out_of_scope_modules_or_enums():
+    # NOTE: src/classification.py now also implements Stage 7 (conversion-volume
+    # confidence classification), which legitimately requires importing CampaignInput
+    # (src.models) and Confidence (src.constants) — narrowed here accordingly. This
+    # test still forbids every import that remains out of scope for the module as a
+    # whole: CampaignPacing, ReviewSetup, RecommendationAction, and ReasonCode.
     import src.classification as classification_module
 
     tree = ast.parse(inspect.getsource(classification_module))
@@ -263,18 +268,15 @@ def test_classification_module_does_not_import_out_of_scope_modules_or_enums():
             imported_names.update(alias.name for alias in node.names)
 
     forbidden_imports = {
-        "src.models",
         "src.pacing",
         "src.validation",
         "src.constraints",
         "src.scoring",
         "src.allocation",
         "src.conservation",
-        "CampaignInput",
         "CampaignPacing",
         "ReviewSetup",
         "RecommendationAction",
-        "Confidence",
         "ReasonCode",
     }
     assert imported_names.isdisjoint(forbidden_imports)

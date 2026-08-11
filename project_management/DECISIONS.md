@@ -462,3 +462,85 @@ classification is comparison-only. The calculation is platform- and KPI-independ
 construction, since Stage 3 already direction-normalised CPA and ROAS so that
 `trend_delta`'s sign has identical meaning for both.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 7 is conversion-volume confidence only; independent of Stage 5/6 classifications
+
+**Decision:** Sprint 1, Development Stage 7 adds conversion-volume confidence
+classification to `src/classification.py`, as an *addition* alongside Stage 5's
+performance classification and Stage 6's trend classification — not a modification of
+either. `CampaignPerformanceClass`, `PerformanceBand`, `CampaignTrendClass`, and
+`TrendDirection` are unmodified. Tracking-status interpretation and every combined
+campaign judgement remain deferred, for the same reasons established when Stages 5 and 6
+were each scoped narrower than "classification": tracking has no frozen precedence rule
+anywhere in the repository.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 7: conversions_28d-only window policy; no summing or weighting
+
+**Decision:** `classify_campaign_confidence` uses `CampaignInput.conversions_28d` only.
+`conversions_7d` is never read, combined, summed, averaged, or weighted with
+`conversions_28d`. This is because `conversions_28d` is the fuller, more statistically
+stable evidence window, and `conversions_7d <= conversions_28d` is already a frozen
+`CampaignInput` invariant precisely because the 7-day window is temporally nested inside
+the 28-day window (the same underlying conversion events), not an independent period —
+so summing the two would double-count. `SEVEN_DAY_WEIGHT`/`TWENTY_28_DAY_WEIGHT` (Stage
+3's ratio-blending constants) are not reused for this purpose.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 7: CampaignConfidenceClass reuses the existing Confidence enum
+
+**Decision:** `CampaignConfidenceClass` (frozen, immutable; `extra="forbid"`; exactly
+`campaign_id`, `confidence`) is defined in `src/classification.py`, alongside but fully
+separate from `CampaignPerformanceClass` and `CampaignTrendClass`. Unlike Stages 5–6
+(which introduced new neutral enums, `PerformanceBand`/`TrendDirection`, specifically to
+avoid conflating a classification with `RecommendationAction`/`ReasonCode`), Stage 7
+reuses the existing `Confidence` enum directly — `Confidence` is already a neutral
+evidence-quality vocabulary, not a recommendation-shaped one, so reuse does not risk the
+same premature-recommendation conflation. The sole public function is
+`classify_campaign_confidence(campaign: CampaignInput) -> CampaignConfidenceClass`; it
+accepts only an already-validated `CampaignInput` instance (no `CampaignMetrics`,
+`CampaignPacing`, `CampaignPerformanceClass`, `CampaignTrendClass`, `ReviewSetup`, raw
+mapping, or unvalidated dict) and reads only `campaign_id` and `conversions_28d` from
+it. There is no batch-calculation function, and `classify_campaign_confidence` never
+calls `classify_campaign_performance` or `classify_campaign_trend` (or vice versa).
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 7: exact HIGH/MEDIUM/LOW bands, equality, and NOT_ASSESSABLE deferral
+
+**Decision:** Using the existing frozen `MINIMUM_CONVERSIONS = 10` and
+`HIGH_CONFIDENCE_CONVERSIONS = 30`, with the threshold magnitude belonging to the higher
+band in both cases (consistent with Stages 5–6's identical "reaching the threshold
+qualifies" convention):
+```
+conversions_28d >= HIGH_CONFIDENCE_CONVERSIONS   → HIGH
+conversions_28d >= MINIMUM_CONVERSIONS           → MEDIUM
+otherwise (0–9, including zero)                  → LOW
+```
+Zero conversions produces `LOW`, not a special case. `Confidence.NOT_ASSESSABLE` is
+never assigned by Stage 7 — this is a deliberate scope boundary (the enum member remains
+valid and unmodified; Stage 7 simply never produces it), not an inference from zero/low
+conversions, `TrackingStatus.WARNING`/`UNRELIABLE`, zero spend, zero budget,
+`PerformanceBand`, `TrendDirection`, `CampaignPacing`, or protected/test status. Its
+trigger and any precedence rule remain deferred until tracking interpretation or a later
+combined-assessment stage is formally approved. No arithmetic, quantisation, or
+`Decimal`/`float` conversion is performed — `conversions_28d` and both thresholds are
+plain `int`; classification is direct integer comparison only. The calculation is
+platform- and KPI-independent — it depends only on `conversions_28d`.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 7: two Stage 5/6 AST scope-boundary tests narrowed by explicit approval
+
+**Decision:** Implementing the approved Stage 7 specification required importing
+`CampaignInput` (`src.models`) and `Confidence` (`src.constants`) into
+`src/classification.py`. This broke a pre-existing assertion in both
+`tests/test_classification.py` and `tests/test_trend_classification.py` —
+`test_classification_module_does_not_import_out_of_scope_modules_or_enums` — which had
+forbidden those exact imports because, at the time Stages 5 and 6 were written,
+`src/classification.py` legitimately had no reason to import either. This was identified
+as a genuine conflict (not silently resolved): implementing Stage 7 as specified and
+never modifying those two test files are mutually incompatible given their existing
+content. With explicit approval, both tests' `forbidden_imports` sets were narrowed to
+remove only `"src.models"`, `"CampaignInput"`, and `"Confidence"`; every other forbidden
+entry (`CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `ReasonCode`, and the
+out-of-scope `src.*` modules) is unchanged and still enforced by both tests.
+**Status:** Frozen.

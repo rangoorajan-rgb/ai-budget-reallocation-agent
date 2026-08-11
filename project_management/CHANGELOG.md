@@ -214,3 +214,53 @@ All notable changes to this project are documented in this file.
   and the trend-to-`ReasonCode` mapping explicitly re-confirmed as pending later
   stages), and `docs/TEST_SCENARIOS.md` (26 concrete Stage 6 scenarios, including a
   synthetic `DECLINING` case since no sample campaign has a negative `trend_delta`).
+
+- Sprint 1, Development Stage 7: added `CampaignConfidenceClass` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `confidence` only, reusing the existing `Confidence`
+  enum unchanged) and `classify_campaign_confidence(campaign: CampaignInput) ->
+  CampaignConfidenceClass` to `src/classification.py`, alongside but fully separate from
+  Stage 5's `PerformanceBand`/`CampaignPerformanceClass`/`classify_campaign_performance`
+  and Stage 6's `TrendDirection`/`CampaignTrendClass`/`classify_campaign_trend`, all of
+  which are unmodified. Classifies `conversions_28d` only (the fuller, more stable
+  evidence window; `conversions_7d` is never read, summed, averaged, or combined —
+  avoiding double-counting the nested 7-day period), using the existing frozen
+  `MINIMUM_CONVERSIONS`/`HIGH_CONFIDENCE_CONVERSIONS`, with the threshold magnitude
+  belonging to the higher band (`>= HIGH_CONFIDENCE_CONVERSIONS` → `HIGH`;
+  `>= MINIMUM_CONVERSIONS` → `MEDIUM`; otherwise, including zero, → `LOW`) — consistent
+  with Stages 5–6's threshold-entry equality convention. `Confidence.NOT_ASSESSABLE` is
+  never assigned — a deliberate, documented scope boundary, not inferred from zero/low
+  conversions, tracking status, pacing, or protected/test status. Direct integer
+  comparison only — no arithmetic, weighting, quantisation, or `Decimal`/`float`
+  conversion. Reads only `campaign_id`/`conversions_28d` from `CampaignInput`; does not
+  import `CampaignPacing`, `ReviewSetup`, `TrackingStatus`, `RecommendationAction`, or
+  `ReasonCode`, and never calls `classify_campaign_performance`/`classify_campaign_trend`.
+  `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`, and
+  `src/pacing.py` are unchanged.
+- **Approved exception:** implementing Stage 7 required `src/classification.py` to
+  import `CampaignInput`/`Confidence`, which broke a pre-existing AST-based scope check
+  in both `tests/test_classification.py` and `tests/test_trend_classification.py` that
+  had forbidden those imports (correct when Stages 5–6 were written, obsolete once Stage
+  7 legitimately needed them). With explicit approval, both tests' forbidden-import sets
+  were narrowed to drop only `CampaignInput`/`Confidence`/`src.models`; every other
+  forbidden entry is unchanged and still enforced.
+- Sprint 1, Development Stage 7: `tests/test_confidence_classification.py` (32 tests)
+  covering result-model shape/immutability, exact threshold-boundary equality behaviour
+  (all 9 boundary/large-magnitude values, including zero), `campaign_id` propagation,
+  `conversions_28d`-only window selection (including a conflicting `conversions_7d=5`/
+  `conversions_28d=20` example proving 28-day-only behaviour, and AST verification that
+  `conversions_7d` is never read and no binary arithmetic occurs), platform/KPI
+  independence, integration with `validate_campaign_csv` over
+  `data/sample_campaigns.csv` (order preserved; `G001`/`M001`/`G002` = `HIGH`,
+  `G003` = `MEDIUM`), and scope boundaries (no out-of-scope field; `NOT_ASSESSABLE`
+  never assigned across every tested value; AST-verified import restrictions and
+  no-call-to-other-classifiers check; no float/Decimal; unaffected by a mutated global
+  `Decimal` context). `tests/test_classification.py` (Stage 5, 23 tests) and
+  `tests/test_trend_classification.py` (Stage 6, 29 tests) re-run and confirmed passing
+  after the approved narrowing above — no behavioural regression. Full suite: 278 tests
+  passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 +
+  32 Stage 7).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignConfidenceClass` fields; `Confidence`
+  table with each member's Stage-7 meaning and whether Stage 7 assigns it),
+  `docs/DECISION_RULES.md` (frozen Stage 7 confidence-classification rule; tracking
+  interpretation and the `NOT_ASSESSABLE` trigger explicitly re-confirmed as pending
+  later stages), and `docs/TEST_SCENARIOS.md` (28 concrete Stage 7 scenarios).

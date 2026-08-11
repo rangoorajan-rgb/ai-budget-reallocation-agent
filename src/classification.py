@@ -1,5 +1,5 @@
-"""Deterministic, neutral performance and trend classification for calculated campaign
-metrics.
+"""Deterministic, neutral performance, trend, and conversion-volume-confidence
+classification for calculated campaign metrics and validated campaign input.
 
 Implements Sprint 1 — Development Stage 5: for one already-calculated `CampaignMetrics`
 instance, classifies `weighted_performance_ratio` into one neutral `PerformanceBand`
@@ -14,10 +14,18 @@ using the existing frozen `TREND_THRESHOLD` constant. This is descriptive eviden
 confidence assessment, tracking assessment, pacing interpretation, constraint,
 eligibility decision, score, recommendation, reason code, or proposed allocation.
 
-Conversion-volume confidence, tracking-status interpretation, pacing interpretation, and
+Also implements Sprint 1 — Development Stage 7: for one already-validated `CampaignInput`
+instance, classifies `conversions_28d` into the existing `Confidence` enum's `HIGH`/
+`MEDIUM`/`LOW` members, using the existing frozen `MINIMUM_CONVERSIONS`/
+`HIGH_CONFIDENCE_CONVERSIONS` constants. This is descriptive conversion-volume evidence
+only — it is independent of `PerformanceBand`/`TrendDirection`, does not read
+`conversions_7d`, `tracking_status`, or any other field, and never assigns
+`Confidence.NOT_ASSESSABLE` (that trigger remains deferred to a later stage).
+
+Tracking-status interpretation, pacing interpretation, `NOT_ASSESSABLE` assignment, and
 any final `RecommendationAction`/`ReasonCode` assignment or combined campaign judgement
-are all explicitly deferred to later stages. Depends only on `CampaignMetrics` —
-never `CampaignInput`, `CampaignPacing`, `ReviewSetup`, or any KPI-type-specific/
+are all explicitly deferred to later stages. Each classification here depends only on its
+own narrow input — never `CampaignPacing`, `ReviewSetup`, or any KPI-type-specific/
 platform-specific branching (Stage 3 has already direction-normalised CPA and ROAS).
 """
 
@@ -26,8 +34,16 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 
-from src.constants import INCREASE_THRESHOLD, MAINTAIN_THRESHOLD, TREND_THRESHOLD
+from src.constants import (
+    Confidence,
+    HIGH_CONFIDENCE_CONVERSIONS,
+    INCREASE_THRESHOLD,
+    MAINTAIN_THRESHOLD,
+    MINIMUM_CONVERSIONS,
+    TREND_THRESHOLD,
+)
 from src.metrics import CampaignMetrics
+from src.models import CampaignInput
 
 
 class PerformanceBand(str, Enum):
@@ -127,4 +143,48 @@ def classify_campaign_trend(
     return CampaignTrendClass(
         campaign_id=metrics.campaign_id,
         trend_direction=trend_direction,
+    )
+
+
+class CampaignConfidenceClass(BaseModel):
+    """Neutral, descriptive conversion-volume confidence classification for one
+    campaign.
+
+    Independent of `PerformanceBand`/`CampaignPerformanceClass` and
+    `TrendDirection`/`CampaignTrendClass`. Not a tracking interpretation, assessability
+    decision, pacing interpretation, constraint, eligibility decision, score,
+    recommendation, reason code, or allocation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    confidence: Confidence
+
+
+def classify_campaign_confidence(
+    campaign: CampaignInput,
+) -> CampaignConfidenceClass:
+    """Classify one campaign's `conversions_28d` into a neutral conversion-volume
+    confidence band.
+
+    Uses `conversions_28d` only — the fuller, more stable evidence window, which also
+    avoids double-counting the nested 7-day period. Reaching either threshold enters the
+    higher confidence band: `>= HIGH_CONFIDENCE_CONVERSIONS` is `HIGH`,
+    `>= MINIMUM_CONVERSIONS` is `MEDIUM`, otherwise `LOW`. Direct integer comparison
+    only — no arithmetic, weighting, quantisation, or Decimal/float conversion.
+    `Confidence.NOT_ASSESSABLE` is never assigned here; its trigger remains deferred.
+    """
+    conversions_28d = campaign.conversions_28d
+
+    if conversions_28d >= HIGH_CONFIDENCE_CONVERSIONS:
+        confidence = Confidence.HIGH
+    elif conversions_28d >= MINIMUM_CONVERSIONS:
+        confidence = Confidence.MEDIUM
+    else:
+        confidence = Confidence.LOW
+
+    return CampaignConfidenceClass(
+        campaign_id=campaign.campaign_id,
+        confidence=confidence,
     )

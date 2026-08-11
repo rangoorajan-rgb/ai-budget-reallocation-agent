@@ -1,10 +1,11 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 6 (adds neutral deterministic trend classification to the
-> Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage 2
-> validation reporting, Stage 3 metric facts, Stage 4 pacing facts, and Stage 5
-> performance classification). Conversion-volume confidence, tracking interpretation, and
-> other derived/decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 7 (adds neutral deterministic conversion-volume confidence
+> classification to the Stage 1 enumerations, numerical constants, core input models,
+> CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
+> Stage 5 performance classification, and Stage 6 trend classification). Tracking
+> interpretation and other derived/decision fields, plus export fields, are pending
+> later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -207,10 +208,45 @@ anywhere in Stage 6.
 `CampaignPerformanceClass` — the two are never combined, and neither is required to
 construct the other.
 
+## Campaign Conversion-Volume Confidence Fields (`src/classification.py`)
+
+Produced by `classify_campaign_confidence(campaign: CampaignInput) ->
+CampaignConfidenceClass`, one result per already-validated `CampaignInput` instance.
+`CampaignConfidenceClass` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is **descriptive conversion-volume evidence only** — it is
+independent of `PerformanceBand`/`CampaignPerformanceClass` and
+`TrendDirection`/`CampaignTrendClass`, and is not a tracking interpretation,
+assessability decision, pacing interpretation, constraint, eligibility decision, score,
+recommendation, reason code, or allocation. Depends only on
+`CampaignInput.campaign_id`/`conversions_28d` — never `conversions_7d`,
+`CampaignMetrics`, `CampaignPacing`, `ReviewSetup`, `tracking_status`, `platform`, or
+`kpi_type`.
+
+### `Confidence` (existing enum, reused — not redefined)
+
+| Member | Value | Meaning as conversion-volume evidence | Assigned by Stage 7? |
+|--------|-------|----------------------------------------|------------------------|
+| `HIGH` | `"HIGH"` | `conversions_28d >= HIGH_CONFIDENCE_CONVERSIONS` (`30`) — ample trailing-28-day conversion evidence. | Yes |
+| `MEDIUM` | `"MEDIUM"` | `MINIMUM_CONVERSIONS <= conversions_28d < HIGH_CONFIDENCE_CONVERSIONS` (`10`–`29`) — moderate evidence. | Yes |
+| `LOW` | `"LOW"` | `conversions_28d < MINIMUM_CONVERSIONS` (`0`–`9`), including zero. | Yes |
+| `NOT_ASSESSABLE` | `"NOT_ASSESSABLE"` | Reserved for a later stage. | **No — Stage 7 never assigns this member.** This is a deliberate scope boundary, not a claim that the value is unreachable in general; its trigger (potentially involving tracking reliability or another combined judgement) remains pending. |
+
+### `CampaignConfidenceClass`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `confidence` | enum (`Confidence`) | The classified conversion-volume band, per the table above. |
+
+`CampaignConfidenceClass` is a separate, independent result model from
+`CampaignPerformanceClass` and `CampaignTrendClass` — none of the three is required to
+construct another, and none is modified by this addition. `Confidence` is descriptive
+evidence, not `RecommendationAction` or `ReasonCode`.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (conversion-volume confidence, tracking interpretation,
-> constraints, scoring, allocation).
+> Pending a later Sprint 1 stage (tracking interpretation, constraints, scoring,
+> allocation).
 
 ## Export Fields
 
