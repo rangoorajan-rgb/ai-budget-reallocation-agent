@@ -373,3 +373,62 @@ All notable changes to this project are documented in this file.
   ownership, constraints, protected/test handling, and eligibility explicitly
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (29 concrete Stage
   9 scenarios).
+
+- Sprint 1, Development Stage 10: populated the previously-placeholder `src/constraints.py`
+  with `CampaignStaticBudgetRoom` (frozen, immutable, `extra="forbid"`: `campaign_id`,
+  `room_to_static_maximum`, `room_to_static_minimum` only) and
+  `calculate_campaign_static_budget_room(campaign: CampaignInput) ->
+  CampaignStaticBudgetRoom`. Calculates static-bound distance facts only —
+  `room_to_static_maximum = maximum_budget - current_budget`,
+  `room_to_static_minimum = current_budget - minimum_budget` — both structurally
+  guaranteed non-negative by `CampaignInput`'s already-validated `minimum_budget <=
+  current_budget <= maximum_budget` invariant, with no new validation, clamping, or
+  default substitution; `Decimal("0.00")` is a valid outcome exactly at either bound,
+  never replaced with `None` or a categorical status. Reads only `campaign_id`/
+  `current_budget`/`minimum_budget`/`maximum_budget` — `campaign_max_change_percentage`,
+  `ReviewSetup.default_max_change_percentage`, `DEFAULT_MAX_CHANGE_PERCENTAGE`,
+  `is_protected`, `is_test_campaign`, and `test_budget_floor` are all deliberately never
+  read; no `ReviewSetup` or Stage 3–9 result is used and no Stage 3–9 function is
+  called. The approved "static" terminology
+  (`CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`/
+  `room_to_static_maximum`/`room_to_static_minimum`) deliberately distinguishes these
+  facts from a future *effective* constraint that must still consider percentage
+  limits, protection, and test-budget-floor rules — none of which is calculated or
+  authorised here. Calculation runs inside an explicit `decimal.localcontext()`
+  (`prec=28`, `ROUND_HALF_UP`), matching the fixed-context pattern already used by
+  Stages 3–4; no `float`, no re-quantisation, no rounding of the output. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 10: populated the previously-placeholder
+  `tests/test_constraints.py` (25 tests) covering result-model shape/immutability/
+  `campaign_id` copying, incompatible-input rejection (`AttributeError`, no silent
+  coercion), exact calculations for a campaign strictly between bounds, exactly at
+  `minimum_budget`, exactly at `maximum_budget`, `minimum_budget == current_budget ==
+  maximum_budget` (including the all-zero case), large valid Decimal currency values,
+  and exact two-decimal non-round results, independence (AST-verified restriction to
+  reading only the four authorised `CampaignInput` fields, AST-verified no call to any
+  Stage 3–9 function, AST-verified `src/constraints.py` imports none of Stage 3–9's
+  models/enums, platform/KPI independence, `is_protected` independence,
+  `is_test_campaign`/`test_budget_floor` independence, `campaign_max_change_percentage`
+  independence, unaffected by a mutated global `Decimal` context), integration with
+  `validate_campaign_csv` over `data/sample_campaigns.csv` (order preserved; `G001` =
+  `3000.00`/`2500.00`, `M001` = `2500.00`/`2000.00`, `G002` (protected) =
+  `3000.00`/`4000.00` unaffected by `is_protected=True`, `G003` (test campaign,
+  `test_budget_floor=300.00`) = `800.00`/`1100.00`, with an explicit note that the
+  `1100.00` figure is a static-bound fact only, not an approved decrease amount).
+  `tests/test_models.py` (Stage 1, 92 tests), `tests/test_validation.py` (Stage 2, 44
+  tests), `tests/test_metrics.py` (Stage 3, 28 tests), `tests/test_pacing.py` (Stage 4,
+  30 tests), `tests/test_classification.py` (Stage 5, 23 tests),
+  `tests/test_trend_classification.py` (Stage 6, 29 tests),
+  `tests/test_confidence_classification.py` (Stage 7, 32 tests),
+  `tests/test_tracking_assessment.py` (Stage 8, 30 tests), and
+  `tests/test_pacing_interpretation.py` (Stage 9, 33 tests) re-run and confirmed
+  passing — no behavioural regression, and no existing test file required modification.
+  Full suite: 366 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23
+  Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 25 Stage 10).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignStaticBudgetRoom` fields; explicit
+  confirmation these are static-bound distances, not final permissible movements),
+  `docs/DECISION_RULES.md` (frozen Stage 10 static budget-bound calculation rule;
+  effective constraints, protected/test handling, and eligibility explicitly
+  re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (22 concrete
+  Stage 10 scenarios).

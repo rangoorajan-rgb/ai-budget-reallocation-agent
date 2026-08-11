@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, and 9 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, and 10 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -282,22 +282,71 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 9 (and not yet started)
+## Development Stage 10 — Deterministic Static Budget-Bound Calculation (complete)
 
-- Combined campaign assessment (performance + trend + confidence + tracking +
-  pacing status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
-- Constraints, protected/test campaign handling, eligibility, scoring, final
-  `RecommendationAction` assignment, `ReasonCode` assignment, allocation, conservation.
+- [x] `src/constraints.py` (populated for the first time — placeholder replaced) —
+      `CampaignStaticBudgetRoom` (frozen, `extra="forbid"`: `campaign_id`,
+      `room_to_static_maximum`, `room_to_static_minimum`) and
+      `calculate_campaign_static_budget_room(campaign: CampaignInput) ->
+      CampaignStaticBudgetRoom`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`
+      unchanged.
+- [x] Exact formulas: `room_to_static_maximum = maximum_budget - current_budget`;
+      `room_to_static_minimum = current_budget - minimum_budget`. Both structurally
+      guaranteed non-negative by `CampaignInput`'s already-validated `minimum_budget <=
+      current_budget <= maximum_budget` invariant. No new validation, clamping, or
+      default substitution. `Decimal("0.00")` is a valid outcome exactly at either
+      bound, never replaced with `None` or a categorical status.
+- [x] Static-bound terminology (`CampaignStaticBudgetRoom`,
+      `calculate_campaign_static_budget_room`, `room_to_static_maximum`,
+      `room_to_static_minimum`) deliberately distinguishes these facts from a future
+      *effective* constraint. `campaign_max_change_percentage`,
+      `ReviewSetup.default_max_change_percentage`, `DEFAULT_MAX_CHANGE_PERCENTAGE`,
+      `is_protected`, `is_test_campaign`, and `test_budget_floor` are all never read —
+      the percentage-limit mechanism, protection rules, and test-budget-floor
+      enforcement all remain pending a later effective-constraint stage. Reporting
+      `room_to_static_minimum` against `minimum_budget` for a test campaign (e.g. G003:
+      `room_to_static_minimum = 1100.00` against `minimum_budget=100.00`, while
+      `test_budget_floor=300.00`) is a static-bound fact only and does not authorise a
+      reduction below the test floor.
+- [x] Calculation runs inside an explicit `decimal.localcontext()` (`prec=28`,
+      `ROUND_HALF_UP`), isolated from any mutated global `Decimal` context; no `float`,
+      no re-quantisation, no rounding of the output (both results are already exact to
+      two decimal places).
+- [x] Independent of Stages 3–9 — no `ReviewSetup`, `CampaignMetrics`, `CampaignPacing`,
+      `PerformanceBand`, `TrendDirection`, `Confidence`, `TrackingStatus`,
+      `CampaignTrackingAssessment`, or `PacingStatus` import; no Stage 3–9 function
+      called.
+- [x] `tests/test_constraints.py` (populated for the first time — placeholder replaced)
+      — 25 tests, all passing. `tests/test_models.py` (Stage 1), `tests/test_validation.py`
+      (Stage 2), `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+      regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 10 (and not yet started)
+
+- Percentage-based effective constraints, protected-campaign rules, test-budget-floor
+  enforcement, the effective (final permissible) budget movement.
+- Combined campaign assessment (performance + trend + confidence + tracking + pacing
+  status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
+- Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
+  assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 10 (not started, scope not yet frozen): requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order. The live
-candidates are a combined campaign assessment stage (which would need to decide
-`Confidence.NOT_ASSESSABLE` ownership and a precedence rule while preserving Stage 7's,
-Stage 8's, and Stage 9's independent results) and constraints/protected-test
-handling/eligibility (each currently blocked on undecided interaction rules — no
-formula anywhere states how `is_protected`, `is_test_campaign`, `test_budget_floor`, or
-`campaign_max_change_percentage` constrain a budget change).
+Stage 11 (not started, scope not yet frozen): requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order. Candidates
+include an effective-constraint stage (which would need to decide the percentage-limit
+application mechanism and its precedence relative to Stage 10's static bounds, plus
+protected/test-campaign rules — none of which is frozen anywhere), and a combined
+campaign assessment stage (which would need to decide `Confidence.NOT_ASSESSABLE`
+ownership and a precedence rule while preserving Stage 7's, Stage 8's, and Stage 9's
+independent results, though the prior inspection noted this may be avoidable entirely in
+favour of a later stage simply consuming the independent facts directly).

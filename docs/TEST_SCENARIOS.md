@@ -1,7 +1,8 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 9 populates the Pacing Interpretation Scenarios section
-> below, backed by `tests/test_pacing_interpretation.py` (33 tests), in addition to the
+> Sprint 1, Development Stage 10 populates the Static Budget-Bound Scenarios section
+> below, backed by `tests/test_constraints.py` (25 tests), in addition to the Stage 9
+> Pacing Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
 > Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
 > tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
@@ -344,6 +345,40 @@ none states whether overspending or underspending is desirable.
 | 27 | Upstream `pacing_ratio = None` from zero elapsed time (`review_date` before `period_start`) | `NOT_AVAILABLE`. |
 | 28 | Upstream `pacing_ratio = None` from zero current budget (`current_budget = Decimal("0.00")`) | `NOT_AVAILABLE`. |
 | 29 | `classify_campaign_performance`, `classify_campaign_trend`, `classify_campaign_confidence`, `assess_campaign_tracking` | Unchanged behaviour after the Stage 9 additions — regression-checked. |
+
+## Static Budget-Bound Scenarios
+
+All scenarios below use `calculate_campaign_static_budget_room(campaign: CampaignInput)
+-> CampaignStaticBudgetRoom` from `src/constraints.py`. Every result is a **static
+budget-bound distance fact only** — none of these scenarios produces an effective/final
+permissible budget movement, a percentage-based limit, a protection or
+test-budget-floor determination, an eligibility result, a blocking flag, a score, a
+recommendation, a reason code, or an allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignStaticBudgetRoom` field set | Exactly `campaign_id`, `room_to_static_maximum`, `room_to_static_minimum`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignStaticBudgetRoom` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 5 | `room_to_static_maximum`/`room_to_static_minimum` | Always `Decimal`, never `float`. |
+| 6 | `calculate_campaign_static_budget_room(None)` / `calculate_campaign_static_budget_room({"current_budget": ...})` (not `CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 7 | `current_budget` strictly between `minimum_budget` and `maximum_budget` (e.g. `current=1000.00`, `min=100.00`, `max=2000.00`) | `room_to_static_maximum = 1000.00`, `room_to_static_minimum = 900.00`. |
+| 8 | `current_budget == minimum_budget` (e.g. `current=min=100.00`, `max=2000.00`) | `room_to_static_minimum = Decimal("0.00")`; `room_to_static_maximum = 1900.00`. |
+| 9 | `current_budget == maximum_budget` (e.g. `current=max=2000.00`, `min=100.00`) | `room_to_static_maximum = Decimal("0.00")`; `room_to_static_minimum = 1900.00`. |
+| 10 | `minimum_budget == current_budget == maximum_budget` | Both fields `Decimal("0.00")`. |
+| 11 | `minimum_budget == current_budget == maximum_budget == Decimal("0.00")` | Both fields `Decimal("0.00")`. |
+| 12 | Large valid `Decimal` currency values (e.g. `current=500000000.00`, `min=0.00`, `max=1000000000.00`) | `room_to_static_maximum = 500000000.00`, `room_to_static_minimum = 500000000.00`. |
+| 13 | Non-round currency values (e.g. `current=1234.56`, `min=100.01`, `max=2345.67`) | Exact two-decimal results: `room_to_static_maximum = 1111.11`, `room_to_static_minimum = 1134.55`. |
+| 14 | `calculate_campaign_static_budget_room` source | Reads only `campaign.campaign_id`/`campaign.current_budget`/`campaign.minimum_budget`/`campaign.maximum_budget` (AST-verified); calls none of `calculate_campaign_metrics`/`calculate_campaign_pacing`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`assess_campaign_tracking`/`classify_campaign_pacing` (AST-verified); `src/constraints.py` imports none of `ReviewSetup`/`CampaignMetrics`/`CampaignPacing`/`PerformanceBand`/`TrendDirection`/`Confidence`/`TrackingStatus`/`CampaignTrackingAssessment`/`PacingStatus`/`RecommendationAction`/`ReasonCode`/`DEFAULT_MAX_CHANGE_PERCENTAGE` (AST-verified). |
+| 15 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function | Result unaffected — calculation runs inside its own fixed `localcontext()` (`prec=28`, `ROUND_HALF_UP`). |
+| 16 | Google Ads vs. Meta Ads, otherwise identical budgets | Same `room_to_static_maximum`/`room_to_static_minimum`. |
+| 17 | CPA vs. ROAS, otherwise identical budgets | Same `room_to_static_maximum`/`room_to_static_minimum`. |
+| 18 | `is_protected=False` vs. `is_protected=True`, otherwise identical budgets | Same `room_to_static_maximum`/`room_to_static_minimum` — protection never read. |
+| 19 | Non-test campaign vs. test campaign with a `test_budget_floor`, otherwise identical `current_budget`/`minimum_budget`/`maximum_budget` | Same `room_to_static_maximum`/`room_to_static_minimum` — `is_test_campaign`/`test_budget_floor` never read. |
+| 20 | `campaign_max_change_percentage = None` vs. a supplied override, otherwise identical budgets | Same `room_to_static_maximum`/`room_to_static_minimum` — never read. |
+| 21 | `CampaignStaticBudgetRoom.model_fields` / result attributes | Contains no `effective_minimum_budget`, `effective_maximum_budget`, `room_to_increase`, `room_to_decrease`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `campaign_max_change_percentage`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, or `allocation` field. |
+| 22 | `data/sample_campaigns.csv` validated, then each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`: `room_to_static_maximum=3000.00`, `room_to_static_minimum=2500.00`. `M001`: `2500.00`/`2000.00`. `G002` (protected): `3000.00`/`4000.00` — unaffected by `is_protected=True`. `G003` (test campaign, `test_budget_floor=300.00`): `800.00`/`1100.00` — the `1100.00` figure is a static-bound fact only, not an approved decrease amount; it does not authorise reducing `G003` below its `300.00` test floor. |
 
 ## Allocation Scenarios
 

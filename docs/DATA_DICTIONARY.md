@@ -1,13 +1,13 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 9 (adds a neutral deterministic pacing-interpretation
-> classification to the Stage 1 enumerations, numerical constants, core input models, CSV
-> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage
-> 5 performance classification, Stage 6 trend classification, Stage 7 conversion-volume
-> confidence classification, and Stage 8 tracking-based assessability). Combined
-> assessment, `Confidence.NOT_ASSESSABLE` ownership, constraints, protected/test
-> handling, eligibility, and other derived/decision fields, plus export fields, are
-> pending later stages.
+> Sprint 1, Development Stage 10 (adds neutral deterministic static budget-bound facts
+> to the Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage
+> 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance
+> classification, Stage 6 trend classification, Stage 7 conversion-volume confidence
+> classification, Stage 8 tracking-based assessability, and Stage 9 pacing
+> interpretation). Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
+> percentage-based effective constraints, protected/test handling, eligibility, and
+> other derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -328,11 +328,46 @@ required to construct another, and none is modified by this addition. Whether/ho
 pacing status combines with performance, trend, confidence, or tracking assessability
 into any final judgement remains pending a later combined-assessment stage.
 
+## Campaign Static Budget Room Fields (`src/constraints.py`)
+
+Produced by `calculate_campaign_static_budget_room(campaign: CampaignInput) ->
+CampaignStaticBudgetRoom`, one result per already-validated `CampaignInput` instance.
+`CampaignStaticBudgetRoom` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). These are **static budget-bound distance facts only** — they are
+**not** the campaign's final permissible budget movement, an effective minimum/maximum
+budget, a percentage-based limit, a protection or test-budget-floor determination, an
+eligibility result, a blocking flag, a score, a recommendation, a reason code, or an
+allocation. Depends only on `CampaignInput.campaign_id`/`current_budget`/
+`minimum_budget`/`maximum_budget` — never `campaign_max_change_percentage`,
+`is_protected`, `is_test_campaign`, `test_budget_floor`, `ReviewSetup`, or any Stage 3–9
+result.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `room_to_static_maximum` | Decimal | `maximum_budget - current_budget`. The static distance from the campaign's current budget to its validated `maximum_budget`. Guaranteed `>= 0` by `CampaignInput`'s validated `current_budget <= maximum_budget` invariant; `Decimal("0.00")` exactly when `current_budget == maximum_budget` — a valid calculated fact, never replaced with `None` or a categorical status. |
+| `room_to_static_minimum` | Decimal | `current_budget - minimum_budget`. The static distance from the campaign's current budget to its validated `minimum_budget`. Guaranteed `>= 0` by `CampaignInput`'s validated `minimum_budget <= current_budget` invariant; `Decimal("0.00")` exactly when `current_budget == minimum_budget`. |
+
+**These are static-bound distances, not final permissible movements.**
+`campaign_max_change_percentage`, `ReviewSetup.default_max_change_percentage`, and
+`DEFAULT_MAX_CHANGE_PERCENTAGE` are never read or applied — the percentage-limit
+mechanism and its precedence relative to these static bounds remain pending a later
+effective-constraint stage. `is_protected` and `is_test_campaign`/`test_budget_floor`
+are likewise never read: reporting `room_to_static_minimum` against `minimum_budget`
+does **not** authorise reducing a test campaign below its `test_budget_floor`, and
+reporting `room_to_static_maximum` does **not** authorise increasing a protected
+campaign — both remain pending a later effective-constraint stage that must consider
+protection and test-floor rules before any budget movement is proposed.
+`CampaignStaticBudgetRoom` is a separate, independent result model from
+`CampaignPerformanceClass`, `CampaignTrendClass`, `CampaignConfidenceClass`,
+`CampaignTrackingAssessment`, and `CampaignPacingClass` — none of the six is required to
+construct another, and none is modified by this addition.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, constraints, protected/test handling,
-> eligibility, scoring, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, percentage-based effective constraints,
+> protected/test handling, eligibility, scoring, allocation).
 
 ## Export Fields
 
