@@ -1038,3 +1038,68 @@ required modification for Stage 13 — no approved AST-narrowing exception was n
 since Stage 13 introduces no new import beyond what `src/constraints.py` already had
 available.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 14 is a neutral, decrease-specific protection constraint only
+
+**Decision:** Sprint 1, Development Stage 14 adds a narrow, deterministic protection
+constraint to `src/constraints.py`, as an *addition* alongside Stage 10's
+`CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage 11's
+`CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+Stage 12's `CampaignRawPercentageMovementCap`/
+`calculate_campaign_raw_percentage_movement_cap`, and Stage 13's
+`CampaignTestFloorRoom`/`calculate_campaign_test_floor_room` — not a modification of
+any of them. For one already-validated `CampaignInput`, it states
+`decrease_blocked = campaign.is_protected`. This is explicitly **not** an eligibility
+decision, a recommendation, a monetary movement amount, permissible decrease, an
+effective directional limit, or an increase-side constraint, and is **never** combined
+with Stages 10–13.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 14: exact model, function, two authorised fields, and Boolean representation
+
+**Decision:** `CampaignProtectionConstraint` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id: str`, `decrease_blocked: bool`) is defined in
+`src/constraints.py`, alongside but fully separate from `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`, and
+`CampaignTestFloorRoom`. The sole public function is
+`resolve_campaign_protection_constraint(campaign: CampaignInput) ->
+CampaignProtectionConstraint`; it reads only `campaign.campaign_id` and
+`campaign.is_protected` — never `current_budget`, `minimum_budget`,
+`maximum_budget`, `is_test_campaign`, `test_budget_floor`,
+`campaign_max_change_percentage`, `platform`, `kpi_type`, `ReviewSetup`, or any Stage
+3–9/Stage 10–13 result, and never calls any Stage 10–13 function. Exact mapping:
+`decrease_blocked = campaign.is_protected` (`True → True`, `False → False`). `False`
+is a meaningful result, never converted to `None`; no truthiness-based fallback is
+used.
+**Reason for rejecting a Decimal/`None` room representation:** `is_protected` is
+explicitly defined as meaning the campaign "must never be reduced"
+(`docs/DATA_DICTIONARY.md`). A Boolean preserves that rule directly, without
+prematurely translating it into a monetary "room" amount (`Decimal("0.00")`/`None`,
+as the Stage 14 inspection had tentatively proposed) — the exact numeric
+representation, if any is ever needed, is deferred to whichever later stage actually
+combines protection with Stage 10/12/13's monetary facts, avoiding a premature and
+potentially incorrect translation now.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 14: no Decimal policy, decrease-only scope, and deferred combination
+
+**Decision:** Stage 14 performs no `Decimal` calculation whatsoever — no `Decimal`
+import, no local `decimal` context, no `CURRENCY_QUANTUM`, no `ROUND_HALF_UP`, no
+rounding, no quantisation, and no `float` conversion anywhere in the addition; it is a
+plain boolean selection. `decrease_blocked=False` means only that protection itself
+does not prohibit a decrease — it is **not** permission to reduce the campaign's
+budget, since other constraints (static bounds, the percentage cap, test-floor rules)
+may still apply once resolved. `decrease_blocked=True` means only that protection
+prohibits a decrease — it does **not** determine eligibility, recommendation action,
+allocation, or any other judgement. The frozen `is_protected` meaning is explicitly
+decrease-specific; Stage 14 makes no statement about increases, which remain entirely
+unaddressed rather than assumed permitted or blocked.
+`resolve_campaign_protection_constraint` never reads any Stage 10–13 field and never
+calls any Stage 10–13 function (or vice versa) — the five facts are never combined
+into one result or one call. The effective-floor precedence, the static-room/raw-cap/
+test-floor/protection intersection (now a genuine four-way combination once Stage 14
+exists), and all later constraint/eligibility/scoring/recommendation/allocation logic
+remain deferred to later stages. No existing test file required modification for
+Stage 14 — no approved AST-narrowing exception was needed, since Stage 14 introduces
+no new import beyond what `src/constraints.py` already had available.
+**Status:** Frozen.

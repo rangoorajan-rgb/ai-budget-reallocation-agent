@@ -656,3 +656,68 @@ All notable changes to this project are documented in this file.
   effective-floor precedence, static-bound/raw-cap/test-floor intersection, and
   protected-campaign handling explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (24 concrete Stage 13 scenarios).
+
+- Sprint 1, Development Stage 14: added `CampaignProtectionConstraint` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `decrease_blocked: bool` only) and
+  `resolve_campaign_protection_constraint(campaign: CampaignInput) ->
+  CampaignProtectionConstraint` to `src/constraints.py`, alongside but fully separate
+  from Stage 10's `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`,
+  Stage 11's `CampaignApplicableChangePercentage`/
+  `resolve_campaign_applicable_change_percentage`, Stage 12's
+  `CampaignRawPercentageMovementCap`/`calculate_campaign_raw_percentage_movement_cap`,
+  and Stage 13's `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, all
+  unmodified. States a neutral, decrease-specific protection constraint:
+  `decrease_blocked = campaign.is_protected` — explicitly not an eligibility
+  decision, a recommendation, a monetary movement amount, permissible decrease, an
+  effective directional limit, or an increase-side constraint, and never combined
+  with Stages 10–13. `decrease_blocked=True` means only that protection prohibits a
+  decrease (not eligibility/recommendation/allocation); `decrease_blocked=False`
+  means only that protection itself does not prohibit a decrease (not permission to
+  reduce the budget) — `False` is a meaningful result, never converted to `None`.
+  **Boolean representation approved over a Decimal/`None` monetary "room"** to
+  preserve the frozen "must never be reduced" rule directly, without prematurely
+  translating it into a numeric amount before a later stage actually needs one.
+  Reads only `campaign_id`, `is_protected` — `current_budget`, `minimum_budget`,
+  `maximum_budget`, `is_test_campaign`, `test_budget_floor`,
+  `campaign_max_change_percentage`, `platform`, `kpi_type`, `ReviewSetup`, and every
+  Stage 3–9/Stage 10–13 result are all deliberately never read. No `Decimal` import,
+  local context, rounding, quantisation, or float conversion anywhere — a plain
+  boolean selection. Decrease-specific only; increase-side protection behaviour
+  remains entirely unaddressed rather than assumed either way. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 14: extended `tests/test_constraints.py` with 28 new
+  tests (all 119 existing Stage 10/11/12/13 tests preserved unchanged; 147 tests
+  total) covering result-model shape/immutability/`campaign_id` copying/no-Decimal-
+  field confirmation, incompatible-input rejection (`AttributeError`, no silent
+  coercion), exact mapping (protected → `True`, non-protected → `False`, `False` not
+  converted to `None`, `True` not converted to `Decimal("0.00")`, no truthiness
+  fallback, no monetary calculation), independence (AST-verified restriction to
+  reading only `campaign_id`/`is_protected`, AST-verified no reference to
+  `ReviewSetup`/`review`, AST-verified no call to any Stage 10–13 or Stage 3–9
+  function, a campaign both protected and test returning `decrease_blocked=True`
+  unaffected by `is_test_campaign`/`test_budget_floor`, `current_budget`/
+  `minimum_budget`/`maximum_budget`/platform/KPI/`campaign_max_change_percentage`
+  independence, no combination with Stage 10–13 results), and integration with
+  `validate_campaign_csv` over `data/sample_campaigns.csv` (order preserved;
+  `G001`/`M001`/`G003` (`is_protected=False`) = `False`, `G002` (`is_protected=True`)
+  = `True`; Stages 10, 11, 12, and 13's existing sample results independently
+  re-verified via separate calls, never combined or intersected).
+  `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+  `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this
+  stage. Full suite: 488 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30
+  Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 147
+  Stage 10/11/12/13/14 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignProtectionConstraint` fields; exact
+  Boolean mapping; confirmation `False` is not permission to decrease; confirmation
+  no monetary amount is calculated; confirmation the fact is decrease-specific and
+  says nothing about increases), `docs/DECISION_RULES.md` (frozen Stage 14
+  protection constraint rule; effective-floor precedence, the four-way static-bound/
+  raw-cap/test-floor/protection intersection, increase-side protection behaviour,
+  and eligibility explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (18 concrete Stage 14 scenarios).

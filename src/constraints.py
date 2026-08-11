@@ -69,6 +69,26 @@ inside a fixed local `decimal` context (`prec=28`, `ROUND_HALF_UP`, matching Sta
 established policy) — unlike Stage 12's multiplication, subtracting two already-
 quantised `Currency` values never needs more significant digits than the larger
 operand already has, so no operand-derived precision is required here.
+
+Also implements Sprint 1 — Development Stage 14: for one already-validated
+`CampaignInput`, states one neutral, deterministic protection constraint —
+`decrease_blocked = campaign.is_protected`. This is a **decrease-specific fact only**,
+directly derived from `is_protected`'s frozen meaning ("must never be reduced",
+`docs/DATA_DICTIONARY.md`) — it is not an eligibility decision, a recommendation, a
+monetary movement amount, permissible decrease, an effective directional limit, or an
+increase-side constraint, and it is never combined with Stages 10–13.
+`decrease_blocked=False` means only that protection itself does not prohibit a
+decrease — it does not mean a decrease is permissible.
+`decrease_blocked=True` means only that protection prohibits a decrease — it does not
+determine eligibility, recommendation action, allocation, or any other judgement.
+Stage 14 reads only `campaign_id` and `is_protected` — never `current_budget`,
+`minimum_budget`, `maximum_budget`, `is_test_campaign`, `test_budget_floor`,
+`campaign_max_change_percentage`, `platform`, `kpi_type`, or any Stage 3–9 result, and
+never imports or calls anything from Stages 10–13 or `ReviewSetup`. Stage 14 performs
+no `Decimal` calculation — it is a plain boolean selection, so no `Decimal` import,
+local context, quantisation, or rounding is used. Increase-side protection behaviour
+remains entirely unaddressed, since the one frozen sentence about `is_protected` is
+decrease-specific only.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -264,4 +284,35 @@ def calculate_campaign_test_floor_room(
     return CampaignTestFloorRoom(
         campaign_id=campaign.campaign_id,
         room_to_test_floor=room_to_test_floor,
+    )
+
+
+class CampaignProtectionConstraint(BaseModel):
+    """A neutral, decrease-specific protection constraint for one campaign.
+
+    Not an eligibility decision, a recommendation, a monetary movement amount,
+    permissible decrease, an effective directional limit, an increase-side
+    constraint, or a combination with Stages 10-13.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    decrease_blocked: bool
+
+
+def resolve_campaign_protection_constraint(
+    campaign: CampaignInput,
+) -> CampaignProtectionConstraint:
+    """State one campaign's decrease-specific protection constraint:
+    `decrease_blocked = campaign.is_protected`.
+
+    `decrease_blocked=False` means only that protection itself does not prohibit a
+    decrease — it does not mean a decrease is permissible. `decrease_blocked=True`
+    means only that protection prohibits a decrease — it does not determine
+    eligibility, recommendation action, allocation, or any other judgement.
+    """
+    return CampaignProtectionConstraint(
+        campaign_id=campaign.campaign_id,
+        decrease_blocked=campaign.is_protected,
     )

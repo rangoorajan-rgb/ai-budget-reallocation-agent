@@ -1,12 +1,13 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 13 populates the Test-Floor Room Scenarios section
-> below, backed by the Stage 13 additions to `tests/test_constraints.py` (which now
-> holds 119 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13), in
-> addition to the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the
-> Applicable Change-Percentage Resolution Scenarios (Stage 11, below), the Static
-> Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation
-> Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking
+> Sprint 1, Development Stage 14 populates the Protection Constraint Scenarios
+> section below, backed by the Stage 14 additions to `tests/test_constraints.py`
+> (which now holds 147 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35
+> Stage 13 + 28 Stage 14), in addition to the Test-Floor Room Scenarios (Stage 13,
+> below), the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the Applicable
+> Change-Percentage Resolution Scenarios (Stage 11, below), the Static Budget-Bound
+> Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation Scenarios
+> (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking
 > Assessability Scenarios (`tests/test_tracking_assessment.py`, 30 tests), the Stage 7
 > Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
@@ -494,6 +495,36 @@ effective directional constraint, or any combination with `minimum_budget`, Stag
 | 22 | `calculate_campaign_static_budget_room` and `calculate_campaign_test_floor_room` called on the same campaign | Both succeed independently; the test-floor result contains no `room_to_static_maximum`/`room_to_static_minimum`/`applicable_max_change_percentage`/`raw_percentage_movement_cap` field. |
 | 23 | `CampaignTestFloorRoom.model_fields` / result attributes | Contains no `effective_floor`, `minimum_budget`, `room_to_static_maximum`, `room_to_static_minimum`, `raw_percentage_movement_cap`, `is_protected`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
 | 24 | `data/sample_campaigns.csv` validated, each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`/`M001`/`G002` (all `is_test_campaign=False`) → `room_to_test_floor=None`. `G003` (`is_test_campaign=True`, `test_budget_floor=300.00`, `current_budget=1200.00`) → `room_to_test_floor=Decimal("900.00")`. Stages 10, 11, and 12's existing sample results for all four independently re-verified via separate calls in the same test, never combined or intersected with Stage 13's result. `Decimal("900.00")` for G003 is never described as a permissible decrease. |
+
+## Protection Constraint Scenarios
+
+All scenarios below use `resolve_campaign_protection_constraint(campaign:
+CampaignInput) -> CampaignProtectionConstraint` from `src/constraints.py`. Every
+result is a **neutral, decrease-specific fact only** — none of these scenarios
+produces eligibility, a recommendation, a monetary movement amount, permissible
+decrease, an effective directional limit, an increase-side constraint, or a
+combination with Stages 10–13.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignProtectionConstraint` field set | Exactly `campaign_id`, `decrease_blocked`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignProtectionConstraint` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 5 | Protected campaign (`is_protected=True`) | `decrease_blocked=True`. |
+| 6 | Non-protected campaign (`is_protected=False`) | `decrease_blocked=False` — not converted to `None`; not permission to decrease. |
+| 7 | `resolve_campaign_protection_constraint(None)` / dict input (not `CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | Campaign both protected and test (`is_protected=True`, `is_test_campaign=True`, `test_budget_floor` set) | `decrease_blocked=True` — unaffected by `is_test_campaign`/`test_budget_floor`. |
+| 9 | `resolve_campaign_protection_constraint` source | Reads only `campaign.campaign_id`/`campaign.is_protected` (AST-verified); never references `ReviewSetup` or a `review` name (AST-verified); calls none of Stage 10–13's or Stage 3–9's functions (AST-verified); contains no `Decimal`, `quantize`, `float(`, or binary arithmetic (source/AST-verified); no `BoolOp`-based truthiness fallback (AST-verified). |
+| 10 | `current_budget` varied, otherwise identical | Same `decrease_blocked` — never read. |
+| 11 | `minimum_budget` varied, otherwise identical | Same `decrease_blocked` — never read. |
+| 12 | `maximum_budget` varied, otherwise identical | Same `decrease_blocked` — never read. |
+| 13 | Google Ads vs. Meta Ads, otherwise identical | Same `decrease_blocked`. |
+| 14 | CPA vs. ROAS, otherwise identical | Same `decrease_blocked`. |
+| 15 | `campaign_max_change_percentage` varied, otherwise identical | Same `decrease_blocked` — never read. |
+| 16 | `calculate_campaign_static_budget_room` and `resolve_campaign_protection_constraint` called on the same campaign | Both succeed independently; the protection result contains no `room_to_static_maximum`/`room_to_static_minimum`/`applicable_max_change_percentage`/`raw_percentage_movement_cap`/`room_to_test_floor` field. |
+| 17 | `CampaignProtectionConstraint.model_fields` / result attributes | Contains no `Decimal`-typed field, no `room_to_protection_limit`, `effective_floor`, `permissible_decrease`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
+| 18 | `data/sample_campaigns.csv` validated, each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`/`M001`/`G003` (`is_protected=False`) → `decrease_blocked=False`. `G002` (`is_protected=True`) → `decrease_blocked=True`. Stages 10, 11, 12, and 13's existing sample results for all four independently re-verified via separate calls in the same test, never combined or intersected with Stage 14's result. `decrease_blocked=False` is never described as permission to reduce a campaign; `decrease_blocked=True` is never described as eligibility, a recommendation, or final movement. |
 
 ## Allocation Scenarios
 

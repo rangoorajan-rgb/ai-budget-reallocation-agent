@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and 13 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -479,13 +479,53 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 13 (and not yet started)
+## Development Stage 14 — Deterministic Protection Constraint (complete)
+
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room`, Stage 11's
+      `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+      Stage 12's `CampaignRawPercentageMovementCap`/
+      `calculate_campaign_raw_percentage_movement_cap`, and Stage 13's
+      `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room` unmodified) —
+      `CampaignProtectionConstraint` (frozen, `extra="forbid"`: `campaign_id`,
+      `decrease_blocked: bool`) and `resolve_campaign_protection_constraint(campaign:
+      CampaignInput) -> CampaignProtectionConstraint`. `src/constants.py`,
+      `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`,
+      `src/classification.py` unchanged.
+- [x] Exact mapping: `decrease_blocked = campaign.is_protected` — `True` means only
+      that protection prohibits a decrease (not eligibility, a recommendation, or an
+      allocation decision); `False` means only that protection itself does not
+      prohibit a decrease (not permission to reduce the campaign's budget). `False`
+      is a meaningful result, never converted to `None`. Boolean representation
+      approved specifically to avoid prematurely translating the frozen "must never
+      be reduced" rule into a monetary room amount.
+- [x] Reads only `campaign_id`, `is_protected` — never `current_budget`,
+      `minimum_budget`, `maximum_budget`, `is_test_campaign`, `test_budget_floor`,
+      `campaign_max_change_percentage`, `platform`, `kpi_type`, `ReviewSetup`, or any
+      Stage 3–9/Stage 10–13 result. No `Decimal` import, no local context, no
+      rounding, no quantisation, no float conversion — a plain boolean selection.
+      Decrease-specific only; increase-side protection behaviour remains entirely
+      unaddressed.
+- [x] `tests/test_constraints.py` extended (all 119 existing Stage 10/11/12/13 tests
+      preserved unchanged) with 28 new Stage 14 tests — 147 tests total, all passing.
+      `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+      `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 14 (and not yet started)
 
 - Effective-floor precedence (`minimum_budget` vs. `test_budget_floor` vs.
   `max(minimum_budget, test_budget_floor)` vs. another formulation — still undecided).
-- Static-bound/raw-cap intersection, separate effective increase/decrease limits, the
-  effective (final permissible) budget movement.
-- Protected-campaign handling (mechanism still undecided).
+- Static-bound/raw-cap/test-floor/protection intersection, separate effective
+  increase/decrease limits, the effective (final permissible) budget movement.
+- Increase-side protection behaviour (unaddressed by the one frozen `is_protected`
+  sentence, which is decrease-specific only).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
@@ -495,12 +535,13 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 14 (not started, scope not yet frozen): requires its own dependency and
+Stage 15 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. Candidates
-include protected-campaign handling (the Data Dictionary states `is_protected` means
-"must never be reduced," but the implementation mechanism — gate vs. effective value,
-interaction with decreases only vs. broader effects — remains undecided), and the
-static-room/raw-cap/test-floor intersection (now a genuine three-way combination,
-since Stage 13 supplies the third decrease-side quantity — no combination formula is
-frozen anywhere). A combined campaign assessment stage remains a live but not clearly
-necessary candidate, as noted in the Stage 11 inspection.
+include the effective-floor precedence (`minimum_budget` vs. `test_budget_floor` vs.
+their combination — still no frozen formula), the raw increase intersection (Stage
+10's `room_to_static_maximum` + Stage 12's `raw_percentage_movement_cap` — the two
+inputs are complete, but no combination formula is frozen), and the raw decrease
+intersection (now a four-way combination once Stage 10, 12, 13, and 14 are all
+available — no combination formula is frozen for this either). A combined campaign
+assessment stage remains a live but not clearly necessary candidate, as noted in the
+Stage 11 inspection.

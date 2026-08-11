@@ -1,16 +1,17 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 13 (adds a neutral, informational test-floor distance
-> calculation to the Stage 1 enumerations, numerical constants, core input models, CSV
+> Sprint 1, Development Stage 14 (adds a neutral, decrease-specific protection
+> constraint to the Stage 1 enumerations, numerical constants, core input models, CSV
 > schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
 > Stage 5 performance classification, Stage 6 trend classification, Stage 7
 > conversion-volume confidence classification, Stage 8 tracking-based assessability,
 > Stage 9 pacing interpretation, Stage 10 static budget-bound facts, Stage 11
-> applicable-change-percentage resolution, and Stage 12 raw percentage-based monetary
-> movement cap). Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
-> effective-floor precedence, static-bound/raw-cap intersection, effective constraints,
-> protected-campaign handling, eligibility, and other derived/decision fields, plus
-> export fields, are pending later stages.
+> applicable-change-percentage resolution, Stage 12 raw percentage-based monetary
+> movement cap, and Stage 13 test-floor distance). Combined assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, effective-floor precedence, static-bound/
+> raw-cap/test-floor/protection intersection, effective constraints, increase-side
+> protection behaviour, eligibility, and other derived/decision fields, plus export
+> fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -492,12 +493,50 @@ is `minimum_budget`, `test_budget_floor`, `max(minimum_budget, test_budget_floor
 another formulation remains an explicitly undecided later-stage question — this
 approval resolves only the raw distance fact, not that precedence.
 
+## Campaign Protection Constraint Fields (`src/constraints.py`)
+
+Produced by `resolve_campaign_protection_constraint(campaign: CampaignInput) ->
+CampaignProtectionConstraint`, one result per already-validated `CampaignInput`.
+`CampaignProtectionConstraint` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is a **neutral, decrease-specific fact only** — it is
+**not** an eligibility decision, a recommendation, a monetary movement amount,
+permissible decrease, an effective directional limit, or an increase-side constraint,
+and it is **never** combined with Stages 10–13. Depends only on
+`CampaignInput.campaign_id`/`is_protected` — never `current_budget`,
+`minimum_budget`, `maximum_budget`, `is_test_campaign`, `test_budget_floor`,
+`campaign_max_change_percentage`, `platform`, `kpi_type`, `ReviewSetup`, or any Stage
+3–9/Stage 10–13 result.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `decrease_blocked` | boolean | `campaign.is_protected`, unchanged. `True` means only that protection prohibits a decrease — it does not determine eligibility, recommendation action, allocation, or any other judgement. `False` means only that protection itself does not prohibit a decrease — it is **not** permission to reduce the campaign's budget; other constraints may still apply. |
+
+**No monetary amount is calculated.** Stage 14 performs no `Decimal` arithmetic and
+produces no currency-shaped field — `decrease_blocked` is a plain boolean, directly
+derived from `is_protected`'s frozen meaning ("`True` if this campaign must never be
+reduced," row 17 above) without translating it into a room amount or any other
+monetary representation.
+
+**Decrease-specific; increase behaviour unaddressed.** The frozen `is_protected`
+meaning speaks only to reduction — `CampaignProtectionConstraint` says nothing about
+whether a protected campaign may receive an increase. This is deliberately left
+unaddressed, not assumed either way.
+
+**Does not decide the effective floor.** `CampaignProtectionConstraint` is a
+separate, independent result model from `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`, and
+`CampaignTestFloorRoom` — none of the five is required to construct another, and none
+is modified by this addition. How `decrease_blocked` eventually combines with Stage
+10's static room, Stage 12's raw cap, and Stage 13's test-floor room into any
+effective decrease limit remains an explicitly undecided later-stage question.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, effective-floor precedence, static-bound/
-> raw-cap intersection, effective constraints, protected-campaign handling,
-> eligibility, scoring, allocation).
+> raw-cap/test-floor/protection intersection, effective constraints, increase-side
+> protection behaviour, eligibility, scoring, allocation).
 
 ## Export Fields
 

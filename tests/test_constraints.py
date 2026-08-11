@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, and 13).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, and 14).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -34,6 +34,13 @@ non-test campaigns, zero behaviour, fixed-precision-28 Decimal-context independe
 independence from minimum_budget/maximum_budget/is_protected and from Stage 10-12
 results, and scope boundaries (no effective floor, no effective movement, no
 eligibility/score/recommendation/reason-code/allocation/conservation field).
+
+Also covers Stage 14's CampaignProtectionConstraint construction/immutability, the
+exact decrease_blocked = is_protected mapping, independence from current_budget/
+minimum_budget/maximum_budget/is_test_campaign/test_budget_floor/
+campaign_max_change_percentage/platform/kpi_type and from Stage 10-13 results, the
+absence of any Decimal/monetary output, and scope boundaries (no eligibility, score,
+recommendation, reason code, allocation, or conservation field).
 """
 
 import ast
@@ -56,6 +63,7 @@ from src.constants import (
 )
 from src.constraints import (
     CampaignApplicableChangePercentage,
+    CampaignProtectionConstraint,
     CampaignRawPercentageMovementCap,
     CampaignStaticBudgetRoom,
     CampaignTestFloorRoom,
@@ -63,6 +71,7 @@ from src.constraints import (
     calculate_campaign_static_budget_room,
     calculate_campaign_test_floor_room,
     resolve_campaign_applicable_change_percentage,
+    resolve_campaign_protection_constraint,
 )
 from src.models import CampaignInput, ReviewSetup
 from src.validation import validate_campaign_csv
@@ -2089,3 +2098,418 @@ def test_sample_campaigns_csv_test_floor_room_exact_values_and_order():
     }
     for cap in caps:
         assert cap.raw_percentage_movement_cap == expected_raw_cap[cap.campaign_id]
+
+
+# ---------------------------------------------------------------------------
+# Stage 14 — CampaignProtectionConstraint result model
+# ---------------------------------------------------------------------------
+
+
+def test_campaign_protection_constraint_accepts_exactly_two_fields():
+    assert set(CampaignProtectionConstraint.model_fields.keys()) == {
+        "campaign_id",
+        "decrease_blocked",
+    }
+
+
+def test_campaign_protection_constraint_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignProtectionConstraint(
+            campaign_id="C001",
+            decrease_blocked=True,
+            extra_field="not allowed",
+        )
+
+
+def test_campaign_protection_constraint_is_immutable():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=True))
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_protection_constraint_campaign_id_copied_exactly():
+    result = resolve_campaign_protection_constraint(_campaign(campaign_id="XYZ-1"))
+    assert result.campaign_id == "XYZ-1"
+
+
+def test_decrease_blocked_is_bool():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=True))
+    assert isinstance(result.decrease_blocked, bool)
+    result_false = resolve_campaign_protection_constraint(_campaign(is_protected=False))
+    assert isinstance(result_false.decrease_blocked, bool)
+
+
+def test_no_decimal_or_optional_monetary_field_exists():
+    field_names = set(CampaignProtectionConstraint.model_fields.keys())
+    forbidden = {
+        "room_to_protection_limit",
+        "room_to_static_maximum",
+        "room_to_static_minimum",
+        "room_to_test_floor",
+        "raw_percentage_movement_cap",
+        "applicable_max_change_percentage",
+        "eligibility",
+        "blocked",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+    }
+    assert field_names.isdisjoint(forbidden)
+    for field_info in CampaignProtectionConstraint.model_fields.values():
+        assert field_info.annotation is not Decimal
+
+
+def test_calculate_campaign_protection_constraint_rejects_incompatible_input():
+    with pytest.raises(AttributeError):
+        resolve_campaign_protection_constraint(None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        resolve_campaign_protection_constraint({"is_protected": True})  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Stage 14 — exact mapping
+# ---------------------------------------------------------------------------
+
+
+def test_protected_campaign_returns_decrease_blocked_true():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=True))
+    assert result.decrease_blocked is True
+
+
+def test_non_protected_campaign_returns_decrease_blocked_false():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=False))
+    assert result.decrease_blocked is False
+
+
+def test_false_is_not_converted_to_none():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=False))
+    assert result.decrease_blocked is not None
+    assert result.decrease_blocked is False
+
+
+def test_true_is_not_converted_to_decimal_zero():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=True))
+    assert result.decrease_blocked is True
+    assert not isinstance(result.decrease_blocked, Decimal)
+
+
+def test_no_truthiness_fallback_source():
+    source = inspect.getsource(resolve_campaign_protection_constraint)
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BoolOp) for node in ast.walk(tree))
+
+
+def test_no_monetary_calculation_in_protection_constraint():
+    source = inspect.getsource(resolve_campaign_protection_constraint)
+    assert "Decimal" not in source
+    assert "quantize" not in source
+    assert "float(" not in source
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BinOp) for node in ast.walk(tree))
+
+
+# ---------------------------------------------------------------------------
+# Stage 14 — independence
+# ---------------------------------------------------------------------------
+
+
+def test_is_test_campaign_does_not_affect_protection_constraint():
+    non_test = _campaign(campaign_id="C001", is_protected=True, is_test_campaign=False, test_budget_floor=None)
+    test_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("500.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result_non_test = resolve_campaign_protection_constraint(non_test)
+    result_test = resolve_campaign_protection_constraint(test_campaign)
+    assert result_non_test.decrease_blocked == result_test.decrease_blocked
+
+
+def test_test_budget_floor_does_not_affect_protection_constraint():
+    campaign = _campaign(
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("500.00"),
+        is_protected=False,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result = resolve_campaign_protection_constraint(campaign)
+    assert result.decrease_blocked is False
+
+
+def test_campaign_both_protected_and_test_returns_decrease_blocked_true():
+    campaign = _campaign(
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("500.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result = resolve_campaign_protection_constraint(campaign)
+    assert result.decrease_blocked is True
+
+
+def test_current_budget_does_not_affect_protection_constraint():
+    low_budget = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("150.00"),
+        spend_to_date=Decimal("100.00"),
+        is_protected=True,
+    )
+    high_budget = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1900.00"),
+        spend_to_date=Decimal("500.00"),
+        is_protected=True,
+    )
+    result_low = resolve_campaign_protection_constraint(low_budget)
+    result_high = resolve_campaign_protection_constraint(high_budget)
+    assert result_low.decrease_blocked == result_high.decrease_blocked
+
+
+def test_minimum_budget_does_not_affect_protection_constraint():
+    shared = dict(current_budget=Decimal("1000.00"), maximum_budget=Decimal("2000.00"), is_protected=True)
+    low_minimum = _campaign(campaign_id="C001", minimum_budget=Decimal("0.00"), **shared)
+    high_minimum = _campaign(campaign_id="C001", minimum_budget=Decimal("500.00"), **shared)
+    result_low = resolve_campaign_protection_constraint(low_minimum)
+    result_high = resolve_campaign_protection_constraint(high_minimum)
+    assert result_low.decrease_blocked == result_high.decrease_blocked
+
+
+def test_maximum_budget_does_not_affect_protection_constraint():
+    shared = dict(current_budget=Decimal("1000.00"), minimum_budget=Decimal("100.00"), is_protected=True)
+    narrow_maximum = _campaign(campaign_id="C001", maximum_budget=Decimal("1500.00"), **shared)
+    wide_maximum = _campaign(campaign_id="C001", maximum_budget=Decimal("1000000.00"), **shared)
+    result_narrow = resolve_campaign_protection_constraint(narrow_maximum)
+    result_wide = resolve_campaign_protection_constraint(wide_maximum)
+    assert result_narrow.decrease_blocked == result_wide.decrease_blocked
+
+
+def test_platform_does_not_affect_protection_constraint():
+    google = _campaign(campaign_id="C001", platform=Platform.GOOGLE_ADS, is_protected=True)
+    meta = _campaign(campaign_id="C001", platform=Platform.META_ADS, is_protected=True)
+    result_google = resolve_campaign_protection_constraint(google)
+    result_meta = resolve_campaign_protection_constraint(meta)
+    assert result_google.decrease_blocked == result_meta.decrease_blocked
+
+
+def test_kpi_type_does_not_affect_protection_constraint():
+    cpa = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.CPA,
+        kpi_target=Decimal("10.00"),
+        kpi_actual_7d=Decimal("10.00"),
+        kpi_actual_28d=Decimal("10.00"),
+        is_protected=True,
+    )
+    roas = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.ROAS,
+        kpi_target=Decimal("3.00"),
+        kpi_actual_7d=Decimal("3.00"),
+        kpi_actual_28d=Decimal("3.00"),
+        is_protected=True,
+    )
+    result_cpa = resolve_campaign_protection_constraint(cpa)
+    result_roas = resolve_campaign_protection_constraint(roas)
+    assert result_cpa.decrease_blocked == result_roas.decrease_blocked
+
+
+def test_campaign_max_change_percentage_not_read_for_protection_constraint():
+    no_override = _campaign(campaign_id="C001", campaign_max_change_percentage=None, is_protected=True)
+    with_override = _campaign(
+        campaign_id="C001", campaign_max_change_percentage=Decimal("0.05"), is_protected=True
+    )
+    result_no_override = resolve_campaign_protection_constraint(no_override)
+    result_with_override = resolve_campaign_protection_constraint(with_override)
+    assert result_no_override.decrease_blocked == result_with_override.decrease_blocked
+
+
+def test_protection_constraint_function_reads_only_two_authorised_fields():
+    source = inspect.getsource(resolve_campaign_protection_constraint)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    param_name = func_def.args.args[0].arg
+
+    accessed_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == param_name:
+                accessed_attrs.add(node.attr)
+
+    assert accessed_attrs == {"campaign_id", "is_protected"}
+
+
+def test_protection_constraint_does_not_reference_review_setup():
+    source = inspect.getsource(resolve_campaign_protection_constraint)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+
+
+def test_protection_constraint_does_not_call_stage_10_to_13_or_stage_3_to_9_functions():
+    source = inspect.getsource(resolve_campaign_protection_constraint)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "calculate_campaign_static_budget_room",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_raw_percentage_movement_cap",
+        "calculate_campaign_test_floor_room",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_stage_10_13_results_neither_read_nor_called_for_protection_constraint():
+    campaign = _campaign(is_protected=True)
+    room = calculate_campaign_static_budget_room(campaign)
+    protection = resolve_campaign_protection_constraint(campaign)
+    assert isinstance(room, CampaignStaticBudgetRoom)
+    assert isinstance(protection, CampaignProtectionConstraint)
+    assert not hasattr(protection, "room_to_static_maximum")
+    assert not hasattr(protection, "room_to_static_minimum")
+    assert not hasattr(protection, "applicable_max_change_percentage")
+    assert not hasattr(protection, "raw_percentage_movement_cap")
+    assert not hasattr(protection, "room_to_test_floor")
+
+
+# ---------------------------------------------------------------------------
+# Stage 14 — scope protection
+# ---------------------------------------------------------------------------
+
+
+def test_no_eligibility_score_recommendation_reason_code_allocation_or_conservation_output():
+    result = resolve_campaign_protection_constraint(_campaign(is_protected=True))
+    for attr in (
+        "room_to_protection_limit",
+        "effective_floor",
+        "permissible_decrease",
+        "effective_movement",
+        "eligibility",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+        "blocked",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 14 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_protection_constraint_exact_values_and_order():
+    review = _review(default_max_change_percentage=Decimal("0.20"))
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    protection_results = [
+        resolve_campaign_protection_constraint(c) for c in report.valid_campaigns
+    ]
+    assert [r.campaign_id for r in protection_results] == ["G001", "M001", "G002", "G003"]
+
+    expected_is_protected = {
+        "G001": False,
+        "M001": False,
+        "G002": True,
+        "G003": False,
+    }
+    expected_decrease_blocked = {
+        "G001": False,
+        "M001": False,
+        "G002": True,
+        "G003": False,
+    }
+    for campaign in report.valid_campaigns:
+        assert campaign.is_protected == expected_is_protected[campaign.campaign_id]
+    for result in protection_results:
+        assert result.decrease_blocked == expected_decrease_blocked[result.campaign_id]
+
+    # decrease_blocked=False for G001/M001/G003 is not permission to reduce those
+    # campaigns; decrease_blocked=True for G002 is not eligibility, a recommendation,
+    # or final movement — it states only the protection constraint itself.
+
+    # Retain and independently verify Stages 10-13's existing sample results via
+    # separate calls — none of Stage 10, 11, 12, 13, or 14's results is combined or
+    # intersected here.
+    room_results = [calculate_campaign_static_budget_room(c) for c in report.valid_campaigns]
+    expected_room = {
+        "G001": (Decimal("3000.00"), Decimal("2500.00")),
+        "M001": (Decimal("2500.00"), Decimal("2000.00")),
+        "G002": (Decimal("3000.00"), Decimal("4000.00")),
+        "G003": (Decimal("800.00"), Decimal("1100.00")),
+    }
+    for room in room_results:
+        exp_max, exp_min = expected_room[room.campaign_id]
+        assert room.room_to_static_maximum == exp_max
+        assert room.room_to_static_minimum == exp_min
+
+    percentages = [
+        resolve_campaign_applicable_change_percentage(review, c)
+        for c in report.valid_campaigns
+    ]
+    expected_applicable_percentage = {
+        "G001": Decimal("0.20"),
+        "M001": Decimal("0.15"),
+        "G002": Decimal("0.20"),
+        "G003": Decimal("0.20"),
+    }
+    for percentage in percentages:
+        assert (
+            percentage.applicable_max_change_percentage
+            == expected_applicable_percentage[percentage.campaign_id]
+        )
+
+    caps = [
+        calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+        for campaign, percentage in zip(report.valid_campaigns, percentages)
+    ]
+    expected_raw_cap = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("1000.00"),
+        "G003": Decimal("240.00"),
+    }
+    for cap in caps:
+        assert cap.raw_percentage_movement_cap == expected_raw_cap[cap.campaign_id]
+
+    test_floor_results = [
+        calculate_campaign_test_floor_room(c) for c in report.valid_campaigns
+    ]
+    expected_room_to_test_floor = {
+        "G001": None,
+        "M001": None,
+        "G002": None,
+        "G003": Decimal("900.00"),
+    }
+    for result in test_floor_results:
+        assert result.room_to_test_floor == expected_room_to_test_floor[result.campaign_id]
