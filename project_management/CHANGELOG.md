@@ -264,3 +264,55 @@ All notable changes to this project are documented in this file.
   `docs/DECISION_RULES.md` (frozen Stage 7 confidence-classification rule; tracking
   interpretation and the `NOT_ASSESSABLE` trigger explicitly re-confirmed as pending
   later stages), and `docs/TEST_SCENARIOS.md` (28 concrete Stage 7 scenarios).
+
+- Sprint 1, Development Stage 8: added `CampaignTrackingAssessment` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `tracking_status`, `is_assessable` only) and
+  `assess_campaign_tracking(campaign: CampaignInput) -> CampaignTrackingAssessment` to
+  `src/classification.py`, alongside but fully separate from Stage 5's
+  `PerformanceBand`/`CampaignPerformanceClass`/`classify_campaign_performance`, Stage 6's
+  `TrendDirection`/`CampaignTrendClass`/`classify_campaign_trend`, and Stage 7's
+  `CampaignConfidenceClass`/`classify_campaign_confidence`, all of which are unmodified.
+  Determines assessability from `tracking_status` alone:
+  `is_assessable = tracking_status is not TrackingStatus.UNRELIABLE`, so `HEALTHY` → `True`,
+  `WARNING` → `True` (a concern requiring later caution, not unusable evidence), and
+  `UNRELIABLE` → `False` (the sole condition producing `False`). The original
+  `tracking_status` is preserved unchanged in the result so `WARNING` is never collapsed
+  into `HEALTHY`. `Confidence.NOT_ASSESSABLE` is never read or assigned — a deliberate,
+  documented scope boundary, deferred to a later combined-assessment stage that must
+  preserve both Stage 7's and Stage 8's independent results. No arithmetic, weighting,
+  quantisation, or `Decimal`/`float` conversion. Reads only
+  `campaign_id`/`tracking_status` from `CampaignInput`; does not import `CampaignMetrics`,
+  `CampaignPacing`, `ReviewSetup`, `RecommendationAction`, or `ReasonCode`, and never calls
+  `classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`.
+  `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`, and
+  `src/pacing.py` are unchanged.
+- **Approved exception:** implementing Stage 8 required `src/classification.py` to import
+  `TrackingStatus`, which broke a pre-existing AST-based scope check in
+  `tests/test_confidence_classification.py` that had forbidden that import (correct when
+  Stage 7 was written, obsolete once Stage 8 legitimately needed it). With explicit
+  approval, that test's forbidden-import set was narrowed to drop only `TrackingStatus`;
+  every other forbidden entry is unchanged and still enforced.
+  `tests/test_classification.py` and `tests/test_trend_classification.py` were not
+  affected and were not modified.
+- Sprint 1, Development Stage 8: `tests/test_tracking_assessment.py` (30 tests) covering
+  result-model shape/immutability, exact `HEALTHY`/`WARNING`/`UNRELIABLE` →
+  `True`/`True`/`False` mapping, `campaign_id` propagation, information preservation
+  (`WARNING` never collapsed into `HEALTHY`; no severity score or replacement enum
+  produced), independence from `conversions_7d`/`conversions_28d`, CPA/ROAS, platform,
+  and protected/test status, integration with `validate_campaign_csv` over
+  `data/sample_campaigns.csv` (order preserved; all four sample campaigns are `HEALTHY`
+  → `is_assessable=True`, with synthetic fixtures covering `WARNING`/`UNRELIABLE`), and
+  scope boundaries (no out-of-scope field; `NOT_ASSESSABLE` never touched; AST-verified
+  restriction to reading only `campaign_id`/`tracking_status` and to calling no other
+  classifier; AST-verified zero binary-arithmetic nodes; unaffected by a mutated global
+  `Decimal` context). `tests/test_classification.py` (Stage 5, 23 tests),
+  `tests/test_trend_classification.py` (Stage 6, 29 tests), and
+  `tests/test_confidence_classification.py` (Stage 7, 32 tests) re-run and confirmed
+  passing after the approved narrowing above — no behavioural regression. Full suite:
+  308 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29
+  Stage 6 + 32 Stage 7 + 30 Stage 8).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignTrackingAssessment` fields; `TrackingStatus`
+  outcome table), `docs/DECISION_RULES.md` (frozen Stage 8 tracking-assessability rule;
+  `NOT_ASSESSABLE` trigger and combined assessment, and pacing interpretation, explicitly
+  re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (21 concrete Stage
+  8 scenarios).

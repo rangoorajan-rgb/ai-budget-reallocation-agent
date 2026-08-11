@@ -1,14 +1,15 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 7 populates the Conversion-Volume Confidence Classification
-> Scenarios section below, backed by `tests/test_confidence_classification.py` (32
-> tests), in addition to the Stage 6 Trend Classification Scenarios
-> (`tests/test_trend_classification.py`, 29 tests), the Stage 5 Performance
-> Classification Scenarios (`tests/test_classification.py`, 23 tests), the Stage 4
-> Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3 Metric
-> Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2 Validation
-> Scenarios (`tests/test_validation.py`, 44 tests). Allocation and Approval/Audit
-> scenarios are pending later stages.
+> Sprint 1, Development Stage 8 populates the Tracking Assessability Scenarios section
+> below, backed by `tests/test_tracking_assessment.py` (30 tests), in addition to the
+> Stage 7 Conversion-Volume Confidence Classification Scenarios
+> (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
+> Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
+> Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
+> Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3
+> Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2
+> Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
+> Approval/Audit scenarios are pending later stages.
 
 ## Validation Scenarios
 
@@ -268,6 +269,39 @@ allocation outcome, and none ever assigns `Confidence.NOT_ASSESSABLE`.
 | 26 | Any result | No `float` or `Decimal` anywhere. |
 | 27 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — classification is plain integer comparison, no `Decimal` involved at all. |
 | 28 | `classify_campaign_performance` (Stage 5) and `classify_campaign_trend` (Stage 6) | Unchanged behaviour after the Stage 7 additions — regression-checked. |
+
+## Tracking Assessability Scenarios
+
+All scenarios below use `assess_campaign_tracking(campaign: CampaignInput) ->
+CampaignTrackingAssessment` from `src/classification.py`. Every result is a **narrow
+tracking-based assessability fact only** — none of these scenarios produces conversion-
+volume confidence, `Confidence.NOT_ASSESSABLE`, a performance/trend classification, a
+pacing interpretation, a combined judgement, `RecommendationAction`, `ReasonCode`,
+score, eligibility, or allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignTrackingAssessment` field set | Exactly `campaign_id`, `tracking_status`, `is_assessable`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignTrackingAssessment` instance | Rejected (`frozen=True`). |
+| 4 | `tracking_status` | Always a `TrackingStatus` instance. |
+| 5 | `is_assessable` | Always a `bool`. |
+| 6 | `campaign_id`, `tracking_status` on the result | Both copied exactly from the source `CampaignInput`. |
+| 7 | `assess_campaign_tracking({"tracking_status": "Healthy"})` (dict, not `CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | `tracking_status = HEALTHY` | `is_assessable = True`. |
+| 9 | `tracking_status = WARNING` | `is_assessable = True` — and the result's `tracking_status` is `WARNING`, not silently converted to `HEALTHY`. |
+| 10 | `tracking_status = UNRELIABLE` | `is_assessable = False` — the sole `False` condition. |
+| 11 | Two campaigns with the same `tracking_status` but different `conversions_28d` | Same `is_assessable`. |
+| 12 | Two campaigns with the same `tracking_status` but different `conversions_7d` | Same `is_assessable`. |
+| 13 | CPA vs. ROAS, same `tracking_status` | Same `is_assessable`. |
+| 14 | Google Ads vs. Meta Ads, same `tracking_status` | Same `is_assessable`. |
+| 15 | Protected vs. unprotected vs. test campaign, same `tracking_status` | Same `is_assessable` in all three. |
+| 16 | `assess_campaign_tracking` source | Reads only `campaign.campaign_id`/`campaign.tracking_status` (AST-verified); calls none of `classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`calculate_campaign_metrics`/`calculate_campaign_pacing` (AST-verified); contains no binary arithmetic operation (AST-verified). |
+| 17 | `data/sample_campaigns.csv` validated, then each `CampaignInput` assessed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); all four have `tracking_status=Healthy` and `is_assessable=True` (no `Warning`/`Unreliable` example exists in the sample data — exercised only via synthetic fixtures, scenarios 8–10). |
+| 18 | `CampaignTrackingAssessment.model_fields` | Contains no `confidence`, `performance_band`, `trend_direction`, `pacing_ratio`, `score`, `reason_code`, `recommendation_action`, `constraint`, `eligibility`, `allocation`, `conversions_7d`, or `conversions_28d` field. |
+| 19 | `Confidence.NOT_ASSESSABLE` | Never assigned or read by `assess_campaign_tracking`, across every `TrackingStatus` value. |
+| 20 | `classify_campaign_confidence`, `classify_campaign_performance`, `classify_campaign_trend` | Unchanged behaviour after the Stage 8 additions — regression-checked; Stage 7 continues returning only `HIGH`/`MEDIUM`/`LOW` regardless of `tracking_status`. |
+| 21 | Global `decimal` context mutated (`prec=1`, `ROUND_DOWN`) before calling the function | Result unaffected — assessment is plain enum comparison, no `Decimal` involved at all. |
 
 ## Allocation Scenarios
 

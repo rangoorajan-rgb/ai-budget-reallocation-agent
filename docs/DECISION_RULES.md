@@ -1,11 +1,12 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 7. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 8. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, and the
-> frozen neutral performance-, trend-, and conversion-volume-confidence-classification
-> rules. Tracking interpretation, constraint, scoring, and allocation rules are pending
-> later Sprint 1 stages.
+> frozen neutral performance-, trend-, conversion-volume-confidence-, and
+> tracking-assessability-classification rules. Combined assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, constraint, scoring, and
+> allocation rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -374,6 +375,51 @@ never re-validates or recalculates it.
   not read `tracking_status` or any `CampaignPacing` fact. `CampaignPerformanceClass`
   and `CampaignTrendClass` are unmodified by Stage 7.
 
+## Deterministic Tracking-Based Assessability Rules (Sprint 1, Development Stage 8)
+
+These rules govern the tracking-assessability addition to `src/classification.py`,
+which determines one already-validated `CampaignInput` instance's assessability from
+`tracking_status` alone. Stage 8 is a **narrow, descriptive fact only** — it is not
+conversion-volume confidence, a `Confidence.NOT_ASSESSABLE` assignment, a replacement for
+`CampaignConfidenceClass`, a performance classification, a trend classification, a
+pacing interpretation, a combined campaign judgement, a constraint, an eligibility
+decision, a score, a recommendation, a reason code, or an allocation. `CampaignInput`
+(`src/models.py`) remains the sole authoritative source of `tracking_status`;
+`src/classification.py` never re-validates it.
+
+- **Classification input.** `CampaignInput.campaign_id` and
+  `CampaignInput.tracking_status` are the only fields read. `conversions_7d`,
+  `conversions_28d`, `CampaignMetrics`, `CampaignPacing`, `platform`, `kpi_type`,
+  `is_protected`, `is_test_campaign`, and every other field are never read.
+- **Exact mapping:**
+  ```
+  is_assessable = campaign.tracking_status is not TrackingStatus.UNRELIABLE
+  ```
+  Therefore: `HEALTHY → True`; `WARNING → True`; `UNRELIABLE → False`. `UNRELIABLE` is
+  the sole condition producing `is_assessable=False`.
+- **Rationale for `WARNING=True`.** `WARNING` represents a concern requiring later
+  caution, not an explicit declaration that the evidence is unusable — it is treated as
+  assessable, the same as `HEALTHY`, deliberately distinguishing it from `UNRELIABLE`.
+- **Original `tracking_status` preserved in the result.** `WARNING` is never collapsed
+  into `HEALTHY` — the result carries the original `TrackingStatus` value unchanged,
+  keeping that distinction visible for later `ReasonCode`/recommendation logic that may
+  treat `WARNING` and `HEALTHY` differently even though both are currently assessable.
+- **No arithmetic, Decimal, or float conversion.** `tracking_status` is a plain enum
+  comparison — no local `decimal` context is relevant and none is used.
+- **Platform and KPI independence.** The result depends only on `tracking_status` — the
+  same status produces the same `is_assessable` value for every platform, KPI type,
+  conversion count, and protected/test state.
+- **No override of performance, trend, or confidence.** `assess_campaign_tracking` never
+  calls `classify_campaign_performance`, `classify_campaign_trend`, or
+  `classify_campaign_confidence` (or vice versa); `CampaignPerformanceClass`,
+  `CampaignTrendClass`, and `CampaignConfidenceClass` are unmodified by Stage 8, and
+  Stage 7 continues to return only `Confidence.HIGH`/`MEDIUM`/`LOW` regardless of
+  `tracking_status`.
+- **`Confidence.NOT_ASSESSABLE` remains unowned.** Stage 8 does not read, assign, or
+  otherwise touch `Confidence.NOT_ASSESSABLE`. Whether/how tracking-based assessability
+  relates to it is deferred to a later combined-assessment stage, which must preserve
+  the independent Stage 7 conversion-volume result rather than overwriting it.
+
 ## Pending
 
 - **Pacing interpretation.** Whether a given `pacing_ratio`, `spend_variance`, or
@@ -394,10 +440,14 @@ never re-validates or recalculates it.
   performance ratio thresholds alone; assigning a final `RecommendationAction` requires
   combining `PerformanceBand` with trend, confidence, tracking, and eligibility/
   constraint considerations that remain pending later stages.
-- **`NOT_ASSESSABLE` trigger.** Stage 7 resolved how `MINIMUM_CONVERSIONS`/
-  `HIGH_CONFIDENCE_CONVERSIONS` map `conversions_28d` to `Confidence.HIGH`/`MEDIUM`/`LOW`
-  (see above) — but `Confidence.NOT_ASSESSABLE`'s trigger, and any tracking-status
-  effect on confidence, remain pending a later stage.
+- **`NOT_ASSESSABLE` trigger and combined assessment.** Stage 7 resolved
+  `conversions_28d` → `Confidence.HIGH`/`MEDIUM`/`LOW`, and Stage 8 resolved
+  `tracking_status` → `is_assessable`/`CampaignTrackingAssessment` (see above) — but
+  neither assigns `Confidence.NOT_ASSESSABLE`, and no rule combines the two independent
+  results. Whether/how tracking-based assessability and conversion-volume confidence
+  relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-assessment
+  stage, which must preserve both Stage 7's and Stage 8's independent results rather
+  than overwriting either.
 - How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
   budget change.
 - The full set of `ReasonCode` trigger conditions.

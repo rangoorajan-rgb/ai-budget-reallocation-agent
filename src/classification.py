@@ -22,11 +22,21 @@ only — it is independent of `PerformanceBand`/`TrendDirection`, does not read
 `conversions_7d`, `tracking_status`, or any other field, and never assigns
 `Confidence.NOT_ASSESSABLE` (that trigger remains deferred to a later stage).
 
-Tracking-status interpretation, pacing interpretation, `NOT_ASSESSABLE` assignment, and
-any final `RecommendationAction`/`ReasonCode` assignment or combined campaign judgement
-are all explicitly deferred to later stages. Each classification here depends only on its
-own narrow input — never `CampaignPacing`, `ReviewSetup`, or any KPI-type-specific/
-platform-specific branching (Stage 3 has already direction-normalised CPA and ROAS).
+Also implements Sprint 1 — Development Stage 8: for one already-validated `CampaignInput`
+instance, determines a narrow tracking-based assessability fact from `tracking_status`
+alone. `TrackingStatus.UNRELIABLE` is the sole condition producing `is_assessable=False`;
+`HEALTHY` and `WARNING` both produce `is_assessable=True` — `WARNING` represents a
+concern requiring later caution, not a declaration that the evidence is unusable, and the
+original `tracking_status` is preserved in the result so `WARNING` is never collapsed
+into `HEALTHY`. This is independent of `CampaignConfidenceClass`; it never assigns or
+reads `Confidence.NOT_ASSESSABLE`, and does not replace or override Stage 7.
+
+Tracking-effects on confidence/performance/trend, `Confidence.NOT_ASSESSABLE` assignment,
+combined campaign judgement, pacing interpretation, and any final
+`RecommendationAction`/`ReasonCode` assignment are all explicitly deferred to later
+stages. Each classification here depends only on its own narrow input — never
+`CampaignPacing`, `ReviewSetup`, or any KPI-type-specific/platform-specific branching
+(Stage 3 has already direction-normalised CPA and ROAS).
 """
 
 from decimal import Decimal
@@ -40,6 +50,7 @@ from src.constants import (
     INCREASE_THRESHOLD,
     MAINTAIN_THRESHOLD,
     MINIMUM_CONVERSIONS,
+    TrackingStatus,
     TREND_THRESHOLD,
 )
 from src.metrics import CampaignMetrics
@@ -187,4 +198,43 @@ def classify_campaign_confidence(
     return CampaignConfidenceClass(
         campaign_id=campaign.campaign_id,
         confidence=confidence,
+    )
+
+
+class CampaignTrackingAssessment(BaseModel):
+    """Narrow, deterministic tracking-based assessability fact for one campaign.
+
+    Not conversion-volume confidence, a `Confidence.NOT_ASSESSABLE` assignment, a
+    replacement for `CampaignConfidenceClass`, a performance/trend classification, a
+    pacing interpretation, a combined campaign judgement, a constraint, eligibility, a
+    score, a recommendation, a reason code, or an allocation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    tracking_status: TrackingStatus
+    is_assessable: bool
+
+
+def assess_campaign_tracking(
+    campaign: CampaignInput,
+) -> CampaignTrackingAssessment:
+    """Determine one campaign's tracking-based assessability from `tracking_status`
+    alone.
+
+    `TrackingStatus.UNRELIABLE` is the sole condition producing `is_assessable=False`.
+    `HEALTHY` and `WARNING` both produce `is_assessable=True` — `WARNING` represents a
+    concern requiring later caution, not a declaration that the evidence is unusable.
+    The original `tracking_status` is preserved in the result so `WARNING` is never
+    collapsed into `HEALTHY`, keeping it visible for later `ReasonCode`/recommendation
+    logic. No arithmetic, Decimal/float conversion, weighting, or quantisation is
+    performed.
+    """
+    is_assessable = campaign.tracking_status is not TrackingStatus.UNRELIABLE
+
+    return CampaignTrackingAssessment(
+        campaign_id=campaign.campaign_id,
+        tracking_status=campaign.tracking_status,
+        is_assessable=is_assessable,
     )

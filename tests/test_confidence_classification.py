@@ -293,6 +293,11 @@ def test_not_assessable_never_assigned():
 
 
 def test_classification_module_does_not_import_out_of_scope_modules_or_enums():
+    # NOTE: src/classification.py now also implements Stage 8 (tracking-based
+    # assessability), which legitimately requires importing TrackingStatus
+    # (src.constants) — narrowed here accordingly. This test still forbids every import
+    # that remains out of scope for the module as a whole: CampaignPacing, ReviewSetup,
+    # RecommendationAction, and ReasonCode.
     import src.classification as classification_module
 
     tree = ast.parse(inspect.getsource(classification_module))
@@ -314,7 +319,6 @@ def test_classification_module_does_not_import_out_of_scope_modules_or_enums():
         "src.conservation",
         "CampaignPacing",
         "ReviewSetup",
-        "TrackingStatus",
         "RecommendationAction",
         "ReasonCode",
     }

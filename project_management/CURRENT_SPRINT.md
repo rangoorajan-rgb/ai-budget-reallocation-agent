@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, and 7 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, and 8 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -202,11 +202,48 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 7 (and not yet started)
+## Development Stage 8 — Deterministic Tracking-Based Assessability (complete)
 
-- Tracking-status interpretation, `NOT_ASSESSABLE` trigger/precedence, pacing
-  interpretation.
-- Combined campaign judgements (trend + performance + confidence + tracking + pacing).
+- [x] `src/classification.py` (additions only — Stages 5/6/7's `PerformanceBand`/
+      `CampaignPerformanceClass`/`classify_campaign_performance`, `TrendDirection`/
+      `CampaignTrendClass`/`classify_campaign_trend`, and `CampaignConfidenceClass`/
+      `classify_campaign_confidence` unmodified) — `CampaignTrackingAssessment` (frozen,
+      `extra="forbid"`: `campaign_id`, `tracking_status`, `is_assessable`, reusing the
+      existing `TrackingStatus` enum) and `assess_campaign_tracking(campaign:
+      CampaignInput) -> CampaignTrackingAssessment`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py` unchanged.
+- [x] Exact mapping: `is_assessable = campaign.tracking_status is not
+      TrackingStatus.UNRELIABLE` — `HEALTHY` and `WARNING` both `True`, `UNRELIABLE` the
+      sole `False` condition. `WARNING` represents a concern requiring later caution,
+      not unusable evidence; the original `tracking_status` is preserved in the result
+      (never collapsed into `HEALTHY`) for later `ReasonCode`/recommendation logic.
+- [x] `Confidence.NOT_ASSESSABLE` is never assigned or read by Stage 8; Stage 7 continues
+      returning only `HIGH`/`MEDIUM`/`LOW` regardless of `tracking_status`.
+      `CampaignConfidenceClass`, `CampaignPerformanceClass`, and `CampaignTrendClass` are
+      unmodified.
+- [x] Direct enum comparison only — no arithmetic, weighting, quantisation, or
+      `Decimal`/`float` conversion; `conversions_7d`/`conversions_28d`, `CampaignMetrics`,
+      `CampaignPacing`, `platform`, `kpi_type`, and protected/test status are never read.
+- [x] `tests/test_tracking_assessment.py` — 30 tests, all passing.
+      `tests/test_classification.py` (Stage 5, 23 tests), `tests/test_trend_classification.py`
+      (Stage 6, 29 tests), and `tests/test_confidence_classification.py` (Stage 7, 32
+      tests) re-run and confirmed passing. **One approved exception:**
+      `tests/test_confidence_classification.py`'s pre-existing
+      `test_classification_module_does_not_import_out_of_scope_modules_or_enums` AST
+      check was narrowed (removing only `TrackingStatus` from its forbidden-import set)
+      because it was written when `src/classification.py` legitimately had no reason to
+      import it — Stage 8 requires it, per your explicit approval; every other forbidden
+      import (`CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `ReasonCode`, and
+      the out-of-scope `src.*` modules) is unchanged and still enforced.
+      `tests/test_models.py`, `tests/test_validation.py`, `tests/test_metrics.py`, and
+      `tests/test_pacing.py` unchanged and still passing.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 8 (and not yet started)
+
+- Combined confidence/tracking assessment, `Confidence.NOT_ASSESSABLE` ownership and
+  trigger, pacing interpretation.
 - Protected/test campaign constraints, eligibility, scoring, final `RecommendationAction`
   assignment, `ReasonCode` assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
@@ -214,6 +251,9 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 8 (not started, scope not yet frozen): candidates include tracking-status
-interpretation and `NOT_ASSESSABLE` handling — each requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order.
+Stage 9 (not started, scope not yet frozen): requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order. Candidates
+include a combined confidence/tracking assessment stage (which would need to decide
+`Confidence.NOT_ASSESSABLE` ownership while preserving Stage 7's and Stage 8's
+independent results) and pacing interpretation (currently the least-evidenced candidate,
+with zero frozen pacing-specific numerical constants).

@@ -544,3 +544,81 @@ remove only `"src.models"`, `"CampaignInput"`, and `"Confidence"`; every other f
 entry (`CampaignPacing`, `ReviewSetup`, `RecommendationAction`, `ReasonCode`, and the
 out-of-scope `src.*` modules) is unchanged and still enforced by both tests.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 8 is narrow tracking-based assessability, not full tracking interpretation
+
+**Decision:** Sprint 1, Development Stage 8 adds a narrow tracking-based assessability
+fact to `src/classification.py`, as an *addition* alongside Stages 5–7's independent
+results — not a modification of any of them. `CampaignPerformanceClass`,
+`PerformanceBand`, `CampaignTrendClass`, `TrendDirection`, `CampaignConfidenceClass`, and
+`classify_campaign_confidence` are all unmodified; Stage 7 continues returning only
+`Confidence.HIGH`/`MEDIUM`/`LOW` regardless of `tracking_status`. This is deliberately
+narrower than "tracking interpretation" broadly — it resolves only the binary
+assessable/not-assessable question from `tracking_status` alone, not severity ranking,
+overrides of other classifications, or `Confidence.NOT_ASSESSABLE` ownership, each of
+which remains a genuinely unresolved decision deferred to a later combined-assessment
+stage.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 8: exact HEALTHY/WARNING/UNRELIABLE mapping and information preservation
+
+**Decision:** `is_assessable = campaign.tracking_status is not TrackingStatus.UNRELIABLE`.
+Therefore `HEALTHY → True`, `WARNING → True`, `UNRELIABLE → False` — `UNRELIABLE` is the
+sole condition producing `is_assessable=False`. `WARNING` is treated as assessable
+because it represents a concern requiring later caution, not an explicit declaration
+that the evidence is unusable. The original `TrackingStatus` value is preserved
+unchanged in the result (`CampaignTrackingAssessment.tracking_status`) specifically so
+`WARNING` is never collapsed into `HEALTHY` — this keeps the distinction visible for
+later `ReasonCode`/recommendation logic that may treat the two differently even though
+both are currently assessable. No severity score, ranking, or replacement enum is
+produced; `TrackingStatus` itself is reused unchanged, no new enum is created.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 8: CampaignTrackingAssessment, exactly three fields, independent of Stages 3–7
+
+**Decision:** `CampaignTrackingAssessment` (frozen, immutable; `extra="forbid"`; exactly
+`campaign_id`, `tracking_status`, `is_assessable`) is defined in `src/classification.py`,
+alongside but fully separate from `CampaignPerformanceClass`, `CampaignTrendClass`, and
+`CampaignConfidenceClass`. The sole public function is `assess_campaign_tracking(campaign:
+CampaignInput) -> CampaignTrackingAssessment`; it accepts only an already-validated
+`CampaignInput` instance (no `CampaignMetrics`, `CampaignPacing`, `CampaignPerformanceClass`,
+`CampaignTrendClass`, `CampaignConfidenceClass`, `ReviewSetup`, raw mapping, or unvalidated
+dict) and reads only `campaign_id` and `tracking_status` from it — never
+`conversions_7d`/`conversions_28d`, `platform`, `kpi_type`, `is_protected`,
+`is_test_campaign`, spend, or budget fields. There is no batch-calculation function, no
+arithmetic/Decimal/float conversion, and `assess_campaign_tracking` never calls
+`classify_campaign_performance`, `classify_campaign_trend`, or
+`classify_campaign_confidence` (or vice versa). The same `TrackingStatus` produces the
+same `is_assessable` for every platform, KPI type, conversion count, and protected/test
+state.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 8: Confidence.NOT_ASSESSABLE ownership remains deferred
+
+**Decision:** Stage 8 does not read, assign, or otherwise touch
+`Confidence.NOT_ASSESSABLE` — it remains a valid, unmodified `Confidence` enum member.
+Whether/how tracking-based assessability (Stage 8) and conversion-volume confidence
+(Stage 7) relate to `Confidence.NOT_ASSESSABLE` is deferred to a later combined-
+assessment stage, which is required to preserve both Stage 7's and Stage 8's independent
+results rather than overwriting either — consistent with the information-preservation
+principle already established when Stage 7 declined to infer `NOT_ASSESSABLE` from zero/
+low conversions. Pacing interpretation likewise remains deferred, unrelated to this
+decision.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 8: one Stage 7 AST scope-boundary test narrowed by explicit approval
+
+**Decision:** Implementing the approved Stage 8 specification required importing
+`TrackingStatus` (`src.constants`) into `src/classification.py`. This broke a
+pre-existing assertion in `tests/test_confidence_classification.py` —
+`test_classification_module_does_not_import_out_of_scope_modules_or_enums` — which had
+forbidden that exact import because, when Stage 7 was written, `src/classification.py`
+legitimately had no reason to import it. This was identified as a genuine conflict (not
+silently resolved) and reported before any test file was touched, mirroring the
+precedent set when Stage 7 itself required narrowing two Stage 5/6 assertions. With
+explicit approval, only `"TrackingStatus"` was removed from that one test's
+`forbidden_imports` set; every other forbidden entry (`CampaignPacing`, `ReviewSetup`,
+`RecommendationAction`, `ReasonCode`, and the out-of-scope `src.*` modules) is unchanged
+and still enforced. `tests/test_classification.py` and `tests/test_trend_classification.py`
+were not affected (neither ever forbade `TrackingStatus`) and were not modified.
+**Status:** Frozen.

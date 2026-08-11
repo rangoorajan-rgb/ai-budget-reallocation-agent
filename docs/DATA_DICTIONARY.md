@@ -1,11 +1,12 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 7 (adds neutral deterministic conversion-volume confidence
-> classification to the Stage 1 enumerations, numerical constants, core input models,
-> CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
-> Stage 5 performance classification, and Stage 6 trend classification). Tracking
-> interpretation and other derived/decision fields, plus export fields, are pending
-> later stages.
+> Sprint 1, Development Stage 8 (adds a narrow deterministic tracking-based
+> assessability fact to the Stage 1 enumerations, numerical constants, core input
+> models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing
+> facts, Stage 5 performance classification, Stage 6 trend classification, and Stage 7
+> conversion-volume confidence classification). Combined assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, and other derived/
+> decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -243,9 +244,47 @@ recommendation, reason code, or allocation. Depends only on
 construct another, and none is modified by this addition. `Confidence` is descriptive
 evidence, not `RecommendationAction` or `ReasonCode`.
 
+## Campaign Tracking Assessment Fields (`src/classification.py`)
+
+Produced by `assess_campaign_tracking(campaign: CampaignInput) ->
+CampaignTrackingAssessment`, one result per already-validated `CampaignInput` instance.
+`CampaignTrackingAssessment` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is a **narrow tracking-based assessability fact only** — it is
+not conversion-volume confidence, a `Confidence.NOT_ASSESSABLE` assignment, a
+replacement for `CampaignConfidenceClass`, a performance classification, a trend
+classification, a pacing interpretation, a combined campaign judgement, a constraint, an
+eligibility decision, a score, a recommendation, a reason code, or an allocation.
+Depends only on `CampaignInput.campaign_id`/`tracking_status` — never
+`conversions_7d`/`conversions_28d`, `CampaignMetrics`, `CampaignPacing`, `platform`,
+`kpi_type`, or protected/test status.
+
+### `TrackingStatus` (existing enum, reused — not redefined)
+
+| Member | Value | Stage 8 `is_assessable` outcome |
+|--------|-------|-----------------------------------|
+| `HEALTHY` | `"Healthy"` | `True` |
+| `WARNING` | `"Warning"` | `True` — represents a concern requiring later caution, not a declaration that the evidence is unusable. |
+| `UNRELIABLE` | `"Unreliable"` | `False` — the sole condition producing `is_assessable=False`. |
+
+### `CampaignTrackingAssessment`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `tracking_status` | enum (`TrackingStatus`) | Copied unchanged from the source `CampaignInput` — **`WARNING` is never collapsed into `HEALTHY`**, preserving that distinction for later `ReasonCode`/recommendation logic. |
+| `is_assessable` | boolean | `campaign.tracking_status is not TrackingStatus.UNRELIABLE`. |
+
+`CampaignTrackingAssessment` is a separate, independent result model from
+`CampaignPerformanceClass`, `CampaignTrendClass`, and `CampaignConfidenceClass` — none of
+the four is required to construct another, and none is modified by this addition.
+**`Confidence.NOT_ASSESSABLE` is not assigned anywhere in Stage 8** — it remains a valid,
+unmodified `Confidence` member whose trigger and ownership remain pending a later
+combined-assessment stage.
+
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (tracking interpretation, constraints, scoring,
+> Pending a later Sprint 1 stage (combined confidence/tracking assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, pacing interpretation, constraints, scoring,
 > allocation).
 
 ## Export Fields
