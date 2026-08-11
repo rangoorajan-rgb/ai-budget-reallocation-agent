@@ -432,3 +432,71 @@ All notable changes to this project are documented in this file.
   effective constraints, protected/test handling, and eligibility explicitly
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (22 concrete
   Stage 10 scenarios).
+
+- Sprint 1, Development Stage 11: added `CampaignApplicableChangePercentage` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `applicable_max_change_percentage` only)
+  and `resolve_campaign_applicable_change_percentage(review: ReviewSetup, campaign:
+  CampaignInput) -> CampaignApplicableChangePercentage` to `src/constraints.py`,
+  alongside but fully separate from Stage 10's `CampaignStaticBudgetRoom`/
+  `calculate_campaign_static_budget_room`, which are unmodified. Resolves which
+  already-validated maximum-change percentage applies to a campaign — a non-`None`
+  `campaign.campaign_max_change_percentage` always wins; otherwise
+  `review.default_max_change_percentage` applies, via an explicit `is not None` check
+  (never a truthiness-based fallback). The result is never `None`; no special zero
+  handling exists or is needed, since both source fields are already constrained to
+  `(0, 1]`. `DEFAULT_MAX_CHANGE_PERCENTAGE` is never imported or read — only the
+  already-validated `review.default_max_change_percentage` is used, so a
+  caller-supplied `ReviewSetup` value is always respected instead of a hard-coded
+  module constant. Reads only `campaign.campaign_id`,
+  `campaign.campaign_max_change_percentage`, and `review.default_max_change_percentage`
+  — `current_budget`, `minimum_budget`, `maximum_budget`, `room_to_static_maximum`,
+  `room_to_static_minimum`, `is_protected`, `is_test_campaign`, `test_budget_floor`,
+  `platform`, `kpi_type`, and every Stage 3–9 result are all deliberately never read. No
+  arithmetic, quantisation, or rounding is performed — a plain conditional selection,
+  so no local `Decimal` context is used and the result is unaffected by a mutated
+  global `Decimal` context. Never calls `calculate_campaign_static_budget_room` or any
+  Stage 3–9 function; does not calculate a monetary movement cap, a static-bound
+  intersection, or any permissible budget movement. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 11: extended `tests/test_constraints.py` with 24 new
+  tests (all 25 existing Stage 10 tests preserved unchanged; 49 tests total) covering
+  result-model shape/immutability/`campaign_id` copying/no-`None`-result,
+  incompatible-input rejection (`AttributeError`, no silent coercion), exact
+  override-first/default-fallback precedence (including a non-default review value of
+  `0.35` to prove the default isn't hard-coded, deliberately different campaign/review
+  values to prove precedence, the `Decimal("1")` upper boundary, and a small valid
+  `Decimal("0.0001")` value preserved exactly), an AST-verified explicit-`is not
+  None`-check proof (no `BoolOp`, an `Is`/`IsNot`-against-`None` comparison present)
+  and an AST/source-verified no-arithmetic/no-`quantize`/no-`ROUND_` proof,
+  independence (AST-verified restriction to reading only the three authorised fields,
+  AST-verified no call to `calculate_campaign_static_budget_room` or any Stage 3–9
+  function, unaffected by a mutated global `Decimal` context across both an override
+  and a no-override case, platform/KPI independence, budget-field independence,
+  protected/test independence, no combination with Stage 10's result), and integration
+  with `validate_campaign_csv` over `data/sample_campaigns.csv` with a
+  `default_max_change_percentage=Decimal("0.20")` `ReviewSetup` fixture (order
+  preserved; `G001`/`G002`/`G003` = `0.20`, `M001` = `0.15`; Stage 10's static-room
+  results for all four independently re-verified via separate calls in the same test,
+  never combined into one object). **One approved exception:**
+  `tests/test_constraints.py`'s pre-existing
+  `test_module_does_not_import_out_of_scope_modules` AST check was narrowed (removing
+  only `"ReviewSetup"` from its forbidden-import set) because it was written when
+  `src/constraints.py` legitimately had no reason to import it — Stage 11 requires it,
+  per your explicit approval; every other forbidden import
+  (`DEFAULT_MAX_CHANGE_PERCENTAGE` included) is unchanged and still enforced.
+  `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+  `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression. Full suite: 390 tests passing (92 Stage 1 + 44 Stage 2 + 28
+  Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9
+  + 49 Stage 10/11 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignApplicableChangePercentage` fields;
+  exact override/default rule; confirmation no monetary cap or permissible movement is
+  calculated), `docs/DECISION_RULES.md` (frozen Stage 11 applicable-change-percentage
+  resolution rule; monetary-cap formula, effective constraints, protected/test
+  handling, and eligibility explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (21 concrete Stage 11 scenarios).

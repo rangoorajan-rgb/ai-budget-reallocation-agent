@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, and 10 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, and 11 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -328,10 +328,60 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 10 (and not yet started)
+## Development Stage 11 — Deterministic Applicable Change-Percentage Resolution (complete)
 
-- Percentage-based effective constraints, protected-campaign rules, test-budget-floor
-  enforcement, the effective (final permissible) budget movement.
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room` unmodified) — `CampaignApplicableChangePercentage`
+      (frozen, `extra="forbid"`: `campaign_id`, `applicable_max_change_percentage`) and
+      `resolve_campaign_applicable_change_percentage(review: ReviewSetup, campaign:
+      CampaignInput) -> CampaignApplicableChangePercentage`. `src/constants.py`,
+      `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`,
+      `src/classification.py` unchanged.
+- [x] Exact rule and precedence: `applicable_max_change_percentage =
+      campaign.campaign_max_change_percentage if campaign.campaign_max_change_percentage
+      is not None else review.default_max_change_percentage` — a non-`None` campaign
+      override always wins; otherwise the review default applies. Explicit `is not None`
+      check, never a truthiness-based fallback. The result is never `None`; no special
+      zero handling exists or is needed (both source fields are `gt=0`).
+      `DEFAULT_MAX_CHANGE_PERCENTAGE` is never imported or read — only the
+      already-validated `review.default_max_change_percentage` is used.
+- [x] Reads only `campaign.campaign_id`, `campaign.campaign_max_change_percentage`, and
+      `review.default_max_change_percentage` — never `current_budget`,
+      `minimum_budget`, `maximum_budget`, `room_to_static_maximum`,
+      `room_to_static_minimum`, `is_protected`, `is_test_campaign`,
+      `test_budget_floor`, `platform`, `kpi_type`, or any Stage 3–9 result. No
+      arithmetic, quantisation, or rounding; no local `Decimal` context (none is
+      required for conditional selection); unaffected by a mutated global `Decimal`
+      context. Never calls `calculate_campaign_static_budget_room` or any Stage 3–9
+      function.
+- [x] `tests/test_constraints.py` extended (all 25 existing Stage 10 tests preserved
+      unchanged) with 24 new Stage 11 tests — 49 tests total, all passing.
+      `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+      `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression. **One approved exception:** `tests/test_constraints.py`'s
+      pre-existing `test_module_does_not_import_out_of_scope_modules` AST check was
+      narrowed (removing only `"ReviewSetup"` from its forbidden-import set) because it
+      was written when `src/constraints.py` legitimately had no reason to import it —
+      Stage 11 requires it, per your explicit approval; every other forbidden import
+      (`src.classification`, `src.metrics`, `src.pacing`, `src.scoring`,
+      `src.allocation`, `src.conservation`, `CampaignMetrics`, `CampaignPacing`,
+      `PerformanceBand`, `TrendDirection`, `Confidence`, `TrackingStatus`,
+      `CampaignTrackingAssessment`, `PacingStatus`, `RecommendationAction`,
+      `ReasonCode`, and `DEFAULT_MAX_CHANGE_PERCENTAGE`) is unchanged and still
+      enforced.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 11 (and not yet started)
+
+- The percentage monetary-cap formula, its base amount, symmetry between
+  increase/decrease, and its precedence relative to Stage 10's static bounds.
+- Effective constraints, protected-campaign rules, test-budget-floor enforcement, the
+  effective (final permissible) budget movement.
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
@@ -341,12 +391,14 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 11 (not started, scope not yet frozen): requires its own dependency and
+Stage 12 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. Candidates
-include an effective-constraint stage (which would need to decide the percentage-limit
-application mechanism and its precedence relative to Stage 10's static bounds, plus
-protected/test-campaign rules — none of which is frozen anywhere), and a combined
-campaign assessment stage (which would need to decide `Confidence.NOT_ASSESSABLE`
-ownership and a precedence rule while preserving Stage 7's, Stage 8's, and Stage 9's
-independent results, though the prior inspection noted this may be avoidable entirely in
-favour of a later stage simply consuming the independent facts directly).
+include the percentage monetary-cap calculation (which would need to decide the base
+amount, symmetry, and precedence relative to Stage 10's static bounds — none of which is
+frozen anywhere), test-campaign effective-floor calculation (blocked on a genuine
+ambiguity: whether the effective floor is `max(minimum_budget, test_budget_floor)` or
+whether `test_budget_floor` replaces `minimum_budget` entirely for test campaigns —
+`CampaignInput` validates no relationship between the two, so either is currently
+possible), and protected-campaign handling (entirely undecided). A combined campaign
+assessment stage remains a live but not clearly necessary candidate, as noted in the
+Stage 11 inspection.

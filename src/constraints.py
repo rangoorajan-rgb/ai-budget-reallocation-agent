@@ -11,13 +11,27 @@ test-budget-floor enforcement all remain pending a later effective-constraint st
 Reporting a static distance to `minimum_budget` never authorises a reduction below a
 campaign's `test_budget_floor`, and reporting a static distance to `maximum_budget` never
 authorises an increase — Stage 10 calculates facts only, independent of Stages 3–9.
+
+Also implements Sprint 1 — Development Stage 11: for one already-validated `ReviewSetup`
+and one already-validated `CampaignInput`, resolves which already-validated
+maximum-change percentage applies to that campaign — `campaign.campaign_max_change_percentage`
+when it is not `None`, otherwise `review.default_max_change_percentage`. This is a
+neutral `Decimal` configuration fact only — no monetary movement cap, no multiplication
+by `current_budget` or any other amount, no static-bound intersection, and no
+increase/decrease symmetry rule is calculated. `DEFAULT_MAX_CHANGE_PERCENTAGE` is never
+imported or read, so a caller-supplied `ReviewSetup` value is always respected instead of
+a hard-coded default. Stage 11 is independent of Stage 10: it never reads
+`current_budget`, `minimum_budget`, `maximum_budget`, `room_to_static_maximum`, or
+`room_to_static_minimum`, and never calls `calculate_campaign_static_budget_room`. It
+also ignores `is_protected`, `is_test_campaign`, and `test_budget_floor` — protection and
+test-campaign effective-floor rules remain pending a later stage.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from pydantic import BaseModel, ConfigDict
 
-from src.models import CampaignInput
+from src.models import CampaignInput, ReviewSetup
 
 
 class CampaignStaticBudgetRoom(BaseModel):
@@ -59,4 +73,42 @@ def calculate_campaign_static_budget_room(
         campaign_id=campaign.campaign_id,
         room_to_static_maximum=room_to_static_maximum,
         room_to_static_minimum=room_to_static_minimum,
+    )
+
+
+class CampaignApplicableChangePercentage(BaseModel):
+    """The applicable maximum-change percentage resolved for one campaign.
+
+    Not a monetary movement cap, a static-bound intersection, a protection or
+    test-budget-floor determination, an eligibility result, a score, a recommendation,
+    a reason code, or an allocation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    applicable_max_change_percentage: Decimal
+
+
+def resolve_campaign_applicable_change_percentage(
+    review: ReviewSetup,
+    campaign: CampaignInput,
+) -> CampaignApplicableChangePercentage:
+    """Resolve which already-validated maximum-change percentage applies to one
+    campaign.
+
+    `campaign.campaign_max_change_percentage` wins when it is not `None`; otherwise
+    `review.default_max_change_percentage` applies. This is a plain conditional
+    selection — no arithmetic, quantisation, or `Decimal` context is required, and the
+    selected value is preserved exactly.
+    """
+    applicable_max_change_percentage = (
+        campaign.campaign_max_change_percentage
+        if campaign.campaign_max_change_percentage is not None
+        else review.default_max_change_percentage
+    )
+
+    return CampaignApplicableChangePercentage(
+        campaign_id=campaign.campaign_id,
+        applicable_max_change_percentage=applicable_max_change_percentage,
     )

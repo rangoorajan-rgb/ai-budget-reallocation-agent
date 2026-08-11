@@ -1,14 +1,15 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 10. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 11. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
 > tracking-assessability-classification rules, the frozen neutral pacing-interpretation
-> rules, and the frozen static budget-bound calculation rules. Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, percentage-based effective constraints,
-> protected/test handling, eligibility, scoring, and allocation rules are pending later
-> Sprint 1 stages.
+> rules, the frozen static budget-bound calculation rules, and the frozen applicable-
+> change-percentage resolution rule. Combined assessment, `Confidence.NOT_ASSESSABLE`
+> ownership, percentage-based monetary caps, effective constraints, protected/test
+> handling, eligibility, scoring, and allocation rules are pending later Sprint 1
+> stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -568,6 +569,67 @@ authoritative source of `current_budget`/`minimum_budget`/`maximum_budget`;
   `ReasonCode`, no score, and no allocation field — it is strictly a pair of static
   distance facts, consumed by a later, still-undesigned effective-constraint stage.
 
+## Deterministic Applicable Change-Percentage Resolution Rules (Sprint 1, Development Stage 11)
+
+These rules govern the addition to `src/constraints.py` that resolves, for one
+already-validated `ReviewSetup` and one already-validated `CampaignInput`, which
+already-validated maximum-change percentage applies to that campaign. Stage 11 is a
+**selection fact only** — no arithmetic, no monetary movement cap, and no permissible
+budget movement is calculated. `CampaignInput`/`ReviewSetup` (`src/models.py`) remain
+the sole authoritative source of `campaign_max_change_percentage`/
+`default_max_change_percentage`; `src/constraints.py` never re-validates them.
+
+- **Resolution input.** `CampaignInput.campaign_id`, `campaign_max_change_percentage`,
+  and `ReviewSetup.default_max_change_percentage` are the only fields read. No other
+  field of either model is read — in particular, `current_budget`, `minimum_budget`,
+  `maximum_budget`, `room_to_static_maximum`, `room_to_static_minimum`, `is_protected`,
+  `is_test_campaign`, `test_budget_floor`, `platform`, and `kpi_type` are never read.
+- **Exact rule and precedence:**
+  ```
+  applicable_max_change_percentage = (
+      campaign.campaign_max_change_percentage
+      if campaign.campaign_max_change_percentage is not None
+      else review.default_max_change_percentage
+  )
+  ```
+  A non-`None` campaign override always wins; otherwise the review default applies.
+  This uses an explicit `is not None` check, never a truthiness-based fallback (e.g.
+  `campaign.campaign_max_change_percentage or review.default_max_change_percentage`) —
+  significant because a truthiness check would behave identically for every value
+  `CampaignInput` currently permits (both fields are `gt=0`, so no valid non-`None`
+  value is ever falsy), but the explicit check is the correct, unambiguous expression of
+  the intended precedence regardless.
+- **The result is never `None`.** `campaign_max_change_percentage` may be `None`, in
+  which case `review.default_max_change_percentage` applies — and that field is itself
+  never `None` on a constructed `ReviewSetup` (it always has a value, defaulting to
+  `DEFAULT_MAX_CHANGE_PERCENTAGE` if not supplied). No special zero handling exists or
+  is needed: both source fields are constrained to `(0, 1]` by existing validation
+  (`gt=0`, `le=1`), so a resolved value of exactly zero cannot occur.
+- **`DEFAULT_MAX_CHANGE_PERCENTAGE` is never imported or read by this resolution.** Only
+  the already-validated `review.default_max_change_percentage` is used, so a
+  caller-supplied `ReviewSetup` value is always respected instead of a hard-coded
+  module constant.
+- **No arithmetic, quantisation, or rounding.** The resolved percentage is preserved
+  exactly as a plain conditional selection — no `Decimal` arithmetic, no local
+  `decimal` context, and no `float` conversion; the result is unaffected by any global
+  `Decimal` context a caller may have mutated, since no computation occurs at all.
+- **Independence from Stage 10.** `resolve_campaign_applicable_change_percentage` never
+  reads any `CampaignStaticBudgetRoom` field and never calls
+  `calculate_campaign_static_budget_room` (or vice versa); the two facts are never
+  combined into one result or one call.
+- **Exclusion of static-bound intersection.** Whether/how the resolved percentage
+  interacts with `room_to_static_maximum`/`room_to_static_minimum` — including any
+  monetary-cap formula, its base amount, and its precedence relative to the static
+  bounds — is not calculated here and remains pending a later stage.
+- **Exclusion of protection and test-budget-floor effects.** `is_protected`,
+  `is_test_campaign`, and `test_budget_floor` are never read; changing any of them while
+  holding the three authorised fields constant never changes the result. This does not
+  authorise any protected-campaign or test-campaign budget behaviour.
+- **Monetary-cap and effective-constraint rules remain pending.** Stage 11 resolves only
+  *which* percentage value applies — the multiplication base, symmetry between
+  increase/decrease, and full precedence among static bounds, percentage caps,
+  protection, and test floors are all still undecided.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -594,13 +656,14 @@ authoritative source of `current_budget`/`minimum_budget`/`maximum_budget`;
   assessment stage, which must preserve Stage 7's, Stage 8's, and Stage 9's independent
   results rather than overwriting any of them.
 - **Effective constraints, protected/test handling, eligibility.** Stage 10 resolved
-  the static budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`,
-  see above), but `is_protected`, `is_test_campaign`, `test_budget_floor`,
-  `campaign_max_change_percentage`, and `default_max_change_percentage` are still never
-  applied anywhere — no rule computes the campaign's *effective* permissible budget
-  movement, and no eligibility concept is defined anywhere in the repository. Both
-  remain pending later stages.
-- How `DEFAULT_MAX_CHANGE_PERCENTAGE` and per-campaign overrides constrain a recommended
-  budget change, and their precedence relative to Stage 10's static bounds.
+  the static budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`),
+  and Stage 11 resolved which percentage applies to a campaign
+  (`applicable_max_change_percentage`, see above), but `is_protected`,
+  `is_test_campaign`, and `test_budget_floor` are still never applied anywhere — no rule
+  computes the campaign's *effective* permissible budget movement, and no eligibility
+  concept is defined anywhere in the repository. Both remain pending later stages.
+- How the resolved `applicable_max_change_percentage` constrains a recommended budget
+  change (the monetary-cap formula and base amount), and its precedence relative to
+  Stage 10's static bounds.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.

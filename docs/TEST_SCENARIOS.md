@@ -1,10 +1,12 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 10 populates the Static Budget-Bound Scenarios section
-> below, backed by `tests/test_constraints.py` (25 tests), in addition to the Stage 9
-> Pacing Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
-> Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
-> tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
+> Sprint 1, Development Stage 11 populates the Applicable Change-Percentage Resolution
+> Scenarios section below, backed by the Stage 11 additions to `tests/test_constraints.py`
+> (which now holds 49 tests total: 25 Stage 10 + 24 Stage 11), in addition to the Static
+> Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation Scenarios
+> (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking Assessability
+> Scenarios (`tests/test_tracking_assessment.py`, 30 tests), the Stage 7
+> Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
 > Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
 > Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
@@ -379,6 +381,39 @@ recommendation, a reason code, or an allocation outcome.
 | 20 | `campaign_max_change_percentage = None` vs. a supplied override, otherwise identical budgets | Same `room_to_static_maximum`/`room_to_static_minimum` — never read. |
 | 21 | `CampaignStaticBudgetRoom.model_fields` / result attributes | Contains no `effective_minimum_budget`, `effective_maximum_budget`, `room_to_increase`, `room_to_decrease`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `campaign_max_change_percentage`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, or `allocation` field. |
 | 22 | `data/sample_campaigns.csv` validated, then each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`: `room_to_static_maximum=3000.00`, `room_to_static_minimum=2500.00`. `M001`: `2500.00`/`2000.00`. `G002` (protected): `3000.00`/`4000.00` — unaffected by `is_protected=True`. `G003` (test campaign, `test_budget_floor=300.00`): `800.00`/`1100.00` — the `1100.00` figure is a static-bound fact only, not an approved decrease amount; it does not authorise reducing `G003` below its `300.00` test floor. |
+
+## Applicable Change-Percentage Resolution Scenarios
+
+All scenarios below use `resolve_campaign_applicable_change_percentage(review:
+ReviewSetup, campaign: CampaignInput) -> CampaignApplicableChangePercentage` from
+`src/constraints.py`. Every result is a **neutral `Decimal` configuration fact only** —
+none of these scenarios produces a monetary movement cap, a static-bound intersection,
+a protection or test-budget-floor determination, an eligibility result, a score, a
+recommendation, a reason code, or an allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignApplicableChangePercentage` field set | Exactly `campaign_id`, `applicable_max_change_percentage`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignApplicableChangePercentage` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 5 | `applicable_max_change_percentage` | Always `Decimal`, never `float`, never `None`. |
+| 6 | `resolve_campaign_applicable_change_percentage(None, None)` / dict inputs (not `ReviewSetup`/`CampaignInput`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 7 | `campaign_max_change_percentage=None`, `review.default_max_change_percentage=Decimal("0.35")` (a non-default value) | `applicable_max_change_percentage = Decimal("0.35")` — proves the review default is used, not a hard-coded `0.20`. |
+| 8 | `campaign_max_change_percentage=Decimal("0.05")`, `review.default_max_change_percentage=Decimal("0.35")` (deliberately different values) | `applicable_max_change_percentage = Decimal("0.05")` — proves campaign-override-first precedence. |
+| 9 | `campaign_max_change_percentage=Decimal("1")` (upper boundary) | `applicable_max_change_percentage = Decimal("1")`. |
+| 10 | `campaign_max_change_percentage=Decimal("0.0001")` (small valid positive value) | Preserved exactly, no rounding. |
+| 11 | Resolution source | Uses an explicit `is not None` check, not a truthiness fallback (AST-verified: no `BoolOp`, an `Is`/`IsNot`-against-`None` comparison is present); contains no binary arithmetic operation and no `quantize`/`ROUND_` text (AST- and source-verified). |
+| 12 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function, for both an override and a no-override case | Result unaffected in both cases — resolution is plain conditional selection, no `Decimal` computation occurs. |
+| 13 | Google Ads vs. Meta Ads, otherwise identical | Same `applicable_max_change_percentage`. |
+| 14 | CPA vs. ROAS, otherwise identical | Same `applicable_max_change_percentage`. |
+| 15 | A campaign with a very small budget vs. a very large budget, otherwise identical | Same `applicable_max_change_percentage` — `current_budget`/`minimum_budget`/`maximum_budget` never read. |
+| 16 | `calculate_campaign_static_budget_room` and `resolve_campaign_applicable_change_percentage` called on the same campaign | Both succeed independently; neither result contains the other's fields; Stage 10's function is neither called from nor combined with Stage 11's. |
+| 17 | `is_protected=False` vs. `is_protected=True`, otherwise identical | Same `applicable_max_change_percentage` — never read. |
+| 18 | Non-test campaign vs. test campaign with a `test_budget_floor`, otherwise identical | Same `applicable_max_change_percentage` — `is_test_campaign`/`test_budget_floor` never read. |
+| 19 | `CampaignApplicableChangePercentage.model_fields` / result attributes | Contains no `room_to_static_maximum`, `room_to_static_minimum`, `monetary_cap`, `max_change_amount`, `effective_minimum_budget`, `effective_maximum_budget`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, or `allocation` field. |
+| 20 | `resolve_campaign_applicable_change_percentage` source | Reads only `campaign.campaign_id`/`campaign.campaign_max_change_percentage`/`review.default_max_change_percentage` (AST-verified); calls none of `calculate_campaign_static_budget_room`/`calculate_campaign_metrics`/`calculate_campaign_pacing`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`assess_campaign_tracking`/`classify_campaign_pacing` (AST-verified); `src/constraints.py`'s module-level import list omits `DEFAULT_MAX_CHANGE_PERCENTAGE` and every Stage 3–9 model/enum (AST-verified — `ReviewSetup` is the one approved exception, narrowed from the prior forbidden set). |
+| 21 | `data/sample_campaigns.csv` validated, a `ReviewSetup` fixture with `default_max_change_percentage=Decimal("0.20")`, then each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001` (no override) = `0.20`. `M001` (`campaign_max_change_percentage=0.15`) = `0.15`. `G002` (no override) = `0.20`. `G003` (no override) = `0.20`. Stage 10's static-room results for all four are independently re-verified via separate `calculate_campaign_static_budget_room` calls in the same test, without combining the two stages' results into one object. |
 
 ## Allocation Scenarios
 

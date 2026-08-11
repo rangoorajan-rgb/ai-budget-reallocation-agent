@@ -1,13 +1,14 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 10 (adds neutral deterministic static budget-bound facts
-> to the Stage 1 enumerations, numerical constants, core input models, CSV schema, Stage
-> 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance
-> classification, Stage 6 trend classification, Stage 7 conversion-volume confidence
-> classification, Stage 8 tracking-based assessability, and Stage 9 pacing
-> interpretation). Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
-> percentage-based effective constraints, protected/test handling, eligibility, and
-> other derived/decision fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 11 (adds a neutral deterministic applicable-change-
+> percentage resolution to the Stage 1 enumerations, numerical constants, core input
+> models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing
+> facts, Stage 5 performance classification, Stage 6 trend classification, Stage 7
+> conversion-volume confidence classification, Stage 8 tracking-based assessability,
+> Stage 9 pacing interpretation, and Stage 10 static budget-bound facts). Combined
+> assessment, `Confidence.NOT_ASSESSABLE` ownership, percentage-based monetary caps,
+> effective constraints, protected/test handling, eligibility, and other derived/
+> decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -363,11 +364,42 @@ protection and test-floor rules before any budget movement is proposed.
 `CampaignTrackingAssessment`, and `CampaignPacingClass` — none of the six is required to
 construct another, and none is modified by this addition.
 
+## Campaign Applicable Change-Percentage Fields (`src/constraints.py`)
+
+Produced by `resolve_campaign_applicable_change_percentage(review: ReviewSetup,
+campaign: CampaignInput) -> CampaignApplicableChangePercentage`, one result per
+already-validated `ReviewSetup`/`CampaignInput` pair. `CampaignApplicableChangePercentage`
+is frozen (immutable) and rejects unknown fields (`extra="forbid"`). This is a **neutral
+`Decimal` configuration fact only** — it is **not** a monetary movement cap, a
+multiplication by `current_budget` or any other amount, a static-bound intersection, an
+increase/decrease symmetry rule, a protection or test-budget-floor determination, an
+eligibility result, a score, a recommendation, a reason code, or an allocation. Depends
+only on `CampaignInput.campaign_id`/`campaign_max_change_percentage` and
+`ReviewSetup.default_max_change_percentage` — never `current_budget`, `minimum_budget`,
+`maximum_budget`, `room_to_static_maximum`, `room_to_static_minimum`, `is_protected`,
+`is_test_campaign`, `test_budget_floor`, `platform`, `kpi_type`, or any Stage 3–9
+result. The module-level `DEFAULT_MAX_CHANGE_PERCENTAGE` constant is never imported or
+read — only the already-validated `review.default_max_change_percentage` value is used,
+so a caller-supplied `ReviewSetup` is always respected.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `applicable_max_change_percentage` | Decimal | `campaign.campaign_max_change_percentage` when it is not `None`; otherwise `review.default_max_change_percentage`. Never `None`. Preserved exactly — no arithmetic, quantisation, or rounding is performed. |
+
+**Exact override/default rule:** the campaign-level override always wins when present
+(explicit `is not None` check, not a truthiness check); otherwise the review's default
+applies. This selects **which already-validated percentage applies** — it does **not**
+calculate a monetary cap or determine any permissible budget movement.
+`CampaignApplicableChangePercentage` is a separate, independent result model from
+`CampaignStaticBudgetRoom` — the two are never combined, and neither is required to
+construct the other.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, percentage-based effective constraints,
-> protected/test handling, eligibility, scoring, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, percentage-based monetary caps, effective
+> constraints, protected/test handling, eligibility, scoring, allocation).
 
 ## Export Fields
 

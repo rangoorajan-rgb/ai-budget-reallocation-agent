@@ -776,3 +776,84 @@ later stages. No existing test file required modification for Stage 10 —
 `tests/test_constraints.py` was a bare placeholder with zero prior tests, so populating
 it was not a modification of prior-stage behaviour.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 11 is applicable maximum-change-percentage resolution only
+
+**Decision:** Sprint 1, Development Stage 11 adds a narrow, deterministic percentage-
+resolution fact to `src/constraints.py`, as an *addition* alongside Stage 10's
+`CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room` — not a modification
+of either. For one already-validated `ReviewSetup` and one already-validated
+`CampaignInput`, it selects which already-validated maximum-change percentage applies —
+it does **not** calculate a monetary movement cap, does **not** multiply by
+`current_budget` or any other amount, and does **not** determine any permissible budget
+movement. This is deliberately narrower than "percentage-based constraints" broadly;
+the monetary-cap formula, its base amount, symmetry between increase/decrease, and its
+precedence relative to Stage 10's static bounds are all explicitly deferred, since none
+is frozen anywhere and implementing them now would require inventing a rule.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 11: exact model, function signature, and override-first precedence
+
+**Decision:** `CampaignApplicableChangePercentage` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id`, `applicable_max_change_percentage`) is defined in
+`src/constraints.py`, alongside but fully separate from `CampaignStaticBudgetRoom`. The
+sole public function is `resolve_campaign_applicable_change_percentage(review:
+ReviewSetup, campaign: CampaignInput) -> CampaignApplicableChangePercentage`; it reads
+only `campaign.campaign_id`, `campaign.campaign_max_change_percentage`, and
+`review.default_max_change_percentage` — no other field of either model, and no Stage
+3–9 result. Exact rule:
+```
+applicable_max_change_percentage = (
+    campaign.campaign_max_change_percentage
+    if campaign.campaign_max_change_percentage is not None
+    else review.default_max_change_percentage
+)
+```
+A non-`None` campaign override always wins; otherwise the review default applies. This
+uses an explicit `is not None` check, never a truthiness-based fallback (e.g. `campaign
+override or review default`) — the distinction is currently unobservable in practice
+(both source fields are `gt=0`, so no valid non-`None` override is ever falsy), but the
+explicit check is the unambiguous, correct expression of the intended precedence
+regardless of that coincidence. The result is never `None`, since
+`review.default_max_change_percentage` itself is never `None` on a constructed
+`ReviewSetup`. No special zero handling exists or is needed, since both source fields
+are already constrained to `(0, 1]`.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 11: DEFAULT_MAX_CHANGE_PERCENTAGE prohibition and no arithmetic
+
+**Decision:** `DEFAULT_MAX_CHANGE_PERCENTAGE` (`src/constants.py`) is never imported or
+read by Stage 11 — only the already-validated `review.default_max_change_percentage` is
+used, ensuring a caller-supplied `ReviewSetup` value is always respected instead of a
+hard-coded module constant. Stage 11 performs no arithmetic, quantisation, or rounding:
+it is a plain conditional selection, so no local `Decimal` context is used and the
+result is unaffected by any global `Decimal` context a caller may have mutated. Stage 11
+remains fully independent of Stage 10 — it never reads `current_budget`,
+`minimum_budget`, `maximum_budget`, `room_to_static_maximum`, or
+`room_to_static_minimum`, and never calls `calculate_campaign_static_budget_room` (or
+vice versa); the two facts are never combined into one result or one call. `is_protected`,
+`is_test_campaign`, and `test_budget_floor` are likewise never read — changing any of
+them while holding the three authorised fields constant never changes the result. This
+does not authorise any protected-campaign or test-campaign budget behaviour; those
+rules, along with the percentage monetary-cap formula and the full effective-constraint
+precedence, remain deferred to later stages.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 11: one Stage 10 AST scope-boundary test narrowed by explicit approval
+
+**Decision:** Implementing the approved Stage 11 specification required importing
+`ReviewSetup` (`src.models`) into `src/constraints.py`. This broke a pre-existing
+assertion in `tests/test_constraints.py` —
+`test_module_does_not_import_out_of_scope_modules` — which had forbidden that exact
+import because, when Stage 10 was written, `src/constraints.py` legitimately had no
+reason to import it. This was identified as a genuine conflict and reported before any
+test file was touched, mirroring the precedent set by Stages 7, 8, and 9's equivalent
+narrowings. With explicit approval, only `"ReviewSetup"` was removed from that one
+test's `forbidden_imports` set; every other forbidden entry (`src.classification`,
+`src.metrics`, `src.pacing`, `src.scoring`, `src.allocation`, `src.conservation`,
+`CampaignMetrics`, `CampaignPacing`, `PerformanceBand`, `TrendDirection`, `Confidence`,
+`TrackingStatus`, `CampaignTrackingAssessment`, `PacingStatus`, `RecommendationAction`,
+`ReasonCode`, and — critically — `DEFAULT_MAX_CHANGE_PERCENTAGE`) remains unchanged and
+still enforced. All 25 of Stage 10's existing tests in `tests/test_constraints.py` were
+preserved unmodified; only this one assertion's forbidden-name set was narrowed.
+**Status:** Frozen.
