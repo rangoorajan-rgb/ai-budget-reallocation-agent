@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10 and 11).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, and 12).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -17,6 +17,16 @@ static budget-bound facts and from every other CampaignInput/ReviewSetup field, 
 scope boundaries (no monetary cap, no static-bound intersection, no protection or
 test-budget-floor effect, no eligibility/score/recommendation/reason-code/allocation
 field).
+
+Also covers Stage 12's CampaignRawPercentageMovementCap construction/immutability, the
+exact current_budget * applicable_max_change_percentage formula, campaign_id-mismatch
+error behaviour, ROUND_HALF_UP quantisation to CURRENCY_QUANTUM applied exactly once,
+the operand-derived local Decimal precision policy (which prevents an intermediate
+double-rounding error reachable by an already-valid extreme CampaignInput), Decimal-
+context independence, independence from Stage 10's static-room facts and from
+protected/test fields, and scope boundaries (no effective movement, static-bound
+intersection, eligibility, score, recommendation, reason code, allocation, or
+conservation field).
 """
 
 import ast
@@ -29,10 +39,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.constants import BusinessPriority, CampaignStatus, KPIType, Platform, TrackingStatus
+from src.constants import (
+    BusinessPriority,
+    CampaignStatus,
+    CURRENCY_QUANTUM,
+    KPIType,
+    Platform,
+    TrackingStatus,
+)
 from src.constraints import (
     CampaignApplicableChangePercentage,
+    CampaignRawPercentageMovementCap,
     CampaignStaticBudgetRoom,
+    calculate_campaign_raw_percentage_movement_cap,
     calculate_campaign_static_budget_room,
     resolve_campaign_applicable_change_percentage,
 )
@@ -844,6 +863,619 @@ def test_sample_campaigns_csv_applicable_change_percentage_exact_values_and_orde
         assert campaign.campaign_max_change_percentage == expected_overrides[campaign.campaign_id]
     for result in results:
         assert result.applicable_max_change_percentage == expected_applicable[result.campaign_id]
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — CampaignRawPercentageMovementCap result model
+# ---------------------------------------------------------------------------
+
+
+def _applicable_percentage(**overrides) -> CampaignApplicableChangePercentage:
+    kwargs = dict(
+        campaign_id="C001",
+        applicable_max_change_percentage=Decimal("0.20"),
+    )
+    kwargs.update(overrides)
+    return CampaignApplicableChangePercentage(**kwargs)
+
+
+def test_campaign_raw_percentage_movement_cap_accepts_exactly_two_fields():
+    assert set(CampaignRawPercentageMovementCap.model_fields.keys()) == {
+        "campaign_id",
+        "raw_percentage_movement_cap",
+    }
+
+
+def test_campaign_raw_percentage_movement_cap_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignRawPercentageMovementCap(
+            campaign_id="C001",
+            raw_percentage_movement_cap=Decimal("600.00"),
+            extra_field="not allowed",
+        )
+
+
+def test_campaign_raw_percentage_movement_cap_is_immutable():
+    result = calculate_campaign_raw_percentage_movement_cap(
+        _campaign(), _applicable_percentage()
+    )
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_raw_movement_cap_campaign_id_copied_exactly_from_campaign_input():
+    result = calculate_campaign_raw_percentage_movement_cap(
+        _campaign(campaign_id="XYZ-1"), _applicable_percentage(campaign_id="XYZ-1")
+    )
+    assert result.campaign_id == "XYZ-1"
+
+
+def test_raw_movement_cap_is_decimal_never_float_never_none_and_two_decimal_places():
+    result = calculate_campaign_raw_percentage_movement_cap(
+        _campaign(), _applicable_percentage()
+    )
+    assert isinstance(result.raw_percentage_movement_cap, Decimal)
+    assert not isinstance(result.raw_percentage_movement_cap, float)
+    assert result.raw_percentage_movement_cap is not None
+    assert result.raw_percentage_movement_cap == result.raw_percentage_movement_cap.quantize(
+        CURRENCY_QUANTUM
+    )
+    assert result.raw_percentage_movement_cap.as_tuple().exponent == -2
+
+
+def test_calculate_campaign_raw_percentage_movement_cap_rejects_incompatible_input():
+    with pytest.raises(AttributeError):
+        calculate_campaign_raw_percentage_movement_cap(None, None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        calculate_campaign_raw_percentage_movement_cap(  # type: ignore[arg-type]
+            _campaign(), {"applicable_max_change_percentage": Decimal("0.20")}
+        )
+    with pytest.raises(AttributeError):
+        calculate_campaign_raw_percentage_movement_cap(  # type: ignore[arg-type]
+            {"current_budget": Decimal("1000.00")}, _applicable_percentage()
+        )
+
+
+def test_raw_movement_cap_has_no_out_of_scope_fields():
+    field_names = set(CampaignRawPercentageMovementCap.model_fields.keys())
+    forbidden = {
+        "room_to_static_maximum",
+        "room_to_static_minimum",
+        "effective_minimum_budget",
+        "effective_maximum_budget",
+        "permissible_movement",
+        "is_protected",
+        "is_test_campaign",
+        "test_budget_floor",
+        "eligibility",
+        "blocked",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+    }
+    assert field_names.isdisjoint(forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — exact calculation
+# ---------------------------------------------------------------------------
+
+
+def test_exact_whole_penny_multiplication():
+    campaign = _campaign(
+        current_budget=Decimal("3000.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("6000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.20"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("600.00")
+
+
+def test_fractional_penny_rounds_up_under_round_half_up():
+    # 333.33 * 0.20 = 66.666 -> discarded portion (.006 relative to 66.66) exceeds
+    # half a cent, so this rounds up regardless of tie-breaking rule.
+    campaign = _campaign(
+        current_budget=Decimal("333.33"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.20"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("66.67")
+
+
+def test_value_below_half_penny_rounds_down():
+    # 1.00 * 0.004 = 0.004 -> exactly below half a cent, rounds down to 0.00.
+    campaign = _campaign(
+        current_budget=Decimal("1.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("1.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.004"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("0.00")
+
+
+def test_exact_half_penny_rounds_up_under_round_half_up():
+    # 1.00 * 0.005 = 0.005 -> an exact tie at the half-cent boundary, ROUND_HALF_UP
+    # rounds away from zero to 0.01.
+    campaign = _campaign(
+        current_budget=Decimal("1.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("1.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.005"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("0.01")
+
+
+def test_percentage_of_one_returns_current_budget_exactly():
+    campaign = _campaign(
+        current_budget=Decimal("3000.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("6000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("1"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("3000.00")
+
+
+def test_small_positive_percentage_handled_and_quantised_correctly():
+    # 12345.00 * 0.0001 = 1.2345 -> third decimal digit is 4, rounds down to 1.23.
+    campaign = _campaign(
+        current_budget=Decimal("12345.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("20000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.0001"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("1.23")
+
+
+def test_zero_current_budget_returns_zero():
+    campaign = _campaign(
+        current_budget=Decimal("0.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("0.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.20"))
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert result.raw_percentage_movement_cap == Decimal("0.00")
+
+
+def test_no_float_conversion_in_calculation():
+    source = inspect.getsource(calculate_campaign_raw_percentage_movement_cap)
+    assert "float(" not in source
+
+
+def test_quantize_is_called_exactly_once():
+    source = inspect.getsource(calculate_campaign_raw_percentage_movement_cap)
+    tree = ast.parse(source)
+    quantize_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "quantize"
+    ]
+    assert len(quantize_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — campaign-ID validation
+# ---------------------------------------------------------------------------
+
+
+def test_matching_campaign_ids_calculate_normally():
+    result = calculate_campaign_raw_percentage_movement_cap(
+        _campaign(campaign_id="MATCH-1"), _applicable_percentage(campaign_id="MATCH-1")
+    )
+    assert result.campaign_id == "MATCH-1"
+
+
+def test_mismatched_campaign_ids_raise_value_error_with_exact_message():
+    with pytest.raises(ValueError) as exc_info:
+        calculate_campaign_raw_percentage_movement_cap(
+            _campaign(campaign_id="A"), _applicable_percentage(campaign_id="B")
+        )
+    assert str(exc_info.value) == "campaign_id mismatch between campaign and applicable percentage"
+
+
+def test_no_result_returned_for_mismatched_campaign_ids():
+    try:
+        calculate_campaign_raw_percentage_movement_cap(
+            _campaign(campaign_id="A"), _applicable_percentage(campaign_id="B")
+        )
+        assert False, "expected ValueError, no result should be returned"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — Decimal context and the operand-derived precision policy
+# ---------------------------------------------------------------------------
+
+
+def test_mutated_global_decimal_context_does_not_affect_raw_movement_cap():
+    campaign = _campaign(
+        current_budget=Decimal("3000.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("6000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.20"))
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 2
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+        assert result.raw_percentage_movement_cap == Decimal("600.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_global_decimal_context_unchanged_after_function_returns():
+    campaign = _campaign(
+        current_budget=Decimal("3000.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("6000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(applicable_max_change_percentage=Decimal("0.20"))
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+
+        assert decimal.getcontext().prec == 5
+        assert decimal.getcontext().rounding == decimal.ROUND_DOWN
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_extreme_operand_derived_precision_regression():
+    """Regression test for the double-rounding bug found during the Stage 12
+    inspection: an already-valid CampaignInput's current_budget can hold up to 28
+    significant digits, and applicable_max_change_percentage has no digit-count
+    restriction. Under a naive fixed local precision of 28, the intermediate
+    multiplication is rounded before the explicit final quantisation ever runs,
+    incorrectly returning Decimal("...52910.71"). The operand-derived precision policy
+    (max(28, operand_digits + 4)) computes the multiplication exactly, correctly
+    returning Decimal("...52910.70").
+    """
+    extreme_current_budget = Decimal("9" * 26 + ".99")
+    extreme_percentage = Decimal("0.036020245307579938554529107051")
+
+    # Confirm the operand-derived policy is actually exercised here (not merely
+    # falling back to the max(28, ...) floor).
+    operand_digits = len(extreme_current_budget.as_tuple().digits) + len(
+        extreme_percentage.as_tuple().digits
+    )
+    assert operand_digits + 4 > 28
+
+    campaign = _campaign(
+        campaign_id="EXTREME-1",
+        current_budget=extreme_current_budget,
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=extreme_current_budget,
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id="EXTREME-1",
+        applicable_max_change_percentage=extreme_percentage,
+    )
+
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+
+    assert result.raw_percentage_movement_cap == Decimal("3602024530757993855452910.70")
+    assert result.raw_percentage_movement_cap != Decimal("3602024530757993855452910.71")
+
+
+def test_extreme_operand_derived_precision_regression_under_altered_global_context():
+    extreme_current_budget = Decimal("9" * 26 + ".99")
+    extreme_percentage = Decimal("0.036020245307579938554529107051")
+
+    campaign = _campaign(
+        campaign_id="EXTREME-1",
+        current_budget=extreme_current_budget,
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=extreme_current_budget,
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id="EXTREME-1",
+        applicable_max_change_percentage=extreme_percentage,
+    )
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+        assert result.raw_percentage_movement_cap == Decimal("3602024530757993855452910.70")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_extreme_value_preserves_significant_whole_number_digits():
+    extreme_current_budget = Decimal("9" * 26 + ".99")
+    campaign = _campaign(
+        campaign_id="EXTREME-2",
+        current_budget=extreme_current_budget,
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=extreme_current_budget,
+        spend_to_date=Decimal("0.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id="EXTREME-2",
+        applicable_max_change_percentage=Decimal("1"),
+    )
+    result = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    # 100% of the extreme budget must equal the extreme budget exactly - no
+    # whole-number digit may be silently rounded or dropped.
+    assert result.raw_percentage_movement_cap == extreme_current_budget
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — independence
+# ---------------------------------------------------------------------------
+
+
+def test_raw_movement_cap_function_reads_only_four_authorised_fields():
+    source = inspect.getsource(calculate_campaign_raw_percentage_movement_cap)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    campaign_param, applicable_percentage_param = (arg.arg for arg in func_def.args.args)
+    assert campaign_param == "campaign"
+    assert applicable_percentage_param == "applicable_percentage"
+
+    campaign_attrs: set[str] = set()
+    percentage_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == campaign_param:
+                campaign_attrs.add(node.attr)
+            elif node.value.id == applicable_percentage_param:
+                percentage_attrs.add(node.attr)
+
+    assert campaign_attrs == {"campaign_id", "current_budget"}
+    assert percentage_attrs == {"campaign_id", "applicable_max_change_percentage"}
+
+
+def test_raw_movement_cap_does_not_reference_review_setup():
+    source = inspect.getsource(calculate_campaign_raw_percentage_movement_cap)
+    tree = ast.parse(source)
+    referenced_names = {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+    }
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+
+
+def test_raw_movement_cap_does_not_call_stage_10_11_or_stage_3_to_9_functions():
+    source = inspect.getsource(calculate_campaign_raw_percentage_movement_cap)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "calculate_campaign_static_budget_room",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_platform_does_not_affect_raw_movement_cap():
+    percentage = _applicable_percentage()
+    google = _campaign(campaign_id="C001", platform=Platform.GOOGLE_ADS)
+    meta = _campaign(campaign_id="C001", platform=Platform.META_ADS)
+    result_google = calculate_campaign_raw_percentage_movement_cap(google, percentage)
+    result_meta = calculate_campaign_raw_percentage_movement_cap(meta, percentage)
+    assert result_google.raw_percentage_movement_cap == result_meta.raw_percentage_movement_cap
+
+
+def test_kpi_type_does_not_affect_raw_movement_cap():
+    percentage = _applicable_percentage()
+    cpa = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.CPA,
+        kpi_target=Decimal("10.00"),
+        kpi_actual_7d=Decimal("10.00"),
+        kpi_actual_28d=Decimal("10.00"),
+    )
+    roas = _campaign(
+        campaign_id="C001",
+        kpi_type=KPIType.ROAS,
+        kpi_target=Decimal("3.00"),
+        kpi_actual_7d=Decimal("3.00"),
+        kpi_actual_28d=Decimal("3.00"),
+    )
+    result_cpa = calculate_campaign_raw_percentage_movement_cap(cpa, percentage)
+    result_roas = calculate_campaign_raw_percentage_movement_cap(roas, percentage)
+    assert result_cpa.raw_percentage_movement_cap == result_roas.raw_percentage_movement_cap
+
+
+def test_minimum_and_maximum_budget_do_not_affect_raw_movement_cap():
+    percentage = _applicable_percentage()
+    narrow_bounds = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("999.00"),
+        maximum_budget=Decimal("1001.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    wide_bounds = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("0.00"),
+        maximum_budget=Decimal("1000000.00"),
+        spend_to_date=Decimal("0.00"),
+    )
+    result_narrow = calculate_campaign_raw_percentage_movement_cap(narrow_bounds, percentage)
+    result_wide = calculate_campaign_raw_percentage_movement_cap(wide_bounds, percentage)
+    assert result_narrow.raw_percentage_movement_cap == result_wide.raw_percentage_movement_cap
+
+
+def test_stage_10_results_neither_read_nor_called_for_raw_movement_cap():
+    campaign = _campaign()
+    percentage = _applicable_percentage()
+    room = calculate_campaign_static_budget_room(campaign)
+    cap = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    assert isinstance(room, CampaignStaticBudgetRoom)
+    assert isinstance(cap, CampaignRawPercentageMovementCap)
+    assert not hasattr(cap, "room_to_static_maximum")
+    assert not hasattr(cap, "room_to_static_minimum")
+
+
+def test_is_protected_does_not_affect_raw_movement_cap():
+    percentage = _applicable_percentage()
+    unprotected = _campaign(campaign_id="C001", is_protected=False)
+    protected = _campaign(campaign_id="C001", is_protected=True)
+    result_unprotected = calculate_campaign_raw_percentage_movement_cap(unprotected, percentage)
+    result_protected = calculate_campaign_raw_percentage_movement_cap(protected, percentage)
+    assert (
+        result_unprotected.raw_percentage_movement_cap
+        == result_protected.raw_percentage_movement_cap
+    )
+
+
+def test_is_test_campaign_and_test_budget_floor_do_not_affect_raw_movement_cap():
+    percentage = _applicable_percentage()
+    non_test = _campaign(
+        campaign_id="C001",
+        is_test_campaign=False,
+        test_budget_floor=None,
+    )
+    test_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1000.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("500.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result_non_test = calculate_campaign_raw_percentage_movement_cap(non_test, percentage)
+    result_test = calculate_campaign_raw_percentage_movement_cap(test_campaign, percentage)
+    assert (
+        result_non_test.raw_percentage_movement_cap == result_test.raw_percentage_movement_cap
+    )
+
+
+def test_no_effective_movement_eligibility_score_recommendation_reason_code_allocation_or_conservation():
+    result = calculate_campaign_raw_percentage_movement_cap(_campaign(), _applicable_percentage())
+    for attr in (
+        "effective_movement",
+        "permissible_movement",
+        "eligibility",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+        "blocked",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 12 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_raw_percentage_movement_cap_exact_values_and_order():
+    review = _review(default_max_change_percentage=Decimal("0.20"))
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    percentages = [
+        resolve_campaign_applicable_change_percentage(review, c)
+        for c in report.valid_campaigns
+    ]
+    caps = [
+        calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+        for campaign, percentage in zip(report.valid_campaigns, percentages)
+    ]
+    assert [c.campaign_id for c in caps] == ["G001", "M001", "G002", "G003"]
+
+    expected_current_budget = {
+        "G001": Decimal("3000.00"),
+        "M001": Decimal("2500.00"),
+        "G002": Decimal("5000.00"),
+        "G003": Decimal("1200.00"),
+    }
+    expected_applicable_percentage = {
+        "G001": Decimal("0.20"),
+        "M001": Decimal("0.15"),
+        "G002": Decimal("0.20"),
+        "G003": Decimal("0.20"),
+    }
+    expected_raw_cap = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("1000.00"),
+        "G003": Decimal("240.00"),
+    }
+    for campaign in report.valid_campaigns:
+        assert campaign.current_budget == expected_current_budget[campaign.campaign_id]
+    for percentage in percentages:
+        assert (
+            percentage.applicable_max_change_percentage
+            == expected_applicable_percentage[percentage.campaign_id]
+        )
+    for cap in caps:
+        assert cap.raw_percentage_movement_cap == expected_raw_cap[cap.campaign_id]
+
+    # Retain and independently verify Stage 10's static-room results, kept fully
+    # separate from Stage 11/12 — never intersected, never combined into one object.
+    room_results = [calculate_campaign_static_budget_room(c) for c in report.valid_campaigns]
+    expected_room = {
+        "G001": (Decimal("3000.00"), Decimal("2500.00")),
+        "M001": (Decimal("2500.00"), Decimal("2000.00")),
+        "G002": (Decimal("3000.00"), Decimal("4000.00")),
+        "G003": (Decimal("800.00"), Decimal("1100.00")),
+    }
+    for room in room_results:
+        exp_max, exp_min = expected_room[room.campaign_id]
+        assert room.room_to_static_maximum == exp_max
+        assert room.room_to_static_minimum == exp_min
+
+    # None of Stage 12's raw caps is a permissible movement amount - they are
+    # informational only, kept conceptually separate from Stage 10's static room.
 
     # Retain and verify Stage 10's existing static-room results via separate calls —
     # the two stages are never combined into one model or one call.

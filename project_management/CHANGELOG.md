@@ -500,3 +500,90 @@ All notable changes to this project are documented in this file.
   resolution rule; monetary-cap formula, effective constraints, protected/test
   handling, and eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (21 concrete Stage 11 scenarios).
+
+- Sprint 1, Development Stage 12: added `CampaignRawPercentageMovementCap` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `raw_percentage_movement_cap` only) and
+  `calculate_campaign_raw_percentage_movement_cap(campaign: CampaignInput,
+  applicable_percentage: CampaignApplicableChangePercentage) ->
+  CampaignRawPercentageMovementCap` to `src/constraints.py`, alongside but fully
+  separate from Stage 10's `CampaignStaticBudgetRoom`/
+  `calculate_campaign_static_budget_room` and Stage 11's
+  `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+  which are unmodified. Calculates a raw, informational percentage-based monetary
+  movement cap: `current_budget * applicable_max_change_percentage`, quantised once to
+  `CURRENCY_QUANTUM` using `ROUND_HALF_UP` — explicitly not permission to increase or
+  decrease a campaign's budget, an effective/final permissible movement, a
+  static-bound intersection, a protection or test-budget-floor determination, an
+  eligibility result, a score, a recommendation, a reason code, or an allocation.
+  Consumes Stage 11's already-resolved result directly (never accepts `ReviewSetup`,
+  never reads `campaign.campaign_max_change_percentage` or
+  `review.default_max_change_percentage`, never imports
+  `DEFAULT_MAX_CHANGE_PERCENTAGE`, never re-resolves override/default precedence).
+  Requires `campaign.campaign_id == applicable_percentage.campaign_id`, raising
+  `ValueError("campaign_id mismatch between campaign and applicable percentage")`
+  otherwise with no result returned. **Decimal precision investigated before
+  implementation, per explicit instruction, rather than assumed safe:** found that a
+  fixed `prec=28` local context (the pattern used by Stages 3, 4, and 10) incorrectly
+  rounds the intermediate multiplication for an already-valid extreme `CampaignInput`
+  (`current_budget=Decimal("99999999999999999999999999.99")`, 28 significant digits —
+  the largest `Currency` can hold under the default global context, empirically
+  confirmed) paired with a many-decimal-digit percentage
+  (`Decimal("0.036020245307579938554529107051")`), returning
+  `Decimal("...52910.71")` instead of the mathematically exact
+  `Decimal("...52910.70")` — a one-penny double-rounding error. Fixed with an approved
+  operand-derived precision policy: `safe_precision = max(28,
+  len(current_budget.as_tuple().digits) +
+  len(applicable_max_change_percentage.as_tuple().digits) + 4)`, used only inside a
+  local `decimal` context for the multiplication and final quantisation, guaranteeing
+  an exact intermediate product and leaving the explicit `.quantize(...)` call as the
+  sole rounding operation; the global `Decimal` context is never mutated and is
+  unaffected by the call. No new maximum budget or percentage digit restriction was
+  introduced; `CampaignInput`/`Currency` validation is unmodified. Independent of
+  Stage 10 (never reads `minimum_budget`/`maximum_budget`/`room_to_static_maximum`/
+  `room_to_static_minimum`, never calls `calculate_campaign_static_budget_room`) and
+  ignores `is_protected`/`is_test_campaign`/`test_budget_floor`. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 12: extended `tests/test_constraints.py` with 35 new
+  tests (all 49 existing Stage 10/11 tests preserved unchanged; 84 tests total)
+  covering result-model shape/immutability/`campaign_id` copying/no-`None`-result/
+  two-decimal-place quantisation, incompatible-input rejection (`AttributeError`, no
+  silent coercion), exact calculation (whole-penny, fractional-penny `ROUND_HALF_UP`
+  rounding both below and exactly at the half-cent boundary, the `Decimal("1")`
+  boundary, a small positive percentage, a zero-budget result, no float conversion,
+  `.quantize()` called exactly once), campaign-ID matching (matching IDs calculate
+  normally, mismatched IDs raise the exact approved `ValueError` message with no
+  result returned), Decimal-context behaviour (mutated global context does not affect
+  results, the global context's `prec`/`rounding` are unchanged after the function
+  returns, and a dedicated **extreme-value regression test** using the exact
+  double-rounding-bug input, asserting the correct `Decimal("...52910.70")` result and
+  explicitly asserting the incorrect fixed-precision-28 result
+  `Decimal("...52910.71")` is *not* returned, both under the default context and under
+  a deliberately altered ambient global context, plus a whole-number-digit-preservation
+  proof at 100% of the extreme budget), independence (AST-verified restriction to
+  reading only the four authorised fields, AST-verified no reference to `ReviewSetup`/
+  `review`, AST-verified no call to Stage 10/11/3–9 functions, platform/KPI
+  independence, static-bound independence, protected/test independence, no
+  combination with Stage 10's result), and integration with `validate_campaign_csv` +
+  `resolve_campaign_applicable_change_percentage` over `data/sample_campaigns.csv`
+  (order preserved; `G001=600.00`, `M001=375.00`, `G002=1000.00`, `G003=240.00`;
+  Stage 10's static-room results for all four independently re-verified via separate
+  calls, never intersected or combined). `tests/test_models.py` (Stage 1),
+  `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage 3),
+  `tests/test_pacing.py` (Stage 4), `tests/test_classification.py` (Stage 5),
+  `tests/test_trend_classification.py` (Stage 6),
+  `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this stage.
+  Full suite: 425 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 + 23
+  Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 84 Stage 10/11/12
+  combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignRawPercentageMovementCap` fields; exact
+  current-budget multiplication rule; campaign-ID matching requirement; confirmation
+  the result is informational only), `docs/DECISION_RULES.md` (frozen Stage 12 raw
+  percentage-based monetary movement-cap calculation rule, including the full
+  operand-derived Decimal precision policy and its empirical justification;
+  static-bound intersection, effective constraints, protected/test handling, and
+  eligibility explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (29 concrete Stage 12 scenarios).

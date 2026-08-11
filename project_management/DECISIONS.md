@@ -857,3 +857,100 @@ test's `forbidden_imports` set; every other forbidden entry (`src.classification
 still enforced. All 25 of Stage 10's existing tests in `tests/test_constraints.py` were
 preserved unmodified; only this one assertion's forbidden-name set was narrowed.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 12 is a raw, informational percentage-based monetary movement-cap fact only
+
+**Decision:** Sprint 1, Development Stage 12 adds a narrow, deterministic raw
+percentage-based monetary movement-cap calculation to `src/constraints.py`, as an
+*addition* alongside Stage 10's `CampaignStaticBudgetRoom`/
+`calculate_campaign_static_budget_room` and Stage 11's
+`CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage` —
+not a modification of either. For one already-validated `CampaignInput` and its
+already-resolved Stage 11 result, it calculates `current_budget *
+applicable_max_change_percentage`, quantised once to `CURRENCY_QUANTUM` using
+`ROUND_HALF_UP`. This is explicitly **not** permission to increase or decrease a
+campaign's budget, an effective/final permissible movement, a static-bound
+intersection, a protection or test-budget-floor determination, an eligibility result,
+a score, a recommendation, a reason code, or an allocation — those all remain deferred
+to a later effective-constraint stage.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 12: exact model, function, campaign-ID matching, and input ownership
+
+**Decision:** `CampaignRawPercentageMovementCap` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id`, `raw_percentage_movement_cap`) is defined in
+`src/constraints.py`, alongside but fully separate from `CampaignStaticBudgetRoom` and
+`CampaignApplicableChangePercentage`. The sole public function is
+`calculate_campaign_raw_percentage_movement_cap(campaign: CampaignInput,
+applicable_percentage: CampaignApplicableChangePercentage) ->
+CampaignRawPercentageMovementCap`; it reads only `campaign.campaign_id`,
+`campaign.current_budget`, `applicable_percentage.campaign_id`, and
+`applicable_percentage.applicable_max_change_percentage`. Stage 12 consumes Stage 11's
+already-resolved result directly, by design: it never accepts `ReviewSetup`, never
+reads `campaign.campaign_max_change_percentage` or
+`review.default_max_change_percentage`, never imports `DEFAULT_MAX_CHANGE_PERCENTAGE`,
+and never calls `resolve_campaign_applicable_change_percentage` internally — this
+avoids duplicating Stage 11's override/default precedence logic in a second place.
+Before calculating, `campaign.campaign_id == applicable_percentage.campaign_id` is
+required; a mismatch raises `ValueError("campaign_id mismatch between campaign and
+applicable percentage")` and no result is returned — the two input objects
+independently identify a campaign, and silently applying one campaign's percentage to
+another would be unsafe.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 12: operand-derived Decimal precision policy (double-rounding bug found and fixed pre-implementation)
+
+**Decision:** Before implementing Stage 12, the fixed `prec=28` local-context pattern
+used by Stages 3, 4, and 10 was investigated rather than assumed safe, per explicit
+instruction. This investigation found a genuine, reproducible double-rounding bug:
+`CampaignInput.current_budget` has no upper bound (only the `Currency` type's own
+construction-time `quantize()` call limits it — empirically confirmed to cap out at 28
+significant digits under the default, unmutated global `Decimal` context), and
+`applicable_max_change_percentage` has no digit-count restriction beyond `gt=0, le=1`.
+With `current_budget = Decimal("99999999999999999999999999.99")` (28 significant
+digits — the maximum `Currency` can hold under the default context) and
+`applicable_max_change_percentage = Decimal("0.036020245307579938554529107051")` (a
+legitimately constructible override), both independently valid under existing,
+unmodified `CampaignInput` validation, a fixed `prec=28` local context rounds the
+*intermediate multiplication* before the explicit final `.quantize()` call ever runs,
+incorrectly returning `Decimal("...52910.71")`; the mathematically exact, correctly
+rounded result is `Decimal("...52910.70")` — a one-penny error, confirmed stable under
+progressively larger precision buffers. The approved fix derives the local context's
+precision from the operands' own digit counts:
+```
+operand_digits = len(current_budget.as_tuple().digits) + len(applicable_max_change_percentage.as_tuple().digits)
+safe_precision = max(28, operand_digits + 4)
+```
+This guarantees the multiplication is computed exactly (an *n*-digit value times an
+*m*-digit value never needs more than *n+m* significant digits to represent exactly),
+leaving the explicit `.quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)` call as the
+sole rounding operation. The `max(28, ...)` floor preserves the repository's
+established baseline precision for ordinary operands. No new maximum budget or
+percentage digit restriction was introduced, and `CampaignInput`/`Currency` validation
+was not modified or weakened. The local context is scoped entirely inside the
+function's `with localcontext() as ctx:` block; the ambient global `Decimal` context is
+never mutated and is provably unaffected (regression-tested both for the extreme case
+and for an ordinary case, including confirming the global context's `prec`/`rounding`
+are unchanged after the function returns).
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 12: zero/None behaviour, Stage 10 separation, and protected/test exclusion
+
+**Decision:** Neither `current_budget` nor `applicable_max_change_percentage` may be
+`None` at Stage 12 (both are guaranteed present by Stages 1 and 11); no fallback value
+is substituted for either. `current_budget` may be exactly `Decimal("0.00")`, in which
+case the result is `Decimal("0.00")` — a legitimate raw cap, not an eligibility
+judgement or error; no truthiness-based fallback is used anywhere.
+`calculate_campaign_raw_percentage_movement_cap` never reads `minimum_budget`,
+`maximum_budget`, `room_to_static_maximum`, or `room_to_static_minimum`, and never
+calls `calculate_campaign_static_budget_room` (or vice versa) — a campaign at a static
+boundary may still have a non-zero raw percentage cap, since the two facts are never
+intersected here. `is_protected`, `is_test_campaign`, and `test_budget_floor` are
+likewise never read — changing any of them while holding the four authorised fields
+constant never changes the result. This does not authorise any protected-campaign or
+test-campaign budget behaviour; those rules, the static-bound intersection, and the
+full effective-constraint precedence remain deferred to later stages. No existing test
+file required modification for Stage 12 — no approved AST-narrowing exception was
+needed, since `CURRENCY_QUANTUM` was not previously forbidden and no new out-of-scope
+name needed importing.
+**Status:** Frozen.

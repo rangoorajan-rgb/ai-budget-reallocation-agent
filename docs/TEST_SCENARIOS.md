@@ -1,12 +1,13 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 11 populates the Applicable Change-Percentage Resolution
-> Scenarios section below, backed by the Stage 11 additions to `tests/test_constraints.py`
-> (which now holds 49 tests total: 25 Stage 10 + 24 Stage 11), in addition to the Static
-> Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation Scenarios
-> (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking Assessability
-> Scenarios (`tests/test_tracking_assessment.py`, 30 tests), the Stage 7
-> Conversion-Volume Confidence Classification Scenarios
+> Sprint 1, Development Stage 12 populates the Raw Percentage Movement-Cap Scenarios
+> section below, backed by the Stage 12 additions to `tests/test_constraints.py`
+> (which now holds 84 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12), in
+> addition to the Applicable Change-Percentage Resolution Scenarios (Stage 11, below),
+> the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
+> Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the Stage
+> 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30 tests),
+> the Stage 7 Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
 > Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
 > Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
@@ -414,6 +415,48 @@ recommendation, a reason code, or an allocation outcome.
 | 19 | `CampaignApplicableChangePercentage.model_fields` / result attributes | Contains no `room_to_static_maximum`, `room_to_static_minimum`, `monetary_cap`, `max_change_amount`, `effective_minimum_budget`, `effective_maximum_budget`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, or `allocation` field. |
 | 20 | `resolve_campaign_applicable_change_percentage` source | Reads only `campaign.campaign_id`/`campaign.campaign_max_change_percentage`/`review.default_max_change_percentage` (AST-verified); calls none of `calculate_campaign_static_budget_room`/`calculate_campaign_metrics`/`calculate_campaign_pacing`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`assess_campaign_tracking`/`classify_campaign_pacing` (AST-verified); `src/constraints.py`'s module-level import list omits `DEFAULT_MAX_CHANGE_PERCENTAGE` and every Stage 3–9 model/enum (AST-verified — `ReviewSetup` is the one approved exception, narrowed from the prior forbidden set). |
 | 21 | `data/sample_campaigns.csv` validated, a `ReviewSetup` fixture with `default_max_change_percentage=Decimal("0.20")`, then each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001` (no override) = `0.20`. `M001` (`campaign_max_change_percentage=0.15`) = `0.15`. `G002` (no override) = `0.20`. `G003` (no override) = `0.20`. Stage 10's static-room results for all four are independently re-verified via separate `calculate_campaign_static_budget_room` calls in the same test, without combining the two stages' results into one object. |
+
+## Raw Percentage Movement-Cap Scenarios
+
+All scenarios below use `calculate_campaign_raw_percentage_movement_cap(campaign:
+CampaignInput, applicable_percentage: CampaignApplicableChangePercentage) ->
+CampaignRawPercentageMovementCap` from `src/constraints.py`. Every result is a **raw,
+informational monetary fact only** — none of these scenarios produces an effective/
+final permissible movement, a static-bound intersection, a protection or
+test-budget-floor determination, an eligibility result, a score, a recommendation, a
+reason code, or an allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignRawPercentageMovementCap` field set | Exactly `campaign_id`, `raw_percentage_movement_cap`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignRawPercentageMovementCap` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied exactly from the source `CampaignInput`. |
+| 5 | `raw_percentage_movement_cap` | Always `Decimal`, never `float`, never `None`, always quantised to exactly two decimal places. |
+| 6 | `calculate_campaign_raw_percentage_movement_cap(None, None)` / dict inputs (not `CampaignInput`/`CampaignApplicableChangePercentage`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 7 | `current_budget=3000.00`, `applicable_max_change_percentage=0.20` | Exact whole-penny result: `600.00`. |
+| 8 | `current_budget=333.33`, `applicable_max_change_percentage=0.20` | `333.33 * 0.20 = 66.666` — discarded portion exceeds half a cent, rounds up to `66.67`. |
+| 9 | `current_budget=1.00`, `applicable_max_change_percentage=0.004` | `0.004` — below half a cent, rounds down to `0.00`. |
+| 10 | `current_budget=1.00`, `applicable_max_change_percentage=0.005` | `0.005` — an exact half-cent tie, `ROUND_HALF_UP` rounds away from zero to `0.01`. |
+| 11 | `applicable_max_change_percentage=Decimal("1")` | Returns `current_budget` exactly. |
+| 12 | `applicable_max_change_percentage=Decimal("0.0001")` | Handled and quantised correctly (e.g. `12345.00 * 0.0001 = 1.2345` → `1.23`). |
+| 13 | `current_budget=Decimal("0.00")` | `Decimal("0.00")` — a legitimate result, not an error or eligibility judgement. |
+| 14 | Matching `campaign_id` on both inputs | Calculates normally. |
+| 15 | Mismatched `campaign_id` between the two inputs | Raises `ValueError("campaign_id mismatch between campaign and applicable percentage")`; no result is returned. |
+| 16 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function | Result unaffected — calculation runs inside its own local context. |
+| 17 | Global `decimal` context mutated before calling the function | The global context's `prec`/`rounding` remain exactly as the caller set them after the function returns — no leakage from the function's local context. |
+| 18 | Extreme-value regression: `current_budget=Decimal("99999999999999999999999999.99")` (28 significant digits — the largest `Currency` can hold under the default global context), `applicable_max_change_percentage=Decimal("0.036020245307579938554529107051")` | `Decimal("3602024530757993855452910.70")` — proven exact; a naive fixed `prec=28` context incorrectly returns `Decimal("3602024530757993855452910.71")` (one penny high), demonstrated and explicitly asserted against in a dedicated regression test. |
+| 19 | Same extreme-value case, under a deliberately altered ambient global context (`prec=5`, `ROUND_DOWN`) | Same correct result (`...52910.70`) — proving independence from the ambient context even in the extreme case. |
+| 20 | Same extreme-value case, with `applicable_max_change_percentage=Decimal("1")` | Result equals the extreme `current_budget` exactly — no significant whole-number digit is silently rounded or dropped. |
+| 21 | `calculate_campaign_raw_percentage_movement_cap` source | Reads only `campaign.campaign_id`/`campaign.current_budget`/`applicable_percentage.campaign_id`/`applicable_percentage.applicable_max_change_percentage` (AST-verified); never references `ReviewSetup` or a `review` name (AST-verified); calls none of `calculate_campaign_static_budget_room`/`resolve_campaign_applicable_change_percentage`/`calculate_campaign_metrics`/`calculate_campaign_pacing`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`assess_campaign_tracking`/`classify_campaign_pacing` (AST-verified); calls `.quantize(...)` exactly once (AST-verified); contains no `float(` conversion (source-verified). |
+| 22 | Google Ads vs. Meta Ads, otherwise identical | Same `raw_percentage_movement_cap`. |
+| 23 | CPA vs. ROAS, otherwise identical | Same `raw_percentage_movement_cap`. |
+| 24 | Narrow vs. wide `minimum_budget`/`maximum_budget`, same `current_budget` | Same `raw_percentage_movement_cap` — static bounds never read. |
+| 25 | `calculate_campaign_static_budget_room` and `calculate_campaign_raw_percentage_movement_cap` called on the same campaign | Both succeed independently; the raw-cap result contains no `room_to_static_maximum`/`room_to_static_minimum` field. |
+| 26 | `is_protected=False` vs. `is_protected=True`, otherwise identical | Same `raw_percentage_movement_cap` — never read. |
+| 27 | Non-test campaign vs. test campaign with a `test_budget_floor`, otherwise identical | Same `raw_percentage_movement_cap` — `is_test_campaign`/`test_budget_floor` never read. |
+| 28 | `CampaignRawPercentageMovementCap.model_fields` / result attributes | Contains no `room_to_static_maximum`, `room_to_static_minimum`, `effective_minimum_budget`, `effective_maximum_budget`, `permissible_movement`, `is_protected`, `is_test_campaign`, `test_budget_floor`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
+| 29 | `data/sample_campaigns.csv` validated, `default_max_change_percentage=Decimal("0.20")` `ReviewSetup` fixture, each campaign's applicable percentage resolved via Stage 11 then passed to Stage 12, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`); `G001 = 600.00`, `M001 = 375.00`, `G002 = 1000.00`, `G003 = 240.00`. Stage 10's static-room results for all four independently re-verified via separate calls in the same test, never intersected or combined with Stage 12's results. None of the four figures is described as a permissible movement. |
 
 ## Allocation Scenarios
 

@@ -25,12 +25,40 @@ a hard-coded default. Stage 11 is independent of Stage 10: it never reads
 `room_to_static_minimum`, and never calls `calculate_campaign_static_budget_room`. It
 also ignores `is_protected`, `is_test_campaign`, and `test_budget_floor` — protection and
 test-campaign effective-floor rules remain pending a later stage.
+
+Also implements Sprint 1 — Development Stage 12: for one already-validated
+`CampaignInput` and one already-resolved `CampaignApplicableChangePercentage` (Stage
+11's result), calculates a raw, informational percentage-based monetary movement cap —
+`current_budget * applicable_max_change_percentage`, quantised once to `CURRENCY_QUANTUM`
+using `ROUND_HALF_UP`. This is **not** permission to increase or decrease a campaign's
+budget, an effective/final permissible movement, a static-bound intersection, a
+protection or test-budget-floor determination, an eligibility result, a score, a
+recommendation, a reason code, or an allocation. Stage 12 consumes Stage 11's already-
+resolved result directly — it never accepts `ReviewSetup`, never reads
+`campaign.campaign_max_change_percentage` or `review.default_max_change_percentage`,
+never imports `DEFAULT_MAX_CHANGE_PERCENTAGE`, and never re-resolves override/default
+precedence. It requires `campaign.campaign_id == applicable_percentage.campaign_id`,
+raising `ValueError` otherwise. The multiplication and quantisation both run inside a
+local `decimal` context whose precision is derived from the operands' own digit counts
+(`max(28, digits(current_budget) + digits(applicable_max_change_percentage) + 4)`) —
+`CampaignInput.current_budget` has no upper bound, and `applicable_max_change_percentage`
+has no digit-count restriction, so a fixed `prec=28` context can round the intermediate
+multiplication before the explicit final quantisation ever runs, silently producing a
+one-penny error via double rounding (empirically confirmed and regression-tested). The
+operand-derived precision guarantees the multiplication is computed exactly, leaving the
+explicit `.quantize(CURRENCY_QUANTUM, rounding=ROUND_HALF_UP)` call as the sole rounding
+operation. Stage 12 is independent of Stage 10: it never reads `minimum_budget`,
+`maximum_budget`, `room_to_static_maximum`, or `room_to_static_minimum`, and never calls
+`calculate_campaign_static_budget_room`. It also ignores `is_protected`,
+`is_test_campaign`, and `test_budget_floor` — static-bound intersection, protection, and
+test-floor effects on the raw cap all remain pending a later effective-constraint stage.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from pydantic import BaseModel, ConfigDict
 
+from src.constants import CURRENCY_QUANTUM
 from src.models import CampaignInput, ReviewSetup
 
 
@@ -111,4 +139,66 @@ def resolve_campaign_applicable_change_percentage(
     return CampaignApplicableChangePercentage(
         campaign_id=campaign.campaign_id,
         applicable_max_change_percentage=applicable_max_change_percentage,
+    )
+
+
+class CampaignRawPercentageMovementCap(BaseModel):
+    """A raw, informational percentage-based monetary movement cap for one campaign.
+
+    Not permission to increase or decrease a campaign's budget, an effective/final
+    permissible movement, a static-bound intersection, a protection or
+    test-budget-floor determination, an eligibility result, a score, a recommendation,
+    a reason code, or an allocation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    raw_percentage_movement_cap: Decimal
+
+
+def calculate_campaign_raw_percentage_movement_cap(
+    campaign: CampaignInput,
+    applicable_percentage: CampaignApplicableChangePercentage,
+) -> CampaignRawPercentageMovementCap:
+    """Calculate one campaign's raw percentage-based monetary movement cap:
+    `current_budget * applicable_max_change_percentage`, quantised once to
+    `CURRENCY_QUANTUM` using `ROUND_HALF_UP`.
+
+    Requires `campaign.campaign_id == applicable_percentage.campaign_id`, raising
+    `ValueError` otherwise — the two input objects independently identify a campaign,
+    and silently applying one campaign's percentage to another would be unsafe.
+
+    `current_budget` has no upper bound and `applicable_max_change_percentage` has no
+    digit-count restriction, so a fixed-precision `Decimal` context can round the
+    intermediate multiplication before the final quantisation ever runs, silently
+    producing an incorrect result via double rounding. The local context's precision is
+    therefore derived from the operands' own digit counts
+    (`max(28, digits(current_budget) + digits(applicable_max_change_percentage) + 4)`),
+    guaranteeing the multiplication is computed exactly and leaving the explicit
+    `quantize` call as the sole rounding operation. The global `Decimal` context is
+    never mutated and cannot affect the result.
+    """
+    if campaign.campaign_id != applicable_percentage.campaign_id:
+        raise ValueError("campaign_id mismatch between campaign and applicable percentage")
+
+    current_budget = campaign.current_budget
+    applicable_max_change_percentage = applicable_percentage.applicable_max_change_percentage
+
+    operand_digits = len(current_budget.as_tuple().digits) + len(
+        applicable_max_change_percentage.as_tuple().digits
+    )
+    safe_precision = max(28, operand_digits + 4)
+
+    with localcontext() as ctx:
+        ctx.prec = safe_precision
+        ctx.rounding = ROUND_HALF_UP
+        product = current_budget * applicable_max_change_percentage
+        raw_percentage_movement_cap = product.quantize(
+            CURRENCY_QUANTUM, rounding=ROUND_HALF_UP
+        )
+
+    return CampaignRawPercentageMovementCap(
+        campaign_id=campaign.campaign_id,
+        raw_percentage_movement_cap=raw_percentage_movement_cap,
     )

@@ -1,12 +1,13 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 11 (adds a neutral deterministic applicable-change-
-> percentage resolution to the Stage 1 enumerations, numerical constants, core input
-> models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing
-> facts, Stage 5 performance classification, Stage 6 trend classification, Stage 7
-> conversion-volume confidence classification, Stage 8 tracking-based assessability,
-> Stage 9 pacing interpretation, and Stage 10 static budget-bound facts). Combined
-> assessment, `Confidence.NOT_ASSESSABLE` ownership, percentage-based monetary caps,
+> Sprint 1, Development Stage 12 (adds a neutral, informational raw percentage-based
+> monetary movement-cap calculation to the Stage 1 enumerations, numerical constants,
+> core input models, CSV schema, Stage 2 validation reporting, Stage 3 metric facts,
+> Stage 4 pacing facts, Stage 5 performance classification, Stage 6 trend
+> classification, Stage 7 conversion-volume confidence classification, Stage 8
+> tracking-based assessability, Stage 9 pacing interpretation, Stage 10 static
+> budget-bound facts, and Stage 11 applicable-change-percentage resolution). Combined
+> assessment, `Confidence.NOT_ASSESSABLE` ownership, static-bound intersection,
 > effective constraints, protected/test handling, eligibility, and other derived/
 > decision fields, plus export fields, are pending later stages.
 
@@ -395,10 +396,66 @@ calculate a monetary cap or determine any permissible budget movement.
 `CampaignStaticBudgetRoom` — the two are never combined, and neither is required to
 construct the other.
 
+## Campaign Raw Percentage Movement-Cap Fields (`src/constraints.py`)
+
+Produced by `calculate_campaign_raw_percentage_movement_cap(campaign: CampaignInput,
+applicable_percentage: CampaignApplicableChangePercentage) ->
+CampaignRawPercentageMovementCap`, one result per already-validated `CampaignInput`
+paired with its already-resolved Stage 11 `CampaignApplicableChangePercentage`.
+`CampaignRawPercentageMovementCap` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`). This is a **raw, informational monetary fact only** — it is **not**
+permission to increase or decrease a campaign's budget, an effective/final permissible
+movement, a static-bound intersection, a protection or test-budget-floor
+determination, an eligibility result, a score, a recommendation, a reason code, or an
+allocation. Depends only on `CampaignInput.campaign_id`/`current_budget` and
+`CampaignApplicableChangePercentage.campaign_id`/`applicable_max_change_percentage` —
+never `minimum_budget`, `maximum_budget`, `room_to_static_maximum`,
+`room_to_static_minimum`, `is_protected`, `is_test_campaign`, `test_budget_floor`,
+`platform`, `kpi_type`, `ReviewSetup`, `campaign_max_change_percentage`, or any Stage
+3–9 result. Stage 12 consumes Stage 11's already-resolved result directly — it never
+re-resolves campaign-override/review-default precedence.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied unchanged from the source `CampaignInput`. |
+| `raw_percentage_movement_cap` | Decimal | `current_budget * applicable_max_change_percentage`, quantised once to two decimal places using `ROUND_HALF_UP`. Never `None`. `Decimal("0.00")` when `current_budget = Decimal("0.00")` — a legitimate result, not an error or eligibility judgement. |
+
+**Exact current-budget multiplication rule.** The percentage is multiplied against
+`CampaignInput.current_budget` — no other base amount is used. **Campaign-ID matching
+requirement:** `calculate_campaign_raw_percentage_movement_cap` requires
+`campaign.campaign_id == applicable_percentage.campaign_id`; a mismatch raises
+`ValueError("campaign_id mismatch between campaign and applicable percentage")` and no
+result is returned — the two input objects independently identify a campaign, and
+silently applying one campaign's percentage to another would be unsafe.
+
+**Decimal type and quantisation.** `raw_percentage_movement_cap` is always a `Decimal`,
+never `float`, and always quantised to exactly two decimal places (reusing the existing
+`CURRENCY_QUANTUM` constant) via `ROUND_HALF_UP`. The multiplication and quantisation
+both run inside a local `decimal` context whose precision is derived from the operands'
+own digit counts (`max(28, digits(current_budget) + digits(applicable_max_change_percentage)
++ 4)`) rather than a fixed value — `current_budget` has no upper bound and
+`applicable_max_change_percentage` has no digit-count restriction, so a fixed
+`prec=28` context can round the intermediate multiplication before the final
+quantisation ever runs, producing an incorrect result via double rounding. The
+operand-derived precision guarantees the multiplication is computed exactly, leaving
+the explicit final `quantize` call as the sole rounding operation; this is empirically
+verified by a regression test using the largest `current_budget` `Currency` can hold
+under the default global context (`Decimal("99999999999999999999999999.99")`, 28
+significant digits) paired with a many-decimal-digit percentage
+(`Decimal("0.036020245307579938554529107051")`) — a fixed `prec=28` context incorrectly
+returns `...52910.71`, while the correct, exact result is `...52910.70`.
+
+**The result is informational only.** `CampaignRawPercentageMovementCap` is a separate,
+independent result model from `CampaignStaticBudgetRoom` and
+`CampaignApplicableChangePercentage` — none of the three is required to construct
+another, and none is modified by this addition. Whether/how the raw cap combines with
+Stage 10's static room, protection, or test-budget-floor rules into any effective,
+permissible movement remains pending a later stage.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, percentage-based monetary caps, effective
+> `Confidence.NOT_ASSESSABLE` ownership, static-bound intersection, effective
 > constraints, protected/test handling, eligibility, scoring, allocation).
 
 ## Export Fields

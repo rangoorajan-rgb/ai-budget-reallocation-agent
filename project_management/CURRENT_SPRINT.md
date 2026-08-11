@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, and 11 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and 12 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -376,12 +376,69 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 11 (and not yet started)
+## Development Stage 12 — Deterministic Raw Percentage-Based Monetary Movement-Cap Calculation (complete)
 
-- The percentage monetary-cap formula, its base amount, symmetry between
-  increase/decrease, and its precedence relative to Stage 10's static bounds.
-- Effective constraints, protected-campaign rules, test-budget-floor enforcement, the
-  effective (final permissible) budget movement.
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room` and Stage 11's
+      `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`
+      unmodified) — `CampaignRawPercentageMovementCap` (frozen, `extra="forbid"`:
+      `campaign_id`, `raw_percentage_movement_cap`) and
+      `calculate_campaign_raw_percentage_movement_cap(campaign: CampaignInput,
+      applicable_percentage: CampaignApplicableChangePercentage) ->
+      CampaignRawPercentageMovementCap`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`
+      unchanged.
+- [x] Exact formula: `raw_percentage_movement_cap = quantize(current_budget *
+      applicable_max_change_percentage, CURRENCY_QUANTUM, ROUND_HALF_UP)` — a raw,
+      informational fact only, not permission to move a budget. Requires
+      `campaign.campaign_id == applicable_percentage.campaign_id`, raising
+      `ValueError("campaign_id mismatch between campaign and applicable percentage")`
+      otherwise, with no result returned. Consumes Stage 11's result directly — never
+      accepts `ReviewSetup`, never reads `campaign.campaign_max_change_percentage` or
+      `review.default_max_change_percentage`, never imports
+      `DEFAULT_MAX_CHANGE_PERCENTAGE`, never re-resolves override/default precedence.
+- [x] **Operand-derived Decimal precision policy** (found necessary during inspection,
+      approved before implementation): `safe_precision = max(28,
+      len(current_budget.as_tuple().digits) +
+      len(applicable_max_change_percentage.as_tuple().digits) + 4)`, used only inside a
+      local `decimal` context for the multiplication and final quantisation. A fixed
+      `prec=28` context was empirically shown to incorrectly return
+      `Decimal("...52910.71")` for an already-valid extreme `CampaignInput`
+      (`current_budget=Decimal("99999999999999999999999999.99")`, 28 significant
+      digits — the largest `Currency` can hold under the default global context) paired
+      with a many-decimal-digit percentage
+      (`Decimal("0.036020245307579938554529107051")`), via double rounding; the correct
+      exact result is `Decimal("...52910.70")`. The operand-derived precision computes
+      the multiplication exactly, leaving the explicit final `.quantize(...)` call as
+      the sole rounding operation. No new maximum budget or percentage digit
+      restriction was introduced; `CampaignInput`/`Currency` validation is unmodified.
+      The global `Decimal` context is never mutated and is unaffected by the function
+      call.
+- [x] Independent of Stage 10 — never reads `minimum_budget`, `maximum_budget`,
+      `room_to_static_maximum`, or `room_to_static_minimum`, never calls
+      `calculate_campaign_static_budget_room`. Ignores `is_protected`,
+      `is_test_campaign`, and `test_budget_floor`. No arithmetic, weighting, or
+      `float` conversion beyond the single approved multiplication and quantisation.
+- [x] `tests/test_constraints.py` extended (all 49 existing Stage 10/11 tests preserved
+      unchanged) with 35 new Stage 12 tests — 84 tests total, all passing, including a
+      dedicated extreme-value regression test asserting the exact correct result and
+      explicitly asserting the incorrect fixed-precision-28 result is *not* returned.
+      `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+      `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 12 (and not yet started)
+
+- Static-bound intersection (reconciling the raw percentage cap with Stage 10's
+  `room_to_static_maximum`/`room_to_static_minimum`), separate effective
+  increase/decrease limits, the effective (final permissible) budget movement.
+- Protected-campaign rules, test-budget-floor enforcement.
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
@@ -391,14 +448,13 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 12 (not started, scope not yet frozen): requires its own dependency and
+Stage 13 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. Candidates
-include the percentage monetary-cap calculation (which would need to decide the base
-amount, symmetry, and precedence relative to Stage 10's static bounds — none of which is
-frozen anywhere), test-campaign effective-floor calculation (blocked on a genuine
-ambiguity: whether the effective floor is `max(minimum_budget, test_budget_floor)` or
-whether `test_budget_floor` replaces `minimum_budget` entirely for test campaigns —
+include test-campaign effective-floor calculation (blocked on a genuine ambiguity:
+whether the effective floor is `max(minimum_budget, test_budget_floor)` or whether
+`test_budget_floor` replaces `minimum_budget` entirely for test campaigns —
 `CampaignInput` validates no relationship between the two, so either is currently
-possible), and protected-campaign handling (entirely undecided). A combined campaign
-assessment stage remains a live but not clearly necessary candidate, as noted in the
-Stage 11 inspection.
+possible), protected-campaign handling (entirely undecided), and the static-bound/
+raw-percentage-cap intersection (which would need a frozen precedence rule that does
+not yet exist). A combined campaign assessment stage remains a live but not clearly
+necessary candidate, as noted in the Stage 11 inspection.
