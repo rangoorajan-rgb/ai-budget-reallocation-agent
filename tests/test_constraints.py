@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, 14, and 15).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, 14, 15, and 16).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -51,6 +51,14 @@ Stage 11/12/14 results, consumption (not recalculation) of Stage 10/13 facts, an
 scope boundaries (no percentage-cap intersection, no protection application, no
 effective movement, no eligibility/score/recommendation/reason-code/allocation/
 conservation field).
+
+Also covers Stage 16's CampaignRawIncreaseLimit construction/immutability, the exact
+min(room_to_static_maximum, raw_percentage_movement_cap) formula, the campaign-ID
+mismatch error, zero behaviour, no-arithmetic Decimal selection, Decimal-context
+independence, independence from CampaignInput/ReviewSetup and from Stage 11/13/14/15
+results, consumption (not recalculation) of Stage 10/12 facts, and scope boundaries
+(no raw decrease result, no protection or test-floor effect, no effective increase,
+no eligibility/score/recommendation/reason-code/allocation/conservation field).
 """
 
 import ast
@@ -74,6 +82,7 @@ from src.constants import (
 from src.constraints import (
     CampaignApplicableChangePercentage,
     CampaignProtectionConstraint,
+    CampaignRawIncreaseLimit,
     CampaignRawPercentageMovementCap,
     CampaignStaticBudgetRoom,
     CampaignTestAwareStaticDecreaseRoom,
@@ -83,6 +92,7 @@ from src.constraints import (
     calculate_campaign_test_floor_room,
     resolve_campaign_applicable_change_percentage,
     resolve_campaign_protection_constraint,
+    resolve_campaign_raw_increase_limit,
     resolve_campaign_test_aware_static_decrease_room,
 )
 from src.models import CampaignInput, ReviewSetup
@@ -3126,3 +3136,610 @@ def test_sample_campaigns_csv_test_aware_static_decrease_room_exact_values_and_o
     assert test_floor_rooms["G003"].room_to_test_floor == Decimal("900.00")
     g003_result = next(r for r in results if r.campaign_id == "G003")
     assert g003_result.test_aware_static_decrease_room == Decimal("900.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — CampaignRawIncreaseLimit result model
+# ---------------------------------------------------------------------------
+
+
+def _raw_cap(**overrides) -> CampaignRawPercentageMovementCap:
+    kwargs = dict(
+        campaign_id="C001",
+        raw_percentage_movement_cap=Decimal("600.00"),
+    )
+    kwargs.update(overrides)
+    return CampaignRawPercentageMovementCap(**kwargs)
+
+
+def test_campaign_raw_increase_limit_accepts_exactly_two_fields():
+    assert set(CampaignRawIncreaseLimit.model_fields.keys()) == {
+        "campaign_id",
+        "raw_increase_limit",
+    }
+
+
+def test_raw_increase_limit_campaign_id_is_str_and_limit_is_decimal():
+    result = resolve_campaign_raw_increase_limit(_static_room(), _raw_cap())
+    assert isinstance(result.campaign_id, str)
+    assert isinstance(result.raw_increase_limit, Decimal)
+
+
+def test_campaign_raw_increase_limit_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignRawIncreaseLimit(
+            campaign_id="C001",
+            raw_increase_limit=Decimal("600.00"),
+            extra_field="not allowed",
+        )
+
+
+def test_campaign_raw_increase_limit_is_immutable():
+    result = resolve_campaign_raw_increase_limit(_static_room(), _raw_cap())
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_raw_increase_limit_has_no_optional_monetary_field():
+    for field_info in CampaignRawIncreaseLimit.model_fields.values():
+        if field_info.annotation is Decimal:
+            continue
+        assert field_info.annotation is str
+
+
+def test_raw_increase_limit_has_no_decrease_eligibility_action_or_judgement_field():
+    field_names = set(CampaignRawIncreaseLimit.model_fields.keys())
+    forbidden = {
+        "raw_decrease_limit",
+        "test_aware_static_decrease_room",
+        "room_to_static_minimum",
+        "room_to_test_floor",
+        "decrease_blocked",
+        "is_protected",
+        "effective_increase",
+        "permissible_increase",
+        "eligibility",
+        "blocked",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+    }
+    assert field_names.isdisjoint(forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — campaign identity
+# ---------------------------------------------------------------------------
+
+
+def test_matching_campaign_ids_preserve_campaign_id_exactly():
+    result = resolve_campaign_raw_increase_limit(
+        _static_room(campaign_id="MATCH-1"), _raw_cap(campaign_id="MATCH-1")
+    )
+    assert result.campaign_id == "MATCH-1"
+
+
+def test_raw_increase_limit_mismatched_campaign_ids_raise_value_error_with_exact_message():
+    with pytest.raises(ValueError) as exc_info:
+        resolve_campaign_raw_increase_limit(
+            _static_room(campaign_id="A"), _raw_cap(campaign_id="B")
+        )
+    assert (
+        str(exc_info.value)
+        == "Campaign IDs must match when resolving raw increase limit."
+    )
+
+
+def test_id_validation_occurs_before_decimal_selection():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    non_docstring_body = [
+        stmt
+        for stmt in func_def.body
+        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+    ]
+    first_stmt = non_docstring_body[0]
+    assert isinstance(first_stmt, ast.If)
+    assert any(isinstance(node, ast.Raise) for node in ast.walk(first_stmt))
+
+
+def test_neither_campaign_id_silently_preferred_after_mismatch():
+    with pytest.raises(ValueError):
+        resolve_campaign_raw_increase_limit(
+            _static_room(campaign_id="A"), _raw_cap(campaign_id="B")
+        )
+
+
+def test_no_result_returned_after_raw_increase_limit_mismatch():
+    try:
+        resolve_campaign_raw_increase_limit(
+            _static_room(campaign_id="A"), _raw_cap(campaign_id="B")
+        )
+        assert False, "expected ValueError, no result should be returned"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — comparison
+# ---------------------------------------------------------------------------
+
+
+def test_static_maximum_room_smaller_returns_static_maximum_room():
+    static_room = _static_room(room_to_static_maximum=Decimal("600.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("1000.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("600.00")
+
+
+def test_static_maximum_room_equal_to_raw_cap_returns_equal_value():
+    static_room = _static_room(room_to_static_maximum=Decimal("800.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("800.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("800.00")
+
+
+def test_raw_cap_smaller_returns_raw_cap():
+    static_room = _static_room(room_to_static_maximum=Decimal("3000.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("600.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("600.00")
+
+
+def test_static_maximum_room_zero_returns_zero():
+    static_room = _static_room(room_to_static_maximum=Decimal("0.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("500.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("0.00")
+
+
+def test_raw_cap_zero_returns_zero():
+    static_room = _static_room(room_to_static_maximum=Decimal("500.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("0.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("0.00")
+
+
+def test_both_values_zero_returns_zero():
+    static_room = _static_room(room_to_static_maximum=Decimal("0.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("0.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    "static_max, cap, expected",
+    [
+        (Decimal("600.00"), Decimal("1000.00"), Decimal("600.00")),
+        (Decimal("800.00"), Decimal("800.00"), Decimal("800.00")),
+        (Decimal("3000.00"), Decimal("600.00"), Decimal("600.00")),
+        (Decimal("0.00"), Decimal("500.00"), Decimal("0.00")),
+        (Decimal("500.00"), Decimal("0.00"), Decimal("0.00")),
+    ],
+)
+def test_smaller_approved_operand_always_selected(static_max, cap, expected):
+    static_room = _static_room(room_to_static_maximum=static_max)
+    raw_cap = _raw_cap(raw_percentage_movement_cap=cap)
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == expected
+    assert result.raw_increase_limit == min(static_max, cap)
+
+
+def test_selected_decimal_operand_returned_unchanged():
+    static_room = _static_room(room_to_static_maximum=Decimal("600.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("1000.00"))
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == static_room.room_to_static_maximum
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — Decimal behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_no_float_conversion_in_raw_increase_limit():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    assert "float(" not in source
+
+
+def test_no_arithmetic_rounding_or_quantisation_in_raw_increase_limit():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    assert "quantize" not in source
+    assert "ROUND_HALF_UP" not in source
+    assert "CURRENCY_QUANTUM" not in source
+    assert "localcontext" not in source
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BinOp) for node in ast.walk(tree))
+
+
+def test_mutated_global_decimal_precision_does_not_affect_raw_increase_limit():
+    static_room = _static_room(room_to_static_maximum=Decimal("600.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("1000.00"))
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 2
+        result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+        assert result.raw_increase_limit == Decimal("600.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_mutated_global_decimal_rounding_does_not_affect_raw_increase_limit():
+    static_room = _static_room(room_to_static_maximum=Decimal("3000.00"))
+    raw_cap = _raw_cap(raw_percentage_movement_cap=Decimal("600.00"))
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+        result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+        assert result.raw_increase_limit == Decimal("600.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_global_decimal_context_restored_after_raw_increase_limit_test():
+    static_room = _static_room()
+    raw_cap = _raw_cap()
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+        resolve_campaign_raw_increase_limit(static_room, raw_cap)
+        assert decimal.getcontext().prec == 5
+        assert decimal.getcontext().rounding == decimal.ROUND_DOWN
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+    assert decimal.getcontext().prec == original_prec
+    assert decimal.getcontext().rounding == original_rounding
+
+
+def test_extreme_already_valid_stage_10_and_stage_12_values_handled_safely():
+    extreme_value = Decimal("9" * 26 + ".99")
+    static_room = _static_room(
+        room_to_static_maximum=extreme_value,
+        room_to_static_minimum=Decimal("0.00"),
+    )
+    raw_cap = _raw_cap(raw_percentage_movement_cap=extreme_value)
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == extreme_value
+
+    smaller_extreme = Decimal("9" * 25 + "8.99")
+    raw_cap_smaller = _raw_cap(raw_percentage_movement_cap=smaller_extreme)
+    result_smaller = resolve_campaign_raw_increase_limit(static_room, raw_cap_smaller)
+    assert result_smaller.raw_increase_limit == smaller_extreme
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — authorised access
+# ---------------------------------------------------------------------------
+
+
+def test_raw_increase_limit_function_reads_only_four_authorised_fields():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    static_room_param, raw_cap_param = (arg.arg for arg in func_def.args.args)
+    assert static_room_param == "static_room"
+    assert raw_cap_param == "raw_cap"
+
+    static_room_attrs: set[str] = set()
+    raw_cap_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == static_room_param:
+                static_room_attrs.add(node.attr)
+            elif node.value.id == raw_cap_param:
+                raw_cap_attrs.add(node.attr)
+
+    assert static_room_attrs == {"campaign_id", "room_to_static_maximum"}
+    assert raw_cap_attrs == {"campaign_id", "raw_percentage_movement_cap"}
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — earlier-stage separation
+# ---------------------------------------------------------------------------
+
+
+def test_does_not_call_stage_10_stage_12_or_other_earlier_stage_functions():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "calculate_campaign_static_budget_room",
+        "calculate_campaign_raw_percentage_movement_cap",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_test_floor_room",
+        "resolve_campaign_protection_constraint",
+        "resolve_campaign_test_aware_static_decrease_room",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_raw_increase_limit_does_not_reference_campaign_input_or_review_setup():
+    source = inspect.getsource(resolve_campaign_raw_increase_limit)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "CampaignInput" not in referenced_names
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+    assert "campaign" not in referenced_names
+
+
+def test_stage_11_13_14_15_results_unused_in_raw_increase_limit():
+    result = resolve_campaign_raw_increase_limit(_static_room(), _raw_cap())
+    assert not hasattr(result, "applicable_max_change_percentage")
+    assert not hasattr(result, "room_to_test_floor")
+    assert not hasattr(result, "decrease_blocked")
+    assert not hasattr(result, "test_aware_static_decrease_room")
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — protected/test independence
+# ---------------------------------------------------------------------------
+
+
+def test_protected_and_unprotected_source_campaigns_produce_identical_raw_increase_limit():
+    unprotected_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("5000.00"),
+        minimum_budget=Decimal("1000.00"),
+        maximum_budget=Decimal("8000.00"),
+        spend_to_date=Decimal("4950.00"),
+        is_protected=False,
+    )
+    protected_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("5000.00"),
+        minimum_budget=Decimal("1000.00"),
+        maximum_budget=Decimal("8000.00"),
+        spend_to_date=Decimal("4950.00"),
+        is_protected=True,
+    )
+    percentage = _applicable_percentage(campaign_id="C001", applicable_max_change_percentage=Decimal("0.20"))
+
+    result_unprotected = resolve_campaign_raw_increase_limit(
+        calculate_campaign_static_budget_room(unprotected_campaign),
+        calculate_campaign_raw_percentage_movement_cap(unprotected_campaign, percentage),
+    )
+    result_protected = resolve_campaign_raw_increase_limit(
+        calculate_campaign_static_budget_room(protected_campaign),
+        calculate_campaign_raw_percentage_movement_cap(protected_campaign, percentage),
+    )
+    assert result_unprotected.raw_increase_limit == result_protected.raw_increase_limit
+
+
+def test_test_and_non_test_source_campaigns_produce_identical_raw_increase_limit():
+    non_test_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=False,
+        test_budget_floor=None,
+    )
+    test_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    percentage = _applicable_percentage(campaign_id="C001", applicable_max_change_percentage=Decimal("0.20"))
+
+    result_non_test = resolve_campaign_raw_increase_limit(
+        calculate_campaign_static_budget_room(non_test_campaign),
+        calculate_campaign_raw_percentage_movement_cap(non_test_campaign, percentage),
+    )
+    result_test = resolve_campaign_raw_increase_limit(
+        calculate_campaign_static_budget_room(test_campaign),
+        calculate_campaign_raw_percentage_movement_cap(test_campaign, percentage),
+    )
+    assert result_non_test.raw_increase_limit == result_test.raw_increase_limit
+
+
+def test_campaign_both_protected_and_test_produces_same_result_with_unchanged_stage_10_12_facts():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id=campaign.campaign_id, applicable_max_change_percentage=Decimal("0.20")
+    )
+    static_room = calculate_campaign_static_budget_room(campaign)
+    raw_cap = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit == min(
+        static_room.room_to_static_maximum, raw_cap.raw_percentage_movement_cap
+    )
+
+
+def test_no_protection_or_test_floor_based_zero_introduced():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id=campaign.campaign_id, applicable_max_change_percentage=Decimal("0.20")
+    )
+    static_room = calculate_campaign_static_budget_room(campaign)
+    raw_cap = calculate_campaign_raw_percentage_movement_cap(campaign, percentage)
+    result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert result.raw_increase_limit != Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — scope protection
+# ---------------------------------------------------------------------------
+
+
+def test_no_raw_decrease_combined_or_later_judgement_output():
+    result = resolve_campaign_raw_increase_limit(_static_room(), _raw_cap())
+    for attr in (
+        "raw_decrease_limit",
+        "test_aware_static_decrease_room",
+        "decrease_blocked",
+        "is_protected",
+        "effective_increase",
+        "permissible_increase",
+        "eligibility",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+        "blocked",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — input contract
+# ---------------------------------------------------------------------------
+
+
+def test_raw_increase_limit_none_and_dict_inputs_not_silently_converted():
+    with pytest.raises(AttributeError):
+        resolve_campaign_raw_increase_limit(None, None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        resolve_campaign_raw_increase_limit(  # type: ignore[arg-type]
+            _static_room(), {"raw_percentage_movement_cap": Decimal("600.00"), "campaign_id": "C001"}
+        )
+    with pytest.raises(AttributeError):
+        resolve_campaign_raw_increase_limit(  # type: ignore[arg-type]
+            {"campaign_id": "C001", "room_to_static_maximum": Decimal("600.00")},
+            _raw_cap(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 16 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_raw_increase_limit_exact_values_and_order():
+    review = _review(default_max_change_percentage=Decimal("0.20"))
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    static_rooms = {
+        c.campaign_id: calculate_campaign_static_budget_room(c) for c in report.valid_campaigns
+    }
+    percentages = {
+        c.campaign_id: resolve_campaign_applicable_change_percentage(review, c)
+        for c in report.valid_campaigns
+    }
+    raw_caps = {
+        c.campaign_id: calculate_campaign_raw_percentage_movement_cap(c, percentages[c.campaign_id])
+        for c in report.valid_campaigns
+    }
+    results = [
+        resolve_campaign_raw_increase_limit(static_rooms[c.campaign_id], raw_caps[c.campaign_id])
+        for c in report.valid_campaigns
+    ]
+    assert [r.campaign_id for r in results] == ["G001", "M001", "G002", "G003"]
+
+    expected = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("1000.00"),
+        "G003": Decimal("240.00"),
+    }
+    for result in results:
+        assert result.raw_increase_limit == expected[result.campaign_id]
+
+    # Independently preserve and verify the existing Stage 10-15 sample outcomes -
+    # never combined with Stage 16's result.
+    expected_static_maximum = {
+        "G001": Decimal("3000.00"),
+        "M001": Decimal("2500.00"),
+        "G002": Decimal("3000.00"),
+        "G003": Decimal("800.00"),
+    }
+    for campaign_id, room in static_rooms.items():
+        assert room.room_to_static_maximum == expected_static_maximum[campaign_id]
+
+    for campaign_id, cap in raw_caps.items():
+        assert cap.raw_percentage_movement_cap == expected[campaign_id]
+
+    protection_results = {
+        c.campaign_id: resolve_campaign_protection_constraint(c) for c in report.valid_campaigns
+    }
+    expected_decrease_blocked = {
+        "G001": False,
+        "M001": False,
+        "G002": True,
+        "G003": False,
+    }
+    for campaign_id, protection in protection_results.items():
+        assert protection.decrease_blocked == expected_decrease_blocked[campaign_id]
+
+    test_floor_rooms = {
+        c.campaign_id: calculate_campaign_test_floor_room(c) for c in report.valid_campaigns
+    }
+    decrease_rooms = {
+        c.campaign_id: resolve_campaign_test_aware_static_decrease_room(
+            static_rooms[c.campaign_id], test_floor_rooms[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    }
+    expected_decrease_room = {
+        "G001": Decimal("2500.00"),
+        "M001": Decimal("2000.00"),
+        "G002": Decimal("4000.00"),
+        "G003": Decimal("900.00"),
+    }
+    for campaign_id, decrease_room in decrease_rooms.items():
+        assert decrease_room.test_aware_static_decrease_room == expected_decrease_room[campaign_id]
+
+    # G002: decrease_blocked=True and raw_increase_limit=1000.00 both hold
+    # simultaneously and separately - never combined, and no increase-side
+    # protection rule is inferred.
+    assert protection_results["G002"].decrease_blocked is True
+    g002_result = next(r for r in results if r.campaign_id == "G002")
+    assert g002_result.raw_increase_limit == Decimal("1000.00")
+
+    # G003: Stage 13/15 remain decrease-specific; Stage 16's raw_increase_limit
+    # (240.00) is unaffected by the test floor.
+    assert test_floor_rooms["G003"].room_to_test_floor == Decimal("900.00")
+    assert decrease_rooms["G003"].test_aware_static_decrease_room == Decimal("900.00")
+    g003_result = next(r for r in results if r.campaign_id == "G003")
+    assert g003_result.raw_increase_limit == Decimal("240.00")

@@ -1179,3 +1179,71 @@ No existing test file required modification for Stage 15 — no approved AST-nar
 exception was needed, since Stage 15 introduces no new import beyond what
 `src/constraints.py` already had available.
 **Status:** Frozen.
+
+## 2026-08-14 — Stage 16: both upward constraints apply simultaneously; the smaller controls
+
+**Decision:** Sprint 1, Development Stage 16 approves the raw increase limit business
+rule: `room_to_static_maximum` (Stage 10) and `raw_percentage_movement_cap` (Stage
+12) are two independent upward constraints that apply simultaneously — the smaller of
+the two is the binding limit: `raw_increase_limit = min(room_to_static_maximum,
+raw_percentage_movement_cap)`. The result is a **raw, increase-specific constraint
+only** — not permission to increase a budget, not an effective increase, not
+eligibility, not a recommendation, and not a final movement amount. It does not
+account for a raw decrease limit, Stage 14's protection constraint, or Stage 15's
+test-aware static decrease room.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 16: exact model, function, and consumption of Stage 10/12 outputs (not recalculation)
+
+**Decision:** `CampaignRawIncreaseLimit` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id: str`, `raw_increase_limit: Decimal`) is defined in
+`src/constraints.py`, alongside but fully separate from `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`,
+`CampaignTestFloorRoom`, `CampaignProtectionConstraint`, and
+`CampaignTestAwareStaticDecreaseRoom`. The sole public function is
+`resolve_campaign_raw_increase_limit(static_room: CampaignStaticBudgetRoom, raw_cap:
+CampaignRawPercentageMovementCap) -> CampaignRawIncreaseLimit`; it reads only
+`static_room.campaign_id`, `static_room.room_to_static_maximum`,
+`raw_cap.campaign_id`, and `raw_cap.raw_percentage_movement_cap`. **Stage 16 consumes
+Stage 10's and Stage 12's already-approved result objects directly, rather than
+reading `CampaignInput`/`ReviewSetup` and recalculating either fact** — it never
+calls `calculate_campaign_static_budget_room` or
+`calculate_campaign_raw_percentage_movement_cap`, consistent with the consumption
+pattern established at Stage 12 (consuming Stage 11) and reaffirmed at Stage 15
+(consuming Stage 10/13). Exact formula:
+```
+raw_increase_limit = min(room_to_static_maximum, raw_percentage_movement_cap)
+```
+Before resolving any Decimal selection, `static_room.campaign_id` must equal
+`raw_cap.campaign_id`; a mismatch raises exactly `ValueError("Campaign IDs must
+match when resolving raw increase limit.")`, checked as the first statement in the
+function body, with no result returned and neither ID silently preferred.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 16: zero/None behaviour, no-arithmetic Decimal policy, and separation from Stages 11, 13, 14, and 15
+
+**Decision:** `Decimal("0.00")` is a legitimate result when the smaller applicable
+constraint is zero (including when `room_to_static_maximum` is zero,
+`raw_percentage_movement_cap` is zero, or both are zero) — it means no raw increase
+room remains under these two constraints, not eligibility or a recommendation.
+Neither input field is optional, and the output is never `None`. Stage 16 performs
+selection and comparison only: no subtraction, multiplication, or division; no local
+`decimal` context; no `CURRENCY_QUANTUM`; no `ROUND_HALF_UP`; no rounding; no
+quantisation; no `float` conversion. The selected `Decimal` operand is returned
+unchanged, and ambient global `Decimal` precision/rounding cannot affect the result,
+since no arithmetic operation is performed at all.
+`resolve_campaign_raw_increase_limit` never reads `applicable_max_change_percentage`,
+`room_to_test_floor`, `decrease_blocked`, or `test_aware_static_decrease_room`, and
+never calls `resolve_campaign_applicable_change_percentage`,
+`calculate_campaign_test_floor_room`, `resolve_campaign_protection_constraint`, or
+`resolve_campaign_test_aware_static_decrease_room` (or vice versa) — a protected
+campaign receives exactly the same Stage 16 result as an otherwise identical
+unprotected campaign with matching Stage 10/12 facts; no protection-based or
+test-floor-based zero is calculated here, and **no increase-side protection rule is
+inferred** — a protected campaign is not thereby assumed unable to be increased. The
+raw decrease intersection, protection application, effective directional
+constraints, and all later eligibility/scoring/recommendation/allocation logic
+remain deferred to later stages. No existing test file required modification for
+Stage 16 — no approved AST-narrowing exception was needed, since Stage 16 introduces
+no new import beyond what `src/constraints.py` already had available.
+**Status:** Frozen.

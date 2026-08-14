@@ -1,6 +1,6 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 15. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 16. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
@@ -8,11 +8,11 @@
 > rules, the frozen static budget-bound calculation rules, the frozen applicable-
 > change-percentage resolution rule, the frozen raw percentage-based monetary
 > movement-cap calculation rule, the frozen test-floor distance calculation rule, the
-> frozen protection constraint rule, and the frozen test-aware static decrease-room
-> rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, percentage-cap
-> intersection, protection application, raw directional intersections, effective
-> constraints, increase-side protection behaviour, eligibility, scoring, and
-> allocation rules are pending later Sprint 1 stages.
+> frozen protection constraint rule, the frozen test-aware static decrease-room rule,
+> and the frozen raw increase limit rule. Combined assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, raw decrease intersection, protection
+> application, effective constraints, increase-side protection behaviour, eligibility,
+> scoring, and allocation rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -896,6 +896,73 @@ never recalculates either.
   directional intersections (with Stage 12's percentage cap) and effective
   constraints (applying Stage 14's protection) both remain pending later stages.
 
+## Deterministic Raw Increase Limit Rules (Sprint 1, Development Stage 16)
+
+These rules govern the addition to `src/constraints.py` that combines one
+already-calculated `CampaignStaticBudgetRoom` (Stage 10) and one already-calculated
+`CampaignRawPercentageMovementCap` (Stage 12) into one neutral raw increase limit.
+Stage 16 is a **raw, increase-specific constraint only** — it is not permission to
+increase a budget, not an effective increase, not eligibility, not a recommendation,
+and not a final movement amount. It does not account for a raw decrease limit,
+Stage 14's protection constraint, or Stage 15's test-aware static decrease room.
+`CampaignStaticBudgetRoom` and `CampaignRawPercentageMovementCap` remain the sole
+authoritative sources of `room_to_static_maximum` and `raw_percentage_movement_cap`;
+`src/constraints.py` never recalculates either.
+
+- **Approved business rule: both upward constraints apply simultaneously; the
+  smaller controls.** `room_to_static_maximum` prevents exceeding `maximum_budget`;
+  `raw_percentage_movement_cap` limits the size of a change under the applicable
+  percentage rule. Both limits apply at once, so the binding limit is the smaller of
+  the two: `raw_increase_limit = min(room_to_static_maximum,
+  raw_percentage_movement_cap)`.
+- **Exact calculation input and authorised fields.** `static_room.campaign_id`,
+  `static_room.room_to_static_maximum`, `raw_cap.campaign_id`, and
+  `raw_cap.raw_percentage_movement_cap` are the only fields read. No other field of
+  either model is read — in particular, `room_to_static_minimum` is never read. No
+  `CampaignInput`, `ReviewSetup`, `CampaignApplicableChangePercentage`,
+  `CampaignTestFloorRoom`, `CampaignProtectionConstraint`, or
+  `CampaignTestAwareStaticDecreaseRoom` is ever read or called;
+  `calculate_campaign_static_budget_room` and
+  `calculate_campaign_raw_percentage_movement_cap` are never called (Stage 16
+  consumes their already-approved outputs, never recalculates them).
+- **Campaign-ID policy.** `static_room.campaign_id` must equal `raw_cap.campaign_id`,
+  checked before any Decimal selection; a mismatch raises exactly
+  `ValueError("Campaign IDs must match when resolving raw increase limit.")`, and no
+  result is returned. Neither ID is silently preferred.
+- **Exact formula:**
+  ```
+  raw_increase_limit = min(room_to_static_maximum, raw_percentage_movement_cap)
+  ```
+- **Zero and `None` behaviour.** `Decimal("0.00")` is a legitimate result when the
+  smaller applicable constraint is zero (including when `room_to_static_maximum` is
+  zero, `raw_percentage_movement_cap` is zero, or both are zero) — it means no raw
+  increase room remains under these two constraints, not eligibility or a
+  recommendation. Neither input field is optional, and the output is never `None`; no
+  fallback value is substituted for either input.
+- **No arithmetic.** Stage 16 performs selection and comparison only — no
+  subtraction, multiplication, or division; no local `decimal` context; no
+  `CURRENCY_QUANTUM`; no `ROUND_HALF_UP`; no rounding; no quantisation; no `float`
+  conversion. The selected `Decimal` operand (one of the two inputs) is returned
+  unchanged. Ambient global `Decimal` precision/rounding cannot affect the result,
+  since no arithmetic operation is performed.
+- **Separation from Stages 11, 13, 14, and 15.** `resolve_campaign_raw_increase_limit`
+  never reads `applicable_max_change_percentage`, `room_to_test_floor`,
+  `decrease_blocked`, or `test_aware_static_decrease_room`, and never calls
+  `resolve_campaign_applicable_change_percentage`,
+  `calculate_campaign_test_floor_room`, `resolve_campaign_protection_constraint`, or
+  `resolve_campaign_test_aware_static_decrease_room`. A protected campaign receives
+  exactly the same Stage 16 result as an otherwise identical unprotected campaign
+  with matching Stage 10/12 facts — no protection-based or test-floor-based zero is
+  calculated here. **Protected status has no approved increase-side effect at Stage
+  16; a protected campaign is not thereby assumed unable to be increased.**
+  Test-floor rules are decrease-specific and have no bearing on this result.
+- **No permissible movement calculated.** The result carries no raw decrease limit,
+  no combined increase/decrease model, no effective increase, no eligibility field,
+  no blocking flag, no `RecommendationAction`, no `ReasonCode`, no score, and no
+  allocation field. The raw decrease intersection and effective constraints (applying
+  Stage 14's protection and Stage 15's test-aware decrease room) both remain pending
+  later stages.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -926,13 +993,13 @@ never recalculates either.
   which percentage applies to a campaign (`applicable_max_change_percentage`), Stage
   12 resolved the raw percentage-based monetary cap (`raw_percentage_movement_cap`),
   Stage 13 resolved the raw test-floor distance (`room_to_test_floor`), Stage 14
-  resolved the decrease-specific protection constraint (`decrease_blocked`), and
-  Stage 15 resolved the test-aware static decrease room
-  (`test_aware_static_decrease_room`, see above), but increase-side protection
-  behaviour is entirely unaddressed, and no rule computes the campaign's *effective*
-  permissible budget movement (i.e. the intersection of Stage 15's result with Stage
-  12's raw percentage cap, further adjusted for Stage 14's protection constraint). No
-  eligibility concept is defined anywhere in the repository. All remain pending later
-  stages.
+  resolved the decrease-specific protection constraint (`decrease_blocked`), Stage 15
+  resolved the test-aware static decrease room (`test_aware_static_decrease_room`),
+  and Stage 16 resolved the raw increase limit (`raw_increase_limit`, see above), but
+  increase-side protection behaviour is entirely unaddressed, and no rule computes
+  the campaign's *effective* permissible budget movement (i.e. the raw decrease
+  intersection of Stage 15's result with Stage 12's raw percentage cap, and adjusting
+  either direction for Stage 14's protection constraint). No eligibility concept is
+  defined anywhere in the repository. All remain pending later stages.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.

@@ -1,13 +1,14 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 15 populates the Test-Aware Static Decrease Room
-> Scenarios section below, backed by the Stage 15 additions to
-> `tests/test_constraints.py` (which now holds 186 tests total: 25 Stage 10 + 24
-> Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15), in addition to
-> the Protection Constraint Scenarios (Stage 14, below), the Test-Floor Room
-> Scenarios (Stage 13, below), the Raw Percentage Movement-Cap Scenarios (Stage 12,
-> below), the Applicable Change-Percentage Resolution Scenarios (Stage 11, below),
-> the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
+> Sprint 1, Development Stage 16 populates the Raw Increase Limit Scenarios section
+> below, backed by the Stage 16 additions to `tests/test_constraints.py` (which now
+> holds 226 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28
+> Stage 14 + 39 Stage 15 + 40 Stage 16), in addition to the Test-Aware Static
+> Decrease Room Scenarios (Stage 15, below), the Protection Constraint Scenarios
+> (Stage 14, below), the Test-Floor Room Scenarios (Stage 13, below), the Raw
+> Percentage Movement-Cap Scenarios (Stage 12, below), the Applicable
+> Change-Percentage Resolution Scenarios (Stage 11, below), the Static Budget-Bound
+> Scenarios (Stage 10, below), the Stage 9 Pacing
 > Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
 > Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
 > tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
@@ -561,6 +562,42 @@ protection application, eligibility, a recommendation, or an allocation outcome.
 | 21 | Campaign both test and protected | Resolved only from its Stage 10/13 facts — `resolve_campaign_protection_constraint`'s `decrease_blocked=True` for the same campaign has no bearing on the Stage 15 result. |
 | 22 | `CampaignTestAwareStaticDecreaseRoom.model_fields` / result attributes | Contains no `effective_decrease_floor`, `effective_decrease_room`, `permissible_decrease`, `raw_percentage_movement_cap`, `applicable_max_change_percentage`, `decrease_blocked`, `is_protected`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
 | 23 | `data/sample_campaigns.csv` validated; Stage 10 and Stage 13 results independently calculated per campaign, then passed to Stage 15, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001 = 2500.00`, `M001 = 2000.00`, `G002 = 4000.00`, `G003 = 900.00`. Stages 10–14's existing sample results independently re-verified via separate calls, never combined. For G002, `decrease_blocked=True` and `test_aware_static_decrease_room=4000.00` both hold simultaneously and separately — `4000.00` is never described as permissible decrease. For G003, `room_to_static_minimum=1100.00` and `room_to_test_floor=900.00` both remain visible; Stage 15 selects `900.00`, never described as permissible decrease. |
+
+## Raw Increase Limit Scenarios
+
+All scenarios below use `resolve_campaign_raw_increase_limit(static_room:
+CampaignStaticBudgetRoom, raw_cap: CampaignRawPercentageMovementCap) ->
+CampaignRawIncreaseLimit` from `src/constraints.py`. Every result is a **raw,
+increase-specific constraint only** — none of these scenarios produces permission to
+increase a budget, an effective increase, eligibility, a recommendation, or a final
+movement amount.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignRawIncreaseLimit` field set | Exactly `campaign_id`, `raw_increase_limit`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignRawIncreaseLimit` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied from `static_room.campaign_id`, after confirming it matches `raw_cap.campaign_id`. |
+| 5 | Matching campaign IDs on both inputs | Resolves normally. |
+| 6 | Mismatched campaign IDs (e.g. `"A"` vs. `"B"`) | Raises `ValueError("Campaign IDs must match when resolving raw increase limit.")`; no result is resolved; neither ID is silently preferred. |
+| 7 | `resolve_campaign_raw_increase_limit(None, None)` / dict inputs (not `CampaignStaticBudgetRoom`/`CampaignRawPercentageMovementCap`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | `room_to_static_maximum` smaller than `raw_percentage_movement_cap` | Returns `room_to_static_maximum`. |
+| 9 | `room_to_static_maximum` equal to `raw_percentage_movement_cap` | Returns the equal value. |
+| 10 | `raw_percentage_movement_cap` smaller than `room_to_static_maximum` | Returns `raw_percentage_movement_cap`. |
+| 11 | `room_to_static_maximum = Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 12 | `raw_percentage_movement_cap = Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 13 | Both values `Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 14 | Parametrised sweep (five static-maximum/raw-cap pairs) | Result always equals `min(room_to_static_maximum, raw_percentage_movement_cap)`. |
+| 15 | Selected operand | Returned unchanged — equals `static_room.room_to_static_maximum` when that is the smaller value. |
+| 16 | `resolve_campaign_raw_increase_limit` source | Reads only `static_room.campaign_id`/`static_room.room_to_static_maximum`/`raw_cap.campaign_id`/`raw_cap.raw_percentage_movement_cap` (AST-verified); never references `CampaignInput` or `ReviewSetup` (AST-verified); calls none of `calculate_campaign_static_budget_room`/`calculate_campaign_raw_percentage_movement_cap`/Stage 11/13/14/15's or Stage 3–9's functions (AST-verified); contains no binary arithmetic, `quantize`, `ROUND_HALF_UP`, `CURRENCY_QUANTUM`, `localcontext`, or `float(` (source/AST-verified); the campaign-ID equality guard is verified via AST to precede any Decimal selection. |
+| 17 | Global `decimal` context mutated (`prec`/`rounding`) before calling the function | Result unaffected — no arithmetic occurs; the global context's `prec`/`rounding` remain exactly as the caller set them after the function returns. |
+| 18 | Extreme already-valid Stage 10/12 values (28-significant-digit `Decimal`) | Handled safely and exactly — the larger or smaller extreme value is selected unchanged, with no precision loss. |
+| 19 | `calculate_campaign_static_budget_room`/`calculate_campaign_raw_percentage_movement_cap` not called by Stage 16 | Confirmed via AST — Stage 16 consumes their already-computed results without recalculating either fact from raw budget/percentage fields. |
+| 20 | `is_protected=False` vs. `is_protected=True`, same Stage 10/12 facts | Same `raw_increase_limit` — `is_protected`/`decrease_blocked` never read; no protection-based zero is calculated; no increase-side protection rule is inferred. |
+| 21 | Non-test vs. test campaign, same Stage 10/12 facts | Same `raw_increase_limit` — `is_test_campaign`/`test_budget_floor`/`room_to_test_floor` never read; test-floor rules have no bearing on this result. |
+| 22 | Campaign both protected and test | Resolved only from its Stage 10/12 facts — Stage 14's `decrease_blocked=True` and Stage 15's `test_aware_static_decrease_room` for the same campaign have no bearing on the Stage 16 result. |
+| 23 | `CampaignRawIncreaseLimit.model_fields` / result attributes | Contains no `raw_decrease_limit`, `test_aware_static_decrease_room`, `decrease_blocked`, `is_protected`, `effective_increase`, `permissible_increase`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
+| 24 | `data/sample_campaigns.csv` validated; Stage 10, Stage 11, and Stage 12 results independently calculated per campaign, then only Stage 10 and Stage 12 passed to Stage 16, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=600.00`, `M001=375.00`, `G002=1000.00`, `G003=240.00`. Stages 10–15's existing sample results independently re-verified via separate calls, never combined. For G002, `decrease_blocked=True` and `raw_increase_limit=1000.00` both hold simultaneously and separately — never combined, and no increase-side protection rule is inferred. For G003, Stage 13's `room_to_test_floor=900.00` and Stage 15's `test_aware_static_decrease_room=900.00` remain decrease-specific; Stage 16's `raw_increase_limit=240.00` is unaffected by the test floor. |
 
 ## Allocation Scenarios
 

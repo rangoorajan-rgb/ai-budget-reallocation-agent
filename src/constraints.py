@@ -111,6 +111,28 @@ Stage 13's already-approved result objects directly — it never accepts or read
 `static_room.campaign_id == test_floor_room.campaign_id`, raising `ValueError`
 otherwise. No arithmetic is performed — the selected `Decimal` operand is returned
 unchanged, so no local `decimal` context, quantisation, or rounding is used.
+
+Also implements Sprint 1 — Development Stage 16: for one already-calculated
+`CampaignStaticBudgetRoom` (Stage 10's result) and one already-calculated
+`CampaignRawPercentageMovementCap` (Stage 12's result), combines the two into one
+neutral raw increase limit — both upward constraints apply simultaneously
+(`room_to_static_maximum` prevents exceeding `maximum_budget`;
+`raw_percentage_movement_cap` limits the size of a change under the applicable
+percentage rule), so the smaller value is the binding limit:
+`raw_increase_limit = min(room_to_static_maximum, raw_percentage_movement_cap)`.
+This is a **raw, increase-specific constraint only** — not permission to increase a
+budget, not an effective increase, not eligibility, not a recommendation, and not a
+final movement amount. Stage 16 consumes Stage 10's and Stage 12's already-approved
+result objects directly — it never accepts or reads `CampaignInput` or `ReviewSetup`,
+never calls `calculate_campaign_static_budget_room` or
+`calculate_campaign_raw_percentage_movement_cap`, and never reads or imports
+`CampaignApplicableChangePercentage`, `CampaignTestFloorRoom`,
+`CampaignProtectionConstraint`, or `CampaignTestAwareStaticDecreaseRoom`. Protected
+status has no approved increase-side effect here, and test-floor rules are
+decrease-specific — neither is read. It requires `static_room.campaign_id ==
+raw_cap.campaign_id`, raising `ValueError` otherwise. No arithmetic is performed —
+the selected `Decimal` operand is returned unchanged, so no local `decimal` context,
+quantisation, or rounding is used.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -386,4 +408,50 @@ def resolve_campaign_test_aware_static_decrease_room(
     return CampaignTestAwareStaticDecreaseRoom(
         campaign_id=static_room.campaign_id,
         test_aware_static_decrease_room=test_aware_static_decrease_room,
+    )
+
+
+class CampaignRawIncreaseLimit(BaseModel):
+    """A raw increase limit for one campaign, intersecting Stage 10's static-maximum
+    room and Stage 12's raw percentage movement cap.
+
+    Not permission to increase a budget, an effective increase, eligibility, a
+    recommendation, or a final movement amount.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    raw_increase_limit: Decimal
+
+
+def resolve_campaign_raw_increase_limit(
+    static_room: CampaignStaticBudgetRoom,
+    raw_cap: CampaignRawPercentageMovementCap,
+) -> CampaignRawIncreaseLimit:
+    """Combine one campaign's Stage 10 static-maximum room and Stage 12 raw
+    percentage movement cap into one raw increase limit.
+
+    Both upward constraints apply simultaneously — `room_to_static_maximum` prevents
+    exceeding `maximum_budget`, and `raw_percentage_movement_cap` limits the size of a
+    change under the applicable percentage rule — so the smaller value is the binding
+    limit: `raw_increase_limit = min(room_to_static_maximum,
+    raw_percentage_movement_cap)`. Requires `static_room.campaign_id ==
+    raw_cap.campaign_id`, raising `ValueError` otherwise. The selected `Decimal`
+    operand is returned unchanged — no arithmetic, quantisation, or rounding is
+    performed.
+    """
+    if static_room.campaign_id != raw_cap.campaign_id:
+        raise ValueError(
+            "Campaign IDs must match when resolving raw increase limit."
+        )
+
+    raw_increase_limit = min(
+        static_room.room_to_static_maximum,
+        raw_cap.raw_percentage_movement_cap,
+    )
+
+    return CampaignRawIncreaseLimit(
+        campaign_id=static_room.campaign_id,
+        raw_increase_limit=raw_increase_limit,
     )

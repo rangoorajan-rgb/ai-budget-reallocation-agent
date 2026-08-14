@@ -812,3 +812,92 @@ All notable changes to this project are documented in this file.
   business meaning; percentage-cap intersection, protection application, raw
   directional intersections, and eligibility explicitly re-confirmed as pending
   later stages), and `docs/TEST_SCENARIOS.md` (23 concrete Stage 15 scenarios).
+
+- Sprint 1, Development Stage 16: added `CampaignRawIncreaseLimit` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `raw_increase_limit: Decimal` only) and
+  `resolve_campaign_raw_increase_limit(static_room: CampaignStaticBudgetRoom,
+  raw_cap: CampaignRawPercentageMovementCap) -> CampaignRawIncreaseLimit` to
+  `src/constraints.py`, alongside but fully separate from Stage 10's
+  `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage 11's
+  `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+  Stage 12's `CampaignRawPercentageMovementCap`/
+  `calculate_campaign_raw_percentage_movement_cap`, Stage 13's
+  `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, Stage 14's
+  `CampaignProtectionConstraint`/`resolve_campaign_protection_constraint`, and Stage
+  15's `CampaignTestAwareStaticDecreaseRoom`/
+  `resolve_campaign_test_aware_static_decrease_room`, all unmodified. **Approved
+  business rule:** `room_to_static_maximum` (Stage 10) and
+  `raw_percentage_movement_cap` (Stage 12) are two independent upward constraints
+  that apply simultaneously — the smaller controls: `raw_increase_limit =
+  min(room_to_static_maximum, raw_percentage_movement_cap)`. A raw,
+  increase-specific constraint only — not permission to increase a budget, not an
+  effective increase, not eligibility, not a recommendation, and not a final
+  movement amount; does not account for a raw decrease limit, Stage 14's protection
+  constraint, or Stage 15's test-aware static decrease room. **Consumes Stage 10's
+  and Stage 12's already-approved result objects directly** (never accepts or reads
+  `CampaignInput`/`ReviewSetup`, never calls `calculate_campaign_static_budget_room`
+  or `calculate_campaign_raw_percentage_movement_cap`, never recalculates either
+  fact) to avoid duplicating their already-tested calculations. Requires
+  `static_room.campaign_id == raw_cap.campaign_id`, checked before any Decimal
+  selection, raising exactly `ValueError("Campaign IDs must match when resolving
+  raw increase limit.")` otherwise with neither ID silently preferred. No arithmetic
+  is performed — the selected `Decimal` operand is returned unchanged; no local
+  `decimal` context, `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, rounding, quantisation, or
+  `float` conversion; ambient global `Decimal` precision cannot affect the result.
+  Fully independent of Stages 11, 13, 14, and 15 — never reads
+  `applicable_max_change_percentage`, `room_to_test_floor`, `decrease_blocked`, or
+  `test_aware_static_decrease_room`; a protected campaign receives exactly the same
+  Stage 16 result as an otherwise identical unprotected campaign with matching Stage
+  10/12 facts, and no increase-side protection rule is inferred. `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 16: extended `tests/test_constraints.py` with 40 new
+  tests (all 186 existing Stage 10/11/12/13/14/15 tests preserved unchanged; 226
+  tests total) covering result-model shape/immutability/field-type confirmation,
+  incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
+  matching (matching IDs resolve normally, mismatched IDs raise the exact approved
+  `ValueError` message with no result resolved and neither ID silently preferred,
+  the ID-equality guard verified via AST to precede any Decimal selection),
+  comparison (static-maximum-smaller, equal, raw-cap-smaller, static-maximum-zero,
+  raw-cap-zero, both zero, a parametrised sweep proving the result always equals
+  `min()` of the two inputs, the selected operand returned unchanged), Decimal
+  behaviour (no float conversion, no arithmetic/rounding/quantisation via AST and
+  source-text checks, Decimal-context independence including confirming the global
+  context's `prec`/`rounding` are unchanged after the function returns, extreme
+  28-significant-digit Stage 10/12 values handled exactly), authorised-field-access
+  verification (AST: exactly the four approved fields), earlier-stage separation
+  (AST-verified no call to `calculate_campaign_static_budget_room`/
+  `calculate_campaign_raw_percentage_movement_cap`/Stage 11/13/14/15/3–9 functions,
+  no reference to `CampaignInput`/`ReviewSetup`), protection/test independence
+  (protected and unprotected source campaigns with identical Stage 10/12 facts
+  produce identical Stage 16 results, non-test and test source campaigns likewise,
+  a campaign both protected and test resolved only from its Stage 10/12 facts, no
+  protection- or test-floor-based zero introduced), scope protection (no batch
+  function, no raw decrease/combined model/effective-increase/eligibility/score/
+  `RecommendationAction`/`ReasonCode`/allocation/conservation field), and
+  integration with `validate_campaign_csv` + `resolve_campaign_applicable_change_percentage`
+  + `calculate_campaign_raw_percentage_movement_cap` over `data/sample_campaigns.csv`
+  (order preserved; `G001=600.00`, `M001=375.00`, `G002=1000.00`, `G003=240.00`;
+  Stages 10–15's existing sample results independently re-verified via separate
+  calls, never combined; G002's `decrease_blocked=True` and `1000.00` result both
+  preserved separately; G003's Stage 13/15 decrease-specific facts preserved
+  separately from the unaffected `240.00` result). `tests/test_models.py` (Stage 1),
+  `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage 3),
+  `tests/test_pacing.py` (Stage 4), `tests/test_classification.py` (Stage 5),
+  `tests/test_trend_classification.py` (Stage 6),
+  `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this
+  stage. Full suite: 567 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30
+  Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 226
+  Stage 10/11/12/13/14/15/16 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignRawIncreaseLimit` fields; exact
+  simultaneous-constraint business meaning; confirmation the output is never `None`;
+  zero meaning; confirmation the result is a raw, increase-specific constraint only;
+  separation from protection and test-floor rules), `docs/DECISION_RULES.md` (frozen
+  Stage 16 raw increase limit rule, including the approved
+  both-constraints-apply-simultaneously business meaning; raw decrease
+  intersection, protection application, effective constraints, and eligibility
+  explicitly re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (24
+  concrete Stage 16 scenarios).
