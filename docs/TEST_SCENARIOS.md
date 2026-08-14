@@ -1,18 +1,20 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 19 populates the Campaign Action Availability
-> Scenarios section below, backed by the new `tests/test_availability.py` (61
-> tests, a dedicated file for the new `src/availability.py` module — Stage 19 does
-> not extend `tests/test_constraints.py`, which remains unchanged at 322 tests: 25
-> Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15 +
-> 40 Stage 16 + 46 Stage 17 + 50 Stage 18), in addition to the Effective Decrease
-> Limit Scenarios (Stage 18, below), the Raw Decrease Limit Scenarios (Stage 17,
-> below), the Raw Increase Limit Scenarios (Stage 16, below), the Test-Aware Static
-> Decrease Room Scenarios (Stage 15, below), the Protection Constraint Scenarios
-> (Stage 14, below), the Test-Floor Room Scenarios (Stage 13, below), the Raw
-> Percentage Movement-Cap Scenarios (Stage 12, below), the Applicable
-> Change-Percentage Resolution Scenarios (Stage 11, below), the Static Budget-Bound
-> Scenarios (Stage 10, below), the Stage 9 Pacing
+> Sprint 1, Development Stage 20 populates the Campaign Action Suitability
+> Scenarios section below, backed by the new `tests/test_suitability.py` (67
+> tests, a dedicated file for the new `src/suitability.py` module — Stage 20 does
+> not extend `tests/test_availability.py`, which remains unchanged at 61 tests,
+> nor `tests/test_constraints.py`, which remains unchanged at 322 tests: 25 Stage
+> 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15 + 40
+> Stage 16 + 46 Stage 17 + 50 Stage 18), in addition to the Campaign Action
+> Availability Scenarios (Stage 19, below), the Effective Decrease Limit Scenarios
+> (Stage 18, below), the Raw Decrease Limit Scenarios (Stage 17, below), the Raw
+> Increase Limit Scenarios (Stage 16, below), the Test-Aware Static Decrease Room
+> Scenarios (Stage 15, below), the Protection Constraint Scenarios (Stage 14,
+> below), the Test-Floor Room Scenarios (Stage 13, below), the Raw Percentage
+> Movement-Cap Scenarios (Stage 12, below), the Applicable Change-Percentage
+> Resolution Scenarios (Stage 11, below), the Static Budget-Bound Scenarios (Stage
+> 10, below), the Stage 9 Pacing
 > Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
 > Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
 > tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
@@ -733,6 +735,51 @@ reason code, or an allocation.
 | 38 | Synthetic integration: warning-tracking campaign | Matches capacity-only outcome; `maintain_available=True`. |
 | 39 | Synthetic integration: both directional limits zero | `(False, True, False)`. |
 | 40 | Synthetic integration: protected-and-test campaign | `reduce_available=False`; `increase_available` matches the already-computed raw increase capacity; `maintain_available=True`. |
+
+## Campaign Action Suitability Scenarios
+
+All scenarios below use `resolve_campaign_action_suitability(performance:
+CampaignPerformanceClass, trend: CampaignTrendClass, availability:
+CampaignActionAvailability) -> CampaignActionSuitability` from
+`src/suitability.py` (`tests/test_suitability.py` — a dedicated test file, not
+an extension of `tests/test_availability.py` or `tests/test_constraints.py`).
+Every result is a categorical directional signal only — none of these scenarios
+produces a recommendation, `RecommendationAction`, `HOLD`, a numeric score, a
+ranking, a reason code, or an allocation.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `Suitability` members | Exactly `SUITABLE`/`"Suitable"`, `NEUTRAL`/`"Neutral"`, `UNSUITABLE`/`"Unsuitable"`, `NOT_APPLICABLE`/`"Not Applicable"`; no numeric base class; no `__lt__`/`__gt__`/`__le__`/`__ge__` defined; disjoint from `RecommendationAction`'s values; no `HOLD` member. |
+| 2 | `CampaignActionSuitability` field set | Exactly `campaign_id`, `increase_suitability`, `maintain_suitability`, `reduce_suitability`. |
+| 3 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate a `CampaignActionSuitability` instance | Rejected (`frozen=True`). |
+| 5 | `campaign_id` on the result | Copied from `performance.campaign_id`, after confirming it matches `trend.campaign_id` and `availability.campaign_id`. |
+| 6 | All three IDs equal | Resolves normally. |
+| 7 | `trend.campaign_id` mismatched | Raises `ValueError("Campaign IDs must match when resolving action suitability.")`. |
+| 8 | `availability.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 9 | Multiple inputs mismatched simultaneously | Raises the same exact `ValueError` — no per-object mismatch reporting, no result returned, no ID silently preferred. |
+| 10 | ID-equality guard | Verified via AST to be the first statement, preceding any `performance_band`/`trend_direction` read, rule-table lookup, or availability-field read. |
+| 11–19 | All nine `PerformanceBand`×`TrendDirection` combinations, all three actions available | `ABOVE_TARGET`+`IMPROVING`=`(SUITABLE, NEUTRAL, UNSUITABLE)`; `ABOVE_TARGET`+`STABLE`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `ABOVE_TARGET`+`DECLINING`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `ON_TARGET`+`IMPROVING`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `ON_TARGET`+`STABLE`=`(NEUTRAL, SUITABLE, NEUTRAL)`; `ON_TARGET`+`DECLINING`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `BELOW_TARGET`+`IMPROVING`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `BELOW_TARGET`+`STABLE`=`(NEUTRAL, NEUTRAL, NEUTRAL)`; `BELOW_TARGET`+`DECLINING`=`(UNSUITABLE, NEUTRAL, SUITABLE)`. |
+| 20 | Increase unavailable only | `increase_suitability=NOT_APPLICABLE`; maintain/reduce follow the base table. |
+| 21 | Maintain unavailable only | `maintain_suitability=NOT_APPLICABLE`; increase/reduce follow the base table. |
+| 22 | Reduce unavailable only | `reduce_suitability=NOT_APPLICABLE`; increase/maintain follow the base table. |
+| 23 | All three unavailable | All three `NOT_APPLICABLE`. |
+| 24 | Only maintain available | increase/reduce `NOT_APPLICABLE`; maintain follows the base table. |
+| 25 | Availability override in a diagonal cell (e.g. `ABOVE_TARGET`+`IMPROVING`, reduce unavailable) | `reduce_suitability=NOT_APPLICABLE`, never `UNSUITABLE`. |
+| 26 | Availability override in a conflict cell (e.g. `ABOVE_TARGET`+`STABLE`, increase unavailable) | `increase_suitability=NOT_APPLICABLE`, not `NEUTRAL`. |
+| 27 | Unavailable direction | Never becomes `UNSUITABLE` — confirmed explicitly even where the base table would otherwise say `UNSUITABLE`. |
+| 28 | Available conflict cells | Remain `NEUTRAL` for all three directions. |
+| 29 | Paused campaign, via the real Stage 8/10–19 production path | `CampaignActionAvailability` = `(False, False, False)`; Stage 20 output = all three `NOT_APPLICABLE`. |
+| 30 | Active, unassessable (`TrackingStatus.UNRELIABLE`), via the real production path | `increase_available=False`, `reduce_available=False`, `maintain_available=True`; Stage 20 returns `NOT_APPLICABLE` for increase/reduce, and the base-table result for maintain. |
+| 31 | Protected active campaign, via the real production path | `reduce_available=False`; Stage 20 returns `NOT_APPLICABLE` for reduce and base-table results for increase/maintain; `is_protected`/`decrease_blocked` never read directly by Stage 20. |
+| 32 | Test campaign, via the real production path | All three directions available; Stage 20 returns base-table results for all three. |
+| 33 | Synthetic campaign both protected and test | Follows only the already-computed Stage 19 availability values supplied — no new interaction. |
+| 34 | `resolve_campaign_action_suitability` source | Reads only `performance.campaign_id`/`performance.performance_band`, `trend.campaign_id`/`trend.trend_direction`, `availability.campaign_id`/`availability.increase_available`/`availability.maintain_available`/`availability.reduce_available` — exactly eight authorised field accesses (AST-verified); never references `performance_ratio`/`weighted_performance_ratio`/`trend_delta` (source-verified); calls none of `classify_campaign_performance`/`classify_campaign_trend`/`resolve_campaign_action_availability`/any other Stage 1–19 production function (AST-verified); contains no binary arithmetic, no `float(` conversion (source/AST-verified). |
+| 35 | `Confidence`/`CampaignConfidenceClass`/`PacingStatus`/`CampaignPacingClass`/`BusinessPriority`/`CampaignTrackingAssessment`/`RecommendationAction`/`ReasonCode`/`Decimal` | Never referenced anywhere in `src/suitability.py`'s source (AST-verified) or imported into the module (`hasattr` on the module confirms absence). |
+| 36 | `CampaignActionSuitability.model_fields` / result attributes | Contains no `score`, `recommendation_action`, `recommendation`, `hold`, `reason_code`, `confidence`, `pacing_status`, `business_priority`, `allocation`, `conservation`, `rank`, `increase_available`, `maintain_available`, or `reduce_available` field. |
+| 37 | `data/sample_campaigns.csv` validated; Stage 5/6/19 results independently calculated per campaign through the real production path, then only those three results passed, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`: `ON_TARGET`/`STABLE`/`(True,True,True)` → `(NEUTRAL, SUITABLE, NEUTRAL)`. `M001`: same shape → `(NEUTRAL, SUITABLE, NEUTRAL)`. `G002` (protected): `ABOVE_TARGET`/`IMPROVING`/`(True,True,False)` → `(SUITABLE, NEUTRAL, NOT_APPLICABLE)` — `REDUCE` is `NOT_APPLICABLE`, never `UNSUITABLE`; protection is never read directly; `INCREASE` being `SUITABLE` does not select `RecommendationAction.INCREASE` (no such field exists). `G003` (test): `ON_TARGET`/`STABLE`/`(True,True,True)` → `(NEUTRAL, SUITABLE, NEUTRAL)`. |
+| 38 | Synthetic integration: all six conflicting/mixed `PerformanceBand`×`TrendDirection` combinations, all available | All three directions `NEUTRAL` in every case. |
+| 39 | Synthetic integration: every availability pattern (8 combinations of the three Booleans) applied to a conflict cell | Each direction is `NEUTRAL` when available and `NOT_APPLICABLE` when unavailable, independently per direction. |
 
 ## Allocation Scenarios
 

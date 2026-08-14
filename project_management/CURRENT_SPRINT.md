@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, and 19 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, and 20 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -803,32 +803,109 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 19 (and not yet started)
+## Development Stage 20 — Deterministic Conservative Diagonal-Only Campaign Action Suitability (complete)
 
-- Action suitability (which *available* action should actually be recommended).
-- `HOLD` (exact trigger undecided; reserved for a later review/deferral or
-  recommendation stage).
+- [x] `src/suitability.py` (new dedicated module — not added to
+      `src/classification.py`, `src/constraints.py`, `src/availability.py`, or
+      `src/scoring.py`, since suitability combines classification-domain
+      performance, classification-domain trend, and availability-domain action
+      gates, and is not a raw classification, a monetary constraint,
+      availability, or numeric scoring; `src/scoring.py` remains unchanged,
+      reserved for later numeric prioritisation-scoring work) — `Suitability`
+      (`str, Enum`: `SUITABLE = "Suitable"`, `NEUTRAL = "Neutral"`,
+      `UNSUITABLE = "Unsuitable"`, `NOT_APPLICABLE = "Not Applicable"`, purely
+      categorical, no ordering), `CampaignActionSuitability` (frozen,
+      `extra="forbid"`: `campaign_id`, `increase_suitability: Suitability`,
+      `maintain_suitability: Suitability`, `reduce_suitability: Suitability`),
+      and `resolve_campaign_action_suitability(performance:
+      CampaignPerformanceClass, trend: CampaignTrendClass, availability:
+      CampaignActionAvailability) -> CampaignActionSuitability`. Uses ordinal
+      **"suitability,"** never a numeric score. `src/classification.py`,
+      `src/constraints.py`, `src/availability.py`, `src/scoring.py`,
+      `src/constants.py`, `src/models.py`, `src/validation.py`,
+      `src/metrics.py`, `src/pacing.py` unchanged.
+- [x] **Approved concept boundary:** availability answers "can this action be
+      taken mechanically and operationally?"; suitability answers "do the
+      approved performance and trend classifications provide a clear
+      directional signal supporting this available action?" Suitability does
+      not mean recommendation — `SUITABLE` is not automatically selected,
+      `NEUTRAL` is not automatically rejected, `UNSUITABLE` is not a final
+      prohibition. Does not select `RecommendationAction`, select `HOLD`,
+      produce `ReasonCode`, produce a numeric score, rank campaigns, or apply
+      `Confidence`, `PacingStatus`, or `BusinessPriority`.
+- [x] **Approved conservative diagonal-only rule:** only the three cells where
+      `PerformanceBand` and `TrendDirection` clearly agree
+      (`ABOVE_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`,
+      `BELOW_TARGET`+`DECLINING`) produce a directional `SUITABLE`/`UNSUITABLE`
+      result; all six conflicting/mixed combinations resolve to `NEUTRAL` for
+      every direction — deliberately avoiding a performance-vs-trend
+      precedence decision. Implemented as a module-level immutable
+      `MappingProxyType` containing exactly all nine
+      `PerformanceBand`×`TrendDirection` keys, never mutated at runtime, no
+      enum-declaration-order dependency.
+- [x] **Availability-first override:** applied independently per direction
+      after the base-table lookup — an unavailable direction is always
+      `Suitability.NOT_APPLICABLE`, overriding the base table; never `None`,
+      numeric zero, or `UNSUITABLE`. For an Active but unassessable campaign,
+      Stage 19 already makes `INCREASE`/`REDUCE` unavailable, so Stage 20
+      returns `NOT_APPLICABLE` for both while `MAINTAIN` still receives its
+      base-table result — Stage 20 never decides `MAINTAIN` versus `HOLD`.
+- [x] Consumes Stage 5's, Stage 6's, and Stage 19's already-approved result
+      objects directly (never calls `classify_campaign_performance`,
+      `classify_campaign_trend`, or `resolve_campaign_action_availability`, and
+      never accepts `CampaignInput`/`ReviewSetup`/`CampaignTrackingAssessment`)
+      — no combined-assessment data-carrier model was created. Requires all
+      three `campaign_id` values to match, raising exactly
+      `ValueError("Campaign IDs must match when resolving action
+      suitability.")` otherwise, checked before any rule-table lookup or
+      availability evaluation. No `Decimal`, arithmetic, or numeric weight is
+      used anywhere — only enum-identity comparison, a fixed mapping lookup,
+      and Boolean gating. Excludes `Confidence` (including any
+      `Confidence.NOT_ASSESSABLE` relationship), `PacingStatus`, and
+      `BusinessPriority` entirely — none is read. Outputs no `ReasonCode` and
+      selects no `RecommendationAction`/`HOLD`.
+- [x] `tests/test_suitability.py` (new dedicated test file — `tests/test_availability.py`
+      unchanged at 61 tests, `tests/test_constraints.py` unchanged at 322
+      tests) — 67 new Stage 20 tests, all passing. `tests/test_models.py`
+      (Stage 1), `tests/test_validation.py` (Stage 2), `tests/test_metrics.py`
+      (Stage 3), `tests/test_pacing.py` (Stage 4), `tests/test_classification.py`
+      (Stage 5), `tests/test_trend_classification.py` (Stage 6),
+      `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+      passing — no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 20 (and not yet started)
+
+- Resolution of the six conflicting/mixed performance-trend cells (deliberately
+  left `NEUTRAL` rather than assigning a performance-vs-trend precedence).
+- `RecommendationAction` selection, `HOLD` (exact trigger still undecided).
+- `ReasonCode` assignment.
+- `Confidence`/`Confidence.NOT_ASSESSABLE`, `PacingStatus`, `BusinessPriority`
+  effects on suitability, scoring, or allocation.
 - Effective increase limit (`CampaignRawIncreaseLimit` remains the authoritative
   increase-side constraint; no approved rule exists to transform it).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
-- Scoring, ranking/prioritisation, final `RecommendationAction` assignment,
-  `ReasonCode` assignment, allocation, conservation.
+- Numeric prioritisation scoring, ranking/prioritisation, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 20 (not started, scope not yet frozen): requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order. Action
-suitability/scoring is the leading candidate, consuming `CampaignActionAvailability`
-(Stage 19) alongside the excluded classification signals (`PerformanceBand`,
-`TrendDirection`, `Confidence`, `PacingStatus`, `BusinessPriority`) to move toward a
-final `RecommendationAction`. **Corrected cross-campaign note:** per-campaign
-scoring may remain single-campaign — it does not inherently require cross-campaign
-data. Only normalisation, ranking/prioritisation, and allocation genuinely require
-comparing multiple campaigns simultaneously; this corrects an earlier note (recorded
-at Stage 18 completion) that conflated per-campaign scoring with cross-campaign
-ranking. The still-deferred combined campaign-assessment question (performance +
-trend + confidence + tracking + pacing) remains a live but not clearly necessary
+Stage 21 (not started, scope not yet frozen): requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order.
+`RecommendationAction` selection is the leading candidate, consuming
+`CampaignActionSuitability` (Stage 20) to move toward a final action per campaign
+— but selecting among `SUITABLE`/`NEUTRAL`/`UNSUITABLE` results, and deciding
+`HOLD`'s exact trigger, both remain open business decisions requiring their own
+approval. Whether `Confidence`, `PacingStatus`, or `BusinessPriority` first need
+a dedicated readiness/scoring stage before `RecommendationAction` can be
+finalised is not yet resolved. Per-campaign scoring may remain single-campaign;
+only normalisation, ranking/prioritisation, and allocation genuinely require
+comparing multiple campaigns simultaneously (corrected at Stage 19 completion).
+The still-deferred combined campaign-assessment question (performance + trend +
+confidence + tracking + pacing) remains a live but not clearly necessary
 candidate on its own, as noted since the Stage 11 inspection.

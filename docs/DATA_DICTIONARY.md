@@ -1,8 +1,9 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 19 (adds deterministic campaign action availability —
-> whether `INCREASE`, `MAINTAIN`, and `REDUCE` are each mechanically and
-> operationally available, from `src/availability.py` — to the Stage 1 enumerations,
+> Sprint 1, Development Stage 20 (adds deterministic, categorical, per-action
+> campaign suitability — whether the approved `PerformanceBand` and
+> `TrendDirection` classifications provide a clear directional signal supporting
+> each available action, from `src/suitability.py` — to the Stage 1 enumerations,
 > numerical constants, core input models, CSV schema, Stage 2 validation reporting,
 > Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance classification,
 > Stage 6 trend classification, Stage 7 conversion-volume confidence classification,
@@ -10,11 +11,11 @@
 > static budget-bound facts, Stage 11 applicable-change-percentage resolution, Stage
 > 12 raw percentage-based monetary movement cap, Stage 13 test-floor distance, Stage
 > 14 protection constraint, Stage 15 test-aware static decrease room, Stage 16 raw
-> increase limit, Stage 17 raw decrease limit, and Stage 18 protection-adjusted
-> effective decrease limit). Combined assessment, `Confidence.NOT_ASSESSABLE`
-> ownership, action suitability, `HOLD`, scoring, ranking, `RecommendationAction`,
-> `ReasonCode`, and other derived/decision fields, plus export fields, are pending
-> later stages.
+> increase limit, Stage 17 raw decrease limit, Stage 18 protection-adjusted
+> effective decrease limit, and Stage 19 campaign action availability). Combined
+> assessment, `Confidence.NOT_ASSESSABLE` ownership, numeric prioritisation
+> scoring, ranking, `RecommendationAction`, `HOLD`, and `ReasonCode`, and other
+> derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -822,11 +823,81 @@ modified by this addition, and traceability to the underlying facts (tracking
 assessability, raw increase limit, effective decrease limit) is preserved by
 holding those result objects separately, not by repeating their fields here.
 
+## Campaign Action Suitability Fields (`src/suitability.py`)
+
+Produced by `resolve_campaign_action_suitability(performance:
+CampaignPerformanceClass, trend: CampaignTrendClass, availability:
+CampaignActionAvailability) -> CampaignActionSuitability`, one result per
+already-calculated Stage 5, Stage 6, and Stage 19 result triple.
+`CampaignActionSuitability` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`).
+
+**Definition of suitability.** Availability answers "can this action be taken
+mechanically and operationally?" Suitability answers "do the approved
+performance and trend classifications provide a clear directional signal
+supporting this available action?" Suitability does **not** mean recommendation
+— a `SUITABLE` action is not automatically selected, a `NEUTRAL` action is not
+automatically rejected, and an `UNSUITABLE` action is not a final prohibition.
+
+### `Suitability` (enum)
+
+| Member | Value | Meaning |
+|--------|-------|---------|
+| `SUITABLE` | `"Suitable"` | Performance and trend clearly agree in favour of this direction. |
+| `NEUTRAL` | `"Neutral"` | Performance and trend do not clearly agree, or the diagonal case does not favour this direction. |
+| `UNSUITABLE` | `"Unsuitable"` | Performance and trend clearly agree against this direction. |
+| `NOT_APPLICABLE` | `"Not Applicable"` | The action is unavailable under Stage 19 and therefore receives no suitability judgement. |
+
+`Suitability` is purely categorical — it carries no numeric value, no ordering,
+and no `SUITABLE > NEUTRAL`-style comparison is defined or implied.
+
+### `CampaignActionSuitability`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `performance.campaign_id`, after confirming it matches `trend.campaign_id` and `availability.campaign_id`. |
+| `increase_suitability` | `Suitability` | Base-table result for `PerformanceBand`/`TrendDirection`, or `NOT_APPLICABLE` if `availability.increase_available` is `False`. |
+| `maintain_suitability` | `Suitability` | Base-table result, or `NOT_APPLICABLE` if `availability.maintain_available` is `False`. |
+| `reduce_suitability` | `Suitability` | Base-table result, or `NOT_APPLICABLE` if `availability.reduce_available` is `False`. |
+
+**Complete 3×3 base rule table** (a conservative, diagonal-only policy — before
+applying the availability override):
+
+| PerformanceBand \ TrendDirection | IMPROVING | STABLE | DECLINING |
+|---|---|---|---|
+| `ABOVE_TARGET` | increase=`SUITABLE`, maintain=`NEUTRAL`, reduce=`UNSUITABLE` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` |
+| `ON_TARGET` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` | increase=`NEUTRAL`, maintain=`SUITABLE`, reduce=`NEUTRAL` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` |
+| `BELOW_TARGET` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` | increase=`NEUTRAL`, maintain=`NEUTRAL`, reduce=`NEUTRAL` | increase=`UNSUITABLE`, maintain=`NEUTRAL`, reduce=`SUITABLE` |
+
+Only the three diagonal cells (`ABOVE_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`,
+`BELOW_TARGET`+`DECLINING`) — where performance and trend clearly agree —
+produce a directional `SUITABLE`/`UNSUITABLE` result. All six conflicting or
+mixed combinations resolve to `NEUTRAL` for every direction. This deliberately
+avoids deciding whether performance or trend has precedence when they disagree.
+
+**Availability override.** After the base-table lookup, availability is applied
+independently per direction: if `availability.increase_available` is `False`,
+`increase_suitability = Suitability.NOT_APPLICABLE`, overriding whatever the
+base table would otherwise say — the same rule applies independently to
+`maintain_suitability`/`maintain_available` and
+`reduce_suitability`/`reduce_available`. `NOT_APPLICABLE` is never represented
+as `None`, a numeric zero, or `UNSUITABLE`.
+
+**Exclusions.** `Confidence`, `PacingStatus`, and `BusinessPriority` are never
+read — these remain deferred suitability/scoring inputs. `CampaignTrackingAssessment`
+is never accepted — Stage 19's already-resolved availability is consumed
+directly instead, so an Active-but-unassessable campaign's `MAINTAIN` still
+receives its base-table result (since `maintain_available` is unaffected by
+assessability) while `INCREASE`/`REDUCE` become `NOT_APPLICABLE` purely because
+Stage 19 already marked them unavailable. Stage 20 never decides `MAINTAIN`
+versus `HOLD`. No `RecommendationAction`, `HOLD`, `ReasonCode`, numeric score,
+ranking, or allocation field exists anywhere on this result.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, action suitability, `HOLD`, scoring,
-> ranking, `RecommendationAction`, `ReasonCode`, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, numeric prioritisation scoring, ranking,
+> `RecommendationAction`, `HOLD`, `ReasonCode`, allocation).
 
 ## Export Fields
 

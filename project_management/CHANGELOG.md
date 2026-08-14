@@ -1243,3 +1243,146 @@ All notable changes to this project are documented in this file.
   `ReasonCode`/`HOLD` deferral, the `CampaignInput`-ownership decision, the
   dedicated-module decision, and the corrected cross-campaign-boundary note),
   and `docs/TEST_SCENARIOS.md` (40 concrete Stage 19 scenarios).
+
+- Sprint 1, Development Stage 20: added a new dedicated module,
+  `src/suitability.py`, containing `Suitability` (`str, Enum`: `SUITABLE =
+  "Suitable"`, `NEUTRAL = "Neutral"`, `UNSUITABLE = "Unsuitable"`,
+  `NOT_APPLICABLE = "Not Applicable"` — purely categorical, no numeric value,
+  no ordering, no `SUITABLE > NEUTRAL`-style comparison), `CampaignActionSuitability`
+  (frozen, immutable, `extra="forbid"`: `campaign_id`, `increase_suitability:
+  Suitability`, `maintain_suitability: Suitability`, `reduce_suitability:
+  Suitability` only), and `resolve_campaign_action_suitability(performance:
+  CampaignPerformanceClass, trend: CampaignTrendClass, availability:
+  CampaignActionAvailability) -> CampaignActionSuitability`. Determines a
+  categorical, per-direction suitability for `INCREASE`, `MAINTAIN`, and
+  `REDUCE` — availability answers "can this action be taken mechanically and
+  operationally?"; suitability answers "do the approved performance and trend
+  classifications provide a clear directional signal supporting this
+  available action?" Suitability does **not** mean recommendation — a
+  `SUITABLE` action is not automatically selected, a `NEUTRAL` action is not
+  automatically rejected, and an `UNSUITABLE` action is not a final
+  prohibition. **Approved conservative diagonal-only rule:** only the three
+  cells where `PerformanceBand` and `TrendDirection` clearly agree
+  (`ABOVE_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`,
+  `BELOW_TARGET`+`DECLINING`) produce a directional `SUITABLE`/`UNSUITABLE`
+  result; all six conflicting or mixed combinations resolve to `NEUTRAL` for
+  every direction, deliberately avoiding a performance-vs-trend precedence
+  decision. Exact complete nine-cell base table:
+  ```
+  ABOVE_TARGET + IMPROVING  → SUITABLE,   NEUTRAL, UNSUITABLE
+  ABOVE_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+  ABOVE_TARGET + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  ON_TARGET    + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  ON_TARGET    + STABLE     → NEUTRAL,    SUITABLE, NEUTRAL
+  ON_TARGET    + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + DECLINING  → UNSUITABLE, NEUTRAL, SUITABLE
+  ```
+  implemented as a module-level immutable `MappingProxyType` containing
+  exactly all nine `PerformanceBand`×`TrendDirection` keys, never mutated at
+  runtime, no numeric weight, no `RecommendationAction`/`ReasonCode`, and no
+  dependency on enum declaration order. **Availability-first override:**
+  applied independently per direction after the base-table lookup — an
+  unavailable direction is always `Suitability.NOT_APPLICABLE`, overriding
+  the base table; never `None`, a numeric zero, or `UNSUITABLE`. For an
+  Active but unassessable campaign, Stage 19 already makes
+  `INCREASE`/`REDUCE` unavailable, so Stage 20 returns `NOT_APPLICABLE` for
+  both while `MAINTAIN` still receives its base-table result — Stage 20
+  never decides `MAINTAIN` versus `HOLD`. **Consumes Stage 5's, Stage 6's,
+  and Stage 19's already-approved result objects directly** (never calls
+  `classify_campaign_performance`, `classify_campaign_trend`, or
+  `resolve_campaign_action_availability`, and never accepts
+  `CampaignInput`/`ReviewSetup`/`CampaignTrackingAssessment`) — no
+  combined-assessment data-carrier model was created. Requires all three
+  `campaign_id` values to match via one combined equality check anchored to
+  `performance.campaign_id`, checked before any rule-table lookup or
+  availability evaluation, raising exactly `ValueError("Campaign IDs must
+  match when resolving action suitability.")` otherwise with the same exact
+  message regardless of which input(s) mismatch. Excludes `Confidence`
+  (including any `Confidence.NOT_ASSESSABLE` relationship), `PacingStatus`,
+  and `BusinessPriority` entirely; outputs no `ReasonCode`; selects no
+  `RecommendationAction`/`HOLD`. No `Decimal` import, arithmetic, local
+  Decimal context, `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, or `float`
+  conversion is used anywhere — only enum-identity comparison, a fixed
+  mapping lookup, and Boolean gating. A dedicated module was chosen over
+  `src/classification.py`/`src/constraints.py`/`src/availability.py`/
+  `src/scoring.py` because suitability combines classification-domain
+  performance, classification-domain trend, and availability-domain action
+  gates simultaneously, and is not a raw classification, a monetary
+  constraint, availability, or numeric scoring; `src/scoring.py` remains
+  unchanged, reserved for later numeric prioritisation-scoring work.
+  `src/classification.py`, `src/constraints.py`, `src/availability.py`,
+  `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`,
+  and `src/pacing.py` are unchanged.
+- Sprint 1, Development Stage 20: added a new dedicated test file,
+  `tests/test_suitability.py` (67 tests, all passing;
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests) covering the
+  `Suitability` enum (exactly four members with exact string values, no
+  numeric base class, no `__lt__`/`__gt__`/`__le__`/`__ge__` defined, disjoint
+  from `RecommendationAction`'s values, no `HOLD` member), result-model
+  shape/immutability/field-type confirmation (no score/action/reason/
+  confidence/pacing/priority/allocation/availability-boolean field),
+  incompatible-input rejection (`AttributeError`, no silent coercion),
+  campaign-ID matching (all three IDs equal resolves normally; performance/
+  trend and performance/availability mismatches, and multiple simultaneous
+  mismatches, each raise the exact approved `ValueError` message with no
+  result resolved and no ID silently preferred; the ID-equality guard
+  verified via AST to precede any rule-table lookup or availability read),
+  the complete nine-cell base table with all actions available (all nine
+  `PerformanceBand`×`TrendDirection` combinations asserted exactly),
+  availability overrides (each direction independently `NOT_APPLICABLE` when
+  unavailable, in both diagonal and conflict cells; unavailable never becomes
+  `UNSUITABLE`; available conflict cells remain `NEUTRAL`; an "only maintain
+  available" case; an "all unavailable" case), Stage 19 scenarios via the
+  real Stage 3/5/6/8/10–19 production path (a Paused campaign producing all
+  `NOT_APPLICABLE`; an unassessable-tracking campaign producing
+  `NOT_APPLICABLE` for increase/reduce with maintain using the base table; a
+  protected campaign producing `NOT_APPLICABLE` for reduce only, with
+  `is_protected`/`decrease_blocked` never read directly; a test campaign
+  using the base table for all three; a synthetic protected-and-test
+  campaign following only its supplied availability), independence from
+  `Confidence`/`CampaignConfidenceClass`/`PacingStatus`/`CampaignPacingClass`/
+  `BusinessPriority`/`CampaignTrackingAssessment`/`RecommendationAction`/
+  `ReasonCode`/`Decimal`/raw performance ratios/raw trend delta (AST- and
+  module-attribute-verified), earlier-stage separation (AST-verified no call
+  to `classify_campaign_performance`/`classify_campaign_trend`/
+  `resolve_campaign_action_availability`/any other Stage 1–19 function;
+  exactly eight authorised field accesses verified via AST), no numeric
+  scoring (no arithmetic `BinOp`, no `float` conversion, no `score`-named
+  field, no production batch function), and sample-data integration through
+  `validate_campaign_csv` + the real production chain over
+  `data/sample_campaigns.csv` (order preserved; `G001`/`M001`/`G003` all
+  producing `(NEUTRAL, SUITABLE, NEUTRAL)`; `G002` producing `(SUITABLE,
+  NEUTRAL, NOT_APPLICABLE)` with `REDUCE` explicitly confirmed as
+  `NOT_APPLICABLE` rather than `UNSUITABLE`, protection never read directly,
+  and `INCREASE` being `SUITABLE` confirmed not to select any
+  `RecommendationAction`), plus synthetic integration cases for all six
+  conflicting/mixed combinations (all `NEUTRAL` for every direction when
+  available) and every availability pattern applied to a conflict cell.
+  `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+  `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+  passing — no behavioural regression, and no existing test file required
+  modification this stage. Full suite: 791 tests passing (92 Stage 1 + 44
+  Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 +
+  30 Stage 8 + 33 Stage 9 + 322 Stage 10–18 combined in
+  `tests/test_constraints.py` + 61 Stage 19 in `tests/test_availability.py` +
+  67 Stage 20 in `tests/test_suitability.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`Suitability` enum; `CampaignActionSuitability`
+  fields; the definition of suitability; the complete 3×3 rule table; the
+  availability override; `NOT_APPLICABLE` meaning; exclusion of confidence,
+  pacing, priority, `HOLD`, action, and reason codes),
+  `docs/DECISION_RULES.md` (frozen Stage 20 conservative diagonal-only
+  campaign action suitability rule, including the exact nine-cell table, the
+  exact three inputs and eight authorised fields, the campaign-ID policy and
+  error, the availability-first override rule, confirmation the six conflict
+  cells remain `NEUTRAL` with no performance/trend precedence decided, no
+  numeric weights, and the deferral of confidence, pacing, priority,
+  `RecommendationAction`, and `ReasonCode` explicitly re-confirmed as pending
+  later stages), and `docs/TEST_SCENARIOS.md` (39 concrete Stage 20
+  scenarios).

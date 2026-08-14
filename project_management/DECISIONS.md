@@ -1568,3 +1568,130 @@ question, scoring, ranking, `RecommendationAction`, `ReasonCode`, allocation, an
 conservation all remain deferred to later stages. No existing test file required
 modification for Stage 19 — a new dedicated test file was created instead.
 **Status:** Frozen.
+
+## 2026-08-14 — Stage 20: approved concept boundary — suitability is not recommendation
+
+**Decision:** Sprint 1, Development Stage 20 produces a deterministic,
+categorical `CampaignActionSuitability` result for `INCREASE`, `MAINTAIN`, and
+`REDUCE`. Availability (Stage 19) answers "can this action be taken
+mechanically and operationally?"; suitability answers "do the approved
+performance and trend classifications provide a clear directional signal
+supporting this available action?" Suitability does **not** mean recommendation
+— a `SUITABLE` action is not automatically selected, a `NEUTRAL` action is not
+automatically rejected, and an `UNSUITABLE` action is not a final prohibition.
+`NOT_APPLICABLE` means the action is unavailable under Stage 19 and therefore
+receives no suitability judgement. Stage 20 does not select
+`RecommendationAction`, select `HOLD`, produce `ReasonCode`, produce a numeric
+score, rank campaigns, or apply `Confidence`, `PacingStatus`, or
+`BusinessPriority`.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 20: approved conservative diagonal-only rule and complete nine-cell table
+
+**Decision:** Stage 20 uses a conservative diagonal-only rule: only the three
+cells where `PerformanceBand` and `TrendDirection` clearly agree
+(`ABOVE_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`, `BELOW_TARGET`+`DECLINING`)
+produce a directional `SUITABLE`/`UNSUITABLE` result; all six conflicting or
+mixed combinations resolve to `NEUTRAL` for every direction. This deliberately
+avoids deciding whether performance or trend has precedence when they
+disagree. Exact complete base table (each cell is `increase, maintain,
+reduce`):
+```
+ABOVE_TARGET + IMPROVING  → SUITABLE,   NEUTRAL, UNSUITABLE
+ABOVE_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+ABOVE_TARGET + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+ON_TARGET    + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+ON_TARGET    + STABLE     → NEUTRAL,    SUITABLE, NEUTRAL
+ON_TARGET    + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+BELOW_TARGET + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+BELOW_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+BELOW_TARGET + DECLINING  → UNSUITABLE, NEUTRAL, SUITABLE
+```
+Implemented as a module-level immutable `MappingProxyType` containing exactly
+all nine `PerformanceBand`×`TrendDirection` keys, never mutated at runtime,
+containing no numeric weight, `RecommendationAction`, or `ReasonCode`, and not
+depending on enum declaration order (keyed by explicit enum-value tuples).
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 20: availability-first override rule
+
+**Decision:** After the base-table lookup, availability is applied
+independently per direction: if `availability.increase_available` is `False`,
+`increase_suitability = Suitability.NOT_APPLICABLE`, overriding whatever the
+base table would otherwise say — the same independent rule applies to
+`maintain_suitability`/`maintain_available` and
+`reduce_suitability`/`reduce_available`. Availability always overrides the
+base suitability table. `NOT_APPLICABLE` is never represented as `None`, a
+numeric zero, or `UNSUITABLE`. For an Active but unassessable campaign, Stage
+19 already makes `INCREASE`/`REDUCE` unavailable, so Stage 20 returns
+`NOT_APPLICABLE` for both, while `MAINTAIN` remains available under Stage 19
+and receives its base-table result — Stage 20 never decides `MAINTAIN` versus
+`HOLD`; this does not prevent a later `RecommendationAction` stage from
+selecting `HOLD` because the data is unreliable.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 20: exact enum, model, function, and three-input consumption (not recalculation)
+
+**Decision:** `Suitability` (`str, Enum`: `SUITABLE = "Suitable"`, `NEUTRAL =
+"Neutral"`, `UNSUITABLE = "Unsuitable"`, `NOT_APPLICABLE = "Not Applicable"`)
+is purely categorical — no numeric value, no ordering, and no `SUITABLE >
+NEUTRAL`-style comparison is defined or implied anywhere.
+`CampaignActionSuitability` (frozen, immutable; `extra="forbid"`; exactly
+`campaign_id: str`, `increase_suitability: Suitability`, `maintain_suitability:
+Suitability`, `reduce_suitability: Suitability`) is defined in the new
+`src/suitability.py` module. The sole public function is
+`resolve_campaign_action_suitability(performance: CampaignPerformanceClass,
+trend: CampaignTrendClass, availability: CampaignActionAvailability) ->
+CampaignActionSuitability`; it reads exactly eight fields:
+`performance.campaign_id`, `performance.performance_band`, `trend.campaign_id`,
+`trend.trend_direction`, `availability.campaign_id`,
+`availability.increase_available`, `availability.maintain_available`, and
+`availability.reduce_available`. **Stage 20 consumes Stage 5's, Stage 6's, and
+Stage 19's already-approved result objects directly, rather than
+recalculating any of them** — it never calls `classify_campaign_performance`,
+`classify_campaign_trend`, or `resolve_campaign_action_availability`, and
+never accepts `CampaignInput`, `ReviewSetup`, or `CampaignTrackingAssessment`,
+consistent with the consumption pattern established since Stage 12. Before
+any rule-table lookup or availability evaluation, all three `campaign_id`
+values must match via one combined equality check anchored to
+`performance.campaign_id`; a mismatch raises exactly `ValueError("Campaign
+IDs must match when resolving action suitability.")`, checked as the first
+statement in the function body, with no result returned, no ID silently
+preferred, and the same exact message regardless of which input(s)
+mismatch.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 20: excluded-input decisions, dedicated module, and reason-code/action deferral
+
+**Decision:** `Confidence` (including any `Confidence.NOT_ASSESSABLE`
+relationship), `PacingStatus`, and `BusinessPriority` are excluded entirely
+from Stage 20 — none is read anywhere in `src/suitability.py`. The
+`Confidence.NOT_ASSESSABLE` trigger is not derived from
+`tracking.is_assessable` during Stage 20; it remains unresolved and deferred.
+`CampaignTrackingAssessment` is not accepted — Stage 19's already-resolved
+availability is consumed instead. **No combined-assessment data-carrier
+model was created** — Stage 20 consumes `CampaignPerformanceClass`,
+`CampaignTrendClass`, and `CampaignActionAvailability` directly, reaffirming
+the rejection of a combined-assessment carrier as unnecessary ceremony first
+established at the Stage 19 dependency-readiness inspection. **Stage 20
+outputs no `ReasonCode`** and does not map suitability to
+`ABOVE_TARGET_STRONG`, `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`,
+`NEAR_TARGET`, `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`,
+`RECENT_TREND_DECLINING`, or any tracking/constraint/availability reason —
+reason codes require a later `RecommendationAction` or outcome context. No
+`RecommendationAction` or `HOLD` is selected. **Dedicated module:**
+`src/suitability.py` was created rather than extending
+`src/classification.py`, `src/constraints.py`, `src/availability.py`, or
+`src/scoring.py`, because suitability combines classification-domain
+performance, classification-domain trend, and availability-domain action
+gates simultaneously, and is not a raw classification, a monetary constraint,
+availability, or numeric scoring; `src/scoring.py` remains unchanged,
+reserved for later numeric prioritisation-scoring work. No `Decimal` import,
+arithmetic, local Decimal context, `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, or
+`float` conversion is used anywhere. Resolution of the six conflicting/mixed
+performance-trend cells, `HOLD`'s exact trigger, `RecommendationAction`
+selection, `ReasonCode` assignment, numeric prioritisation scoring, ranking,
+allocation, and conservation all remain deferred to later stages. No
+existing test file required modification for Stage 20 — a new dedicated
+test file was created instead.
+**Status:** Frozen.

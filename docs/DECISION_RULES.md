@@ -1,6 +1,6 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 19. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 20. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
@@ -10,9 +10,10 @@
 > movement-cap calculation rule, the frozen test-floor distance calculation rule, the
 > frozen protection constraint rule, the frozen test-aware static decrease-room rule,
 > the frozen raw increase limit rule, the frozen raw decrease limit rule, the frozen
-> protection-adjusted effective decrease limit rule, and the frozen campaign action
-> availability rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
-> action suitability, `HOLD`, scoring, ranking, `RecommendationAction`, and
+> protection-adjusted effective decrease limit rule, the frozen campaign action
+> availability rule, and the frozen conservative diagonal-only campaign action
+> suitability rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
+> numeric prioritisation scoring, ranking, `RecommendationAction`, `HOLD`, and
 > `ReasonCode` rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
@@ -1237,6 +1238,113 @@ mechanically possible, never a recommendation.
   assessability, and both directional monetary constraints simultaneously, and
   is not purely a monetary constraint, a descriptive classification, or a score.
 
+## Deterministic Conservative Diagonal-Only Campaign Action Suitability Rules (Sprint 1, Development Stage 20)
+
+These rules govern `src/suitability.py`, a new dedicated module, which
+determines for one already-calculated `CampaignPerformanceClass` (Stage 5), one
+already-calculated `CampaignTrendClass` (Stage 6), and one already-calculated
+`CampaignActionAvailability` (Stage 19) a categorical, per-direction suitability
+for `INCREASE`, `MAINTAIN`, and `REDUCE`. Availability answers "can this action
+be taken mechanically and operationally?"; suitability answers "do the approved
+performance and trend classifications provide a clear directional signal
+supporting this available action?" Suitability does **not** mean recommendation
+— a `SUITABLE` action is not automatically selected, a `NEUTRAL` action is not
+automatically rejected, and an `UNSUITABLE` action is not a final prohibition.
+Stage 20 must not select `RecommendationAction`, select `HOLD`, produce
+`ReasonCode`, produce a numeric score, rank campaigns, or apply `Confidence`,
+`PacingStatus`, or `BusinessPriority`.
+
+- **Approved rule approach: conservative diagonal-only policy.** Only the three
+  cells where `PerformanceBand` and `TrendDirection` clearly agree
+  (`ABOVE_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`, `BELOW_TARGET`+`DECLINING`)
+  produce a directional `SUITABLE`/`UNSUITABLE` result. All six conflicting or
+  mixed combinations resolve to `NEUTRAL` for every direction. This
+  deliberately avoids deciding whether performance or trend has precedence
+  when they disagree.
+- **Exact nine-cell base rule table** (before applying the availability
+  override; each cell is `(increase, maintain, reduce)`):
+  ```
+  ABOVE_TARGET + IMPROVING  → SUITABLE,   NEUTRAL, UNSUITABLE
+  ABOVE_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+  ABOVE_TARGET + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  ON_TARGET    + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  ON_TARGET    + STABLE     → NEUTRAL,    SUITABLE, NEUTRAL
+  ON_TARGET    + DECLINING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + IMPROVING  → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + STABLE     → NEUTRAL,    NEUTRAL, NEUTRAL
+  BELOW_TARGET + DECLINING  → UNSUITABLE, NEUTRAL, SUITABLE
+  ```
+  The table is implemented as a module-level immutable mapping
+  (`MappingProxyType`), containing exactly all nine
+  `PerformanceBand`×`TrendDirection` keys, never mutated at runtime, and
+  containing no numeric weight, `RecommendationAction`, or `ReasonCode`. No
+  enum declaration order is depended upon — the table is keyed by explicit
+  enum-value tuples, not iteration order.
+- **Availability-first override rule.** After the base-table lookup,
+  availability is applied independently per direction: if
+  `availability.increase_available` is `False`,
+  `increase_suitability = Suitability.NOT_APPLICABLE`, overriding whatever the
+  base table would otherwise say — the same independent rule applies to
+  `maintain_suitability`/`maintain_available` and
+  `reduce_suitability`/`reduce_available`. Availability always overrides the
+  base suitability table. `NOT_APPLICABLE` is never represented as `None`, a
+  numeric zero, or `UNSUITABLE`.
+- **Exact calculation input and authorised fields.** `performance.campaign_id`,
+  `performance.performance_band`, `trend.campaign_id`,
+  `trend.trend_direction`, `availability.campaign_id`,
+  `availability.increase_available`, `availability.maintain_available`, and
+  `availability.reduce_available` are the only eight fields read, across
+  exactly three input objects (`CampaignPerformanceClass`,
+  `CampaignTrendClass`, `CampaignActionAvailability`). No `CampaignInput` or
+  `ReviewSetup` is accepted. `classify_campaign_performance`,
+  `classify_campaign_trend`, and `resolve_campaign_action_availability` are
+  never called (Stage 20 consumes their already-approved outputs, never
+  recalculates them), nor is any other Stage 1–19 production function.
+- **Campaign-ID policy.** All three `campaign_id` values must match, checked
+  as the first statement before reading `performance_band`, `trend_direction`,
+  looking up the rule table, or reading any availability field — one combined
+  equality check anchored to `performance.campaign_id`. A mismatch raises
+  exactly `ValueError("Campaign IDs must match when resolving action
+  suitability.")`, with no result returned, no ID silently preferred, and the
+  same exact message regardless of which input(s) mismatch.
+- **`Suitability` enum policy.** `SUITABLE`, `NEUTRAL`, `UNSUITABLE`, and
+  `NOT_APPLICABLE` are purely categorical — no numeric value, no ordering, and
+  no `SUITABLE > NEUTRAL`-style comparison is defined or implied anywhere.
+- **Exclusion of confidence, pacing, and business priority.** `Confidence`
+  (including any `Confidence.NOT_ASSESSABLE` relationship), `PacingStatus`,
+  and `BusinessPriority` are never read anywhere in Stage 20 — these remain
+  suitability/scoring inputs deferred to a later stage. The
+  `Confidence.NOT_ASSESSABLE` trigger is not derived from
+  `tracking.is_assessable` here, and remains unresolved.
+- **Tracking and MAINTAIN.** Stage 20 does not accept
+  `CampaignTrackingAssessment` — it consumes Stage 19's already-resolved
+  availability only. For an Active but unassessable campaign, Stage 19 already
+  makes `INCREASE` and `REDUCE` unavailable, so Stage 20 returns
+  `NOT_APPLICABLE` for both; `MAINTAIN` remains available under Stage 19 and
+  receives its base-table result. This does not prevent a later
+  `RecommendationAction` stage from selecting `HOLD` because the data is
+  unreliable — Stage 20 never decides `MAINTAIN` versus `HOLD`.
+- **No `ReasonCode` output.** Stage 20 does not map suitability to
+  `ABOVE_TARGET_STRONG`, `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`,
+  `NEAR_TARGET`, `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`,
+  `RECENT_TREND_DECLINING`, or any tracking/constraint/availability reason —
+  reason codes require a later `RecommendationAction` or outcome context.
+- **No combined-assessment model.** Stage 20 does not create a data-carrier
+  model copying `PerformanceBand`, `TrendDirection`, `Confidence`,
+  `PacingStatus`, or tracking facts — it consumes the three approved result
+  objects directly.
+- **No numeric scoring or weights.** No `Decimal` import, arithmetic, local
+  Decimal context, `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, or `float` conversion
+  is used anywhere — only enum-identity comparison, a fixed mapping lookup,
+  and Boolean gating.
+- **Dedicated module.** `src/suitability.py` is a new production module,
+  distinct from `src/classification.py`, `src/constraints.py`,
+  `src/availability.py`, and `src/scoring.py` — suitability combines
+  classification-domain performance, classification-domain trend, and
+  availability-domain action gates, and is not a raw classification, a
+  monetary constraint, availability, or numeric scoring. `src/scoring.py`
+  remains unchanged, reserved for later numeric prioritisation-scoring work.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -1262,9 +1370,9 @@ mechanically possible, never a recommendation.
   status relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-
   assessment stage, which must preserve Stage 7's, Stage 8's, and Stage 9's independent
   results rather than overwriting any of them.
-- **Effective increase, action suitability, `HOLD`.** Stage 10 resolved the static
-  budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`), Stage
-  11 resolved which percentage applies to a campaign
+- **Effective increase, `HOLD`, `RecommendationAction`.** Stage 10 resolved the
+  static budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`),
+  Stage 11 resolved which percentage applies to a campaign
   (`applicable_max_change_percentage`), Stage 12 resolved the raw percentage-based
   monetary cap (`raw_percentage_movement_cap`), Stage 13 resolved the raw test-floor
   distance (`room_to_test_floor`), Stage 14 resolved the decrease-specific
@@ -1272,15 +1380,20 @@ mechanically possible, never a recommendation.
   static decrease room (`test_aware_static_decrease_room`), Stage 16 resolved the
   raw increase limit (`raw_increase_limit`), Stage 17 resolved the raw decrease
   limit (`raw_decrease_limit`), Stage 18 resolved the protection-adjusted effective
-  decrease limit (`effective_decrease_limit`), and Stage 19 resolved mechanical
-  action availability (`increase_available`/`maintain_available`/
-  `reduce_available`, see above), but no rule computes an *effective* increase
-  limit — protection has no approved increase-side effect, so `raw_increase_limit`
-  remains the authoritative increase-side constraint. No action-suitability concept
-  is defined anywhere in the repository — which *available* action should actually
-  be recommended, and `HOLD`'s exact trigger, both remain pending later stages, as
-  do scoring, ranking, `RecommendationAction`, `ReasonCode`, allocation, and
-  conservation. Per-campaign scoring is not itself known to require cross-campaign
-  data; only normalisation, ranking/prioritisation, and allocation are.
+  decrease limit (`effective_decrease_limit`), Stage 19 resolved mechanical action
+  availability (`increase_available`/`maintain_available`/`reduce_available`), and
+  Stage 20 resolved conservative, diagonal-only per-action suitability
+  (`increase_suitability`/`maintain_suitability`/`reduce_suitability`, see above),
+  but no rule computes an *effective* increase limit — protection has no approved
+  increase-side effect, so `raw_increase_limit` remains the authoritative
+  increase-side constraint. `Suitability` is not `RecommendationAction` — which
+  *available and suitable* action should actually be recommended, and `HOLD`'s
+  exact trigger, both remain pending later stages, as do the six conflicting
+  performance/trend cells' precedence (deliberately left `NEUTRAL` rather than
+  resolved), `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` and
+  `BusinessPriority` effects, numeric prioritisation scoring, ranking,
+  `ReasonCode`, allocation, and conservation. Per-campaign scoring is not itself
+  known to require cross-campaign data; only normalisation, ranking/prioritisation,
+  and allocation are.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.
