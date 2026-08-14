@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, and 18 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, and 19 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -741,26 +741,94 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 18 (and not yet started)
+## Development Stage 19 — Deterministic Campaign Action Availability (complete)
 
+- [x] `src/availability.py` (new dedicated module — not added to
+      `src/constraints.py`, `src/classification.py`, or `src/scoring.py`, since
+      action availability spans campaign status, tracking assessability, and both
+      directional monetary constraints simultaneously, and is not purely a
+      monetary constraint, a descriptive classification, or a score) —
+      `CampaignActionAvailability` (frozen, `extra="forbid"`: `campaign_id`,
+      `increase_available: bool`, `maintain_available: bool`,
+      `reduce_available: bool`) and `resolve_campaign_action_availability(campaign:
+      CampaignInput, tracking: CampaignTrackingAssessment, raw_increase:
+      CampaignRawIncreaseLimit, effective_decrease: CampaignEffectiveDecreaseLimit)
+      -> CampaignActionAvailability`. Uses the term **"action availability,"**
+      never "eligibility." `src/constraints.py`, `src/classification.py`,
+      `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`,
+      `src/pacing.py` unchanged.
+- [x] **Approved concept boundary:** availability means an action is not prevented
+      by campaign status, tracking-based assessability, or the relevant approved
+      monetary capacity — it does not mean the action is advisable. Positive
+      capacity means only that a direction is mechanically possible, never a
+      recommendation. Does not decide which available action is suitable, which
+      action should be recommended, `HOLD`, scoring, priority, ranking,
+      `ReasonCode`, or allocation.
+- [x] **Exact mapping:** `is_active = campaign.status is CampaignStatus.ACTIVE`;
+      `increase_available = is_active and tracking.is_assessable and
+      raw_increase.raw_increase_limit > Decimal("0.00")`; `maintain_available =
+      is_active`; `reduce_available = is_active and tracking.is_assessable and
+      effective_decrease.effective_decrease_limit > Decimal("0.00")`. Paused →
+      all three `False`, always one result object, never an error, never `HOLD`,
+      never a reason code. Unassessable Active → `increase_available=False`,
+      `maintain_available=True`, `reduce_available=False`. `hold_available` is
+      excluded entirely — `HOLD`'s exact trigger remains undecided, reserved for
+      a later review/deferral or recommendation stage.
+- [x] Consumes Stage 8's, Stage 16's, and Stage 18's already-approved result
+      objects directly, plus `CampaignInput` for identity/status (no
+      status-wrapper model created — mirrors the Stage 14 precedent of consuming
+      `CampaignInput` directly) — never calls `assess_campaign_tracking`,
+      `resolve_campaign_raw_increase_limit`,
+      `resolve_campaign_effective_decrease_limit`, or any other Stage 1–18
+      production function. Requires all four `campaign_id` values to match,
+      raising exactly `ValueError("Campaign IDs must match when resolving action
+      availability.")` otherwise, checked before any status/assessability/Decimal
+      evaluation. No arithmetic — enum-identity comparison, Boolean conjunction,
+      and `Decimal` comparison against `Decimal("0.00")` only; no local context,
+      quantisation, or rounding; ambient global `Decimal` precision cannot affect
+      the result. Never reads `tracking_status`, `is_protected`,
+      `decrease_blocked`, `is_test_campaign`, `test_budget_floor`,
+      `minimum_budget`, `maximum_budget`, `PerformanceBand`, `TrendDirection`,
+      `Confidence`, `PacingStatus`, or `BusinessPriority`. Outputs no
+      `ReasonCode` and selects no `RecommendationAction.HOLD`.
+- [x] `tests/test_availability.py` (new dedicated test file — `tests/test_constraints.py`
+      unchanged at 322 tests) — 61 new Stage 19 tests, all passing.
+      `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+      `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing
+      — no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 19 (and not yet started)
+
+- Action suitability (which *available* action should actually be recommended).
+- `HOLD` (exact trigger undecided; reserved for a later review/deferral or
+  recommendation stage).
 - Effective increase limit (`CampaignRawIncreaseLimit` remains the authoritative
   increase-side constraint; no approved rule exists to transform it).
-- Combined effective-directional result (increase and decrease stay in separate
-  result objects).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
-- Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
-  assignment, allocation, conservation.
+- Scoring, ranking/prioritisation, final `RecommendationAction` assignment,
+  `ReasonCode` assignment, allocation, conservation.
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 19 (not started, scope not yet frozen): requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order. Eligibility
-is the leading candidate but is not yet clearly ready — it may depend on first
-resolving the still-deferred combined campaign-assessment question (performance +
-trend + confidence + tracking + pacing), which remains a live but not clearly
-necessary candidate on its own, as noted since the Stage 11 inspection. Scoring and
-prioritisation are expected to be the earliest stage requiring cross-campaign
-comparison, once eligibility (or its prerequisites) is resolved.
+Stage 20 (not started, scope not yet frozen): requires its own dependency and
+decision-readiness inspection before being frozen, not file-list order. Action
+suitability/scoring is the leading candidate, consuming `CampaignActionAvailability`
+(Stage 19) alongside the excluded classification signals (`PerformanceBand`,
+`TrendDirection`, `Confidence`, `PacingStatus`, `BusinessPriority`) to move toward a
+final `RecommendationAction`. **Corrected cross-campaign note:** per-campaign
+scoring may remain single-campaign — it does not inherently require cross-campaign
+data. Only normalisation, ranking/prioritisation, and allocation genuinely require
+comparing multiple campaigns simultaneously; this corrects an earlier note (recorded
+at Stage 18 completion) that conflated per-campaign scoring with cross-campaign
+ranking. The still-deferred combined campaign-assessment question (performance +
+trend + confidence + tracking + pacing) remains a live but not clearly necessary
+candidate on its own, as noted since the Stage 11 inspection.

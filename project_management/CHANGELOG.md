@@ -1117,3 +1117,129 @@ All notable changes to this project are documented in this file.
   no approved increase-side effect; deferral of eligibility and combined campaign
   assessment explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (26 concrete Stage 18 scenarios).
+
+- Sprint 1, Development Stage 19: added a new dedicated module,
+  `src/availability.py`, containing `CampaignActionAvailability` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `increase_available: bool`,
+  `maintain_available: bool`, `reduce_available: bool` only) and
+  `resolve_campaign_action_availability(campaign: CampaignInput, tracking:
+  CampaignTrackingAssessment, raw_increase: CampaignRawIncreaseLimit,
+  effective_decrease: CampaignEffectiveDecreaseLimit) ->
+  CampaignActionAvailability`. Determines whether `INCREASE`, `MAINTAIN`, and
+  `REDUCE` are each mechanically and operationally available — using the term
+  **"availability,"** never "eligibility." Availability means an action is not
+  prevented by campaign status, tracking-based assessability, or the relevant
+  approved monetary capacity; it does **not** mean the action is advisable —
+  positive capacity establishes only that a direction is mechanically possible,
+  never a recommendation. Does not decide which available action is suitable,
+  which action should be recommended, `HOLD`, scoring, priority, ranking,
+  `ReasonCode`, or allocation; `hold_available` is deliberately excluded, since
+  `HOLD` is a later review/deferral or recommendation outcome whose exact trigger
+  remains undecided. **Approved mapping:** `is_active = campaign.status is
+  CampaignStatus.ACTIVE`; `increase_available = is_active and
+  tracking.is_assessable and raw_increase.raw_increase_limit >
+  Decimal("0.00")`; `maintain_available = is_active`; `reduce_available =
+  is_active and tracking.is_assessable and
+  effective_decrease.effective_decrease_limit > Decimal("0.00")`. Paused
+  campaigns receive all three fields `False` — always one result object, never
+  an error, never `HOLD`, never a reason code. Unassessable Active campaigns get
+  `increase_available=False`/`reduce_available=False` while
+  `maintain_available=True` remains unaffected, since leaving the budget
+  unchanged requires no data confidence. **Consumes Stage 8's, Stage 16's, and
+  Stage 18's already-approved result objects directly** (never calls
+  `assess_campaign_tracking`, `resolve_campaign_raw_increase_limit`,
+  `resolve_campaign_effective_decrease_limit`, or any other Stage 1–18
+  production function) plus `CampaignInput` directly for identity/status — no
+  new status-wrapper model was created, since one would only duplicate
+  `campaign_id`/`status` without producing a new fact, mirroring the Stage 14
+  precedent of consuming `CampaignInput` directly. Requires all four
+  `campaign_id` values to match via one combined equality check anchored to
+  `campaign.campaign_id`, checked before any status/assessability/Decimal
+  evaluation, raising exactly `ValueError("Campaign IDs must match when
+  resolving action availability.")` otherwise, with the same exact message
+  regardless of which input(s) mismatch. No arithmetic is performed — only
+  enum-identity comparison, Boolean conjunction, and `Decimal` comparison
+  against `Decimal("0.00")`; no local `decimal` context, `CURRENCY_QUANTUM`,
+  `ROUND_HALF_UP`, rounding, quantisation, or `float` conversion; ambient
+  global `Decimal` precision cannot affect the result. Never reads
+  `tracking_status`, `is_protected`, `decrease_blocked`, `is_test_campaign`,
+  `test_budget_floor`, `minimum_budget`, `maximum_budget`, `PerformanceBand`,
+  `TrendDirection`, `Confidence`, `PacingStatus`, or `BusinessPriority` —
+  these are suitability/scoring inputs, not availability inputs. A dedicated
+  module was chosen over `src/constraints.py`/`src/classification.py`/
+  `src/scoring.py` because action availability spans campaign status, tracking
+  assessability, and both directional monetary constraints simultaneously, and
+  is not purely a monetary constraint, a descriptive classification, or a
+  score. `src/constraints.py`, `src/classification.py`, `src/constants.py`,
+  `src/models.py`, `src/validation.py`, `src/metrics.py`, and `src/pacing.py`
+  are unchanged.
+- Sprint 1, Development Stage 19: added a new dedicated test file,
+  `tests/test_availability.py` (61 tests, all passing;
+  `tests/test_constraints.py` unchanged at 322 tests) covering result-model
+  shape/immutability/field-type confirmation (no `hold_available`/eligibility/
+  monetary/classification/priority field), incompatible-input rejection
+  (`AttributeError`, no silent coercion), campaign-ID matching (all four IDs
+  equal resolves normally; mismatch on any one of the three non-anchor inputs,
+  or multiple simultaneous mismatches, raises the exact approved `ValueError`
+  message with no result resolved and no ID silently preferred; the
+  ID-equality guard verified via AST to precede any status/assessability/
+  Decimal evaluation), the full active/assessable decision-table sweep (four
+  positive/zero increase-and-decrease combinations), active/unassessable
+  behaviour (directional limits never override the assessability gate;
+  `maintain_available` unaffected, parametrised across every zero/positive
+  combination), Paused behaviour (assessable/unassessable/zero-limit cases all
+  producing `(False, False, False)`; a Paused campaign always receives one
+  result object; no `HOLD`/reason-code field present), tracking cases via the
+  real `assess_campaign_tracking` production path (`Healthy`/`Warning` both
+  assessable per Stage 8's own frozen rule, `Unreliable` blocking both
+  directions while `maintain_available` remains `True`; AST-verified that only
+  `is_assessable` is read from the tracking object and that `tracking_status`
+  is never referenced), capacity cases (exact `Decimal("0.00")` boundary,
+  smallest positive currency amount, extreme 28-significant-digit values, no
+  negative-value correction/clamping, no input monetary value mutated),
+  protected/test cases (a protected active campaign built through the real
+  Stage 10–18 production chain showing `increase_available=True`/
+  `reduce_available=False`; a test campaign showing all three `True`; a
+  synthetic protected-and-test campaign following only its already-computed
+  capacities; source-verified absence of `is_protected`/`decrease_blocked`/
+  `is_test_campaign`/`test_budget_floor`), independence from
+  `PerformanceBand`/`TrendDirection`/`Confidence`/`PacingStatus`/
+  `BusinessPriority`/`RecommendationAction`/`ReasonCode` (AST- and
+  module-attribute-verified), earlier-stage separation (AST-verified no call
+  to `assess_campaign_tracking`/`resolve_campaign_raw_increase_limit`/
+  `resolve_campaign_effective_decrease_limit`/any other Stage 1–18 function;
+  exactly eight authorised field accesses verified via AST), Decimal-context
+  independence (including a mutated-global-context test and confirmation the
+  global context's `prec`/`rounding` are unchanged after the function
+  returns), no production batch function, and sample-data integration through
+  `validate_campaign_csv` + the real Stage 8/10–18 production chain over
+  `data/sample_campaigns.csv` (order preserved; `G001=(True, True, True)`,
+  `M001=(True, True, True)`, `G002=(True, True, False)`,
+  `G003=(True, True, True)`; G002's underlying facts — `status=Active`,
+  `tracking.is_assessable=True`, `raw_increase_limit=1000.00`,
+  `effective_decrease_limit=0.00` — independently re-verified, with no
+  protection field read and no action recommended), plus five synthetic
+  integration cases (Paused, unreliable tracking, warning tracking, both
+  directional limits zero, protected-and-test). `tests/test_models.py`
+  (Stage 1), `tests/test_validation.py` (Stage 2), `tests/test_metrics.py`
+  (Stage 3), `tests/test_pacing.py` (Stage 4), `tests/test_classification.py`
+  (Stage 5), `tests/test_trend_classification.py` (Stage 6),
+  `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+  passing — no behavioural regression, and no existing test file required
+  modification this stage. Full suite: 724 tests passing (92 Stage 1 + 44
+  Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30
+  Stage 8 + 33 Stage 9 + 322 Stage 10–18 combined in `tests/test_constraints.py`
+  + 61 Stage 19 in `tests/test_availability.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignActionAvailability` fields; the
+  definition of availability; exact active/paused policy; exact assessability
+  policy; exact directional-capacity rules; `MAINTAIN` meaning; `HOLD`
+  exclusion; separation from suitability and recommendation),
+  `docs/DECISION_RULES.md` (frozen Stage 19 campaign action availability rule,
+  including the exact mapping, the exact eight authorised fields, the
+  campaign-ID policy and error, the status/assessability/capacity policies,
+  the exclusion of confidence/pacing/performance/trend/priority, the
+  `ReasonCode`/`HOLD` deferral, the `CampaignInput`-ownership decision, the
+  dedicated-module decision, and the corrected cross-campaign-boundary note),
+  and `docs/TEST_SCENARIOS.md` (40 concrete Stage 19 scenarios).

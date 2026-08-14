@@ -1,17 +1,19 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 18 (adds a protection-adjusted effective decrease
-> limit, applying Stage 14's protection constraint to Stage 17's raw decrease limit,
-> to the Stage 1 enumerations, numerical constants, core input models, CSV schema,
-> Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage 5
-> performance classification, Stage 6 trend classification, Stage 7 conversion-volume
-> confidence classification, Stage 8 tracking-based assessability, Stage 9 pacing
-> interpretation, Stage 10 static budget-bound facts, Stage 11 applicable-change-
-> percentage resolution, Stage 12 raw percentage-based monetary movement cap, Stage 13
-> test-floor distance, Stage 14 protection constraint, Stage 15 test-aware static
-> decrease room, Stage 16 raw increase limit, and Stage 17 raw decrease limit).
-> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, effective increase,
-> eligibility, and other derived/decision fields, plus export fields, are pending
+> Sprint 1, Development Stage 19 (adds deterministic campaign action availability —
+> whether `INCREASE`, `MAINTAIN`, and `REDUCE` are each mechanically and
+> operationally available, from `src/availability.py` — to the Stage 1 enumerations,
+> numerical constants, core input models, CSV schema, Stage 2 validation reporting,
+> Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance classification,
+> Stage 6 trend classification, Stage 7 conversion-volume confidence classification,
+> Stage 8 tracking-based assessability, Stage 9 pacing interpretation, Stage 10
+> static budget-bound facts, Stage 11 applicable-change-percentage resolution, Stage
+> 12 raw percentage-based monetary movement cap, Stage 13 test-floor distance, Stage
+> 14 protection constraint, Stage 15 test-aware static decrease room, Stage 16 raw
+> increase limit, Stage 17 raw decrease limit, and Stage 18 protection-adjusted
+> effective decrease limit). Combined assessment, `Confidence.NOT_ASSESSABLE`
+> ownership, action suitability, `HOLD`, scoring, ranking, `RecommendationAction`,
+> `ReasonCode`, and other derived/decision fields, plus export fields, are pending
 > later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
@@ -753,11 +755,78 @@ Stage 16's raw increase limit, and protection has no approved increase-side effe
 — `CampaignRawIncreaseLimit` remains the authoritative increase-side constraint
 unless a later approved rule changes it.
 
+## Campaign Action Availability Fields (`src/availability.py`)
+
+Produced by `resolve_campaign_action_availability(campaign: CampaignInput, tracking:
+CampaignTrackingAssessment, raw_increase: CampaignRawIncreaseLimit,
+effective_decrease: CampaignEffectiveDecreaseLimit) -> CampaignActionAvailability`,
+one result per already-validated `CampaignInput` paired with its already-calculated
+Stage 8, Stage 16, and Stage 18 results. `CampaignActionAvailability` is frozen
+(immutable) and rejects unknown fields (`extra="forbid"`).
+
+**Definition of availability.** An action is *available* when it is not prevented by
+campaign status, tracking-based assessability, or the relevant approved monetary
+capacity. Availability does **not** mean the action is advisable — positive capacity
+establishes only that a direction is mechanically possible, never a recommendation.
+This is a **narrow mechanical gate only** — it is not suitability, a recommendation,
+`HOLD`, a score, a priority, a ranking, a reason code, or an allocation.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `campaign.campaign_id`, after confirming it matches `tracking.campaign_id`, `raw_increase.campaign_id`, and `effective_decrease.campaign_id`. |
+| `increase_available` | boolean | `True` only when the campaign is `Active`, `tracking.is_assessable` is `True`, and `raw_increase_limit > Decimal("0.00")`. |
+| `maintain_available` | boolean | `True` only when the campaign is `Active`. Unaffected by tracking assessability or either directional monetary capacity. |
+| `reduce_available` | boolean | `True` only when the campaign is `Active`, `tracking.is_assessable` is `True`, and `effective_decrease_limit > Decimal("0.00")`. |
+
+**Active/Paused policy.** For `CampaignStatus.PAUSED`, all three fields are `False`
+— `increase_available=False`, `maintain_available=False`, `reduce_available=False`.
+A Paused campaign is never omitted, never raises an error, and never results in
+`HOLD` or a reason code being produced — it simply receives the same
+`CampaignActionAvailability` shape as every other campaign, with all three flags
+`False`. `MAINTAIN` is described as "not available through the active
+budget-review process" for a Paused campaign, not as an error condition.
+
+**Assessability policy.** For an `Active` campaign with `tracking.is_assessable ==
+False`, `increase_available=False` and `reduce_available=False`, while
+`maintain_available` remains `True` — leaving the budget unchanged requires no
+confidence in the underlying data, and is the natural safe default when tracking
+cannot be trusted. `TrackingStatus.WARNING` remains assessable because Stage 8
+already returns `is_assessable=True` for it; Stage 19 does not re-derive this — it
+consumes `is_assessable` only, never `tracking_status` itself.
+
+**Directional-capacity policy.** `raw_increase_limit > Decimal("0.00")` means
+positive increase capacity exists; `raw_increase_limit == Decimal("0.00")` means
+`INCREASE` is unavailable. `effective_decrease_limit > Decimal("0.00")` means
+positive decrease capacity exists; `effective_decrease_limit == Decimal("0.00")`
+means `REDUCE` is unavailable. Positive capacity is necessary for directional
+availability but is never a recommendation. Upstream invariants make negative
+values structurally impossible; no correction, clamping, or fallback logic is
+present.
+
+**`MAINTAIN` meaning.** A concrete decision to leave the budget unchanged — for an
+`Active` campaign it remains mechanically available regardless of tracking
+assessability or directional monetary capacity, since "doing nothing" requires
+neither.
+
+**`HOLD` exclusion.** `hold_available` does not exist anywhere on this model.
+`HOLD` is excluded entirely from Stage 19 — it is a later review/deferral or
+recommendation outcome whose exact trigger remains undecided, not a capacity-gated
+action in the same sense as `INCREASE`/`MAINTAIN`/`REDUCE`.
+
+**Separation from suitability and recommendation.** `PerformanceBand`,
+`TrendDirection`, `Confidence`, `PacingStatus`, and `BusinessPriority` are never
+read — these are suitability/scoring signals, not availability inputs. No
+`RecommendationAction` or `ReasonCode` is produced. `CampaignActionAvailability` is
+a separate, independent result model from every Stage 8–18 result — none is
+modified by this addition, and traceability to the underlying facts (tracking
+assessability, raw increase limit, effective decrease limit) is preserved by
+holding those result objects separately, not by repeating their fields here.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, effective increase, eligibility, scoring,
-> allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, action suitability, `HOLD`, scoring,
+> ranking, `RecommendationAction`, `ReasonCode`, allocation).
 
 ## Export Fields
 

@@ -1429,3 +1429,142 @@ existing test file required modification for Stage 18 — no approved AST-narrow
 exception was needed, since Stage 18 introduces no new import beyond what
 `src/constraints.py` already had available.
 **Status:** Frozen.
+
+## 2026-08-14 — Stage 19: approved concept boundary — "action availability," not "eligibility"
+
+**Decision:** Sprint 1, Development Stage 19 produces a deterministic
+`CampaignActionAvailability` result answering only whether `INCREASE`, `MAINTAIN`,
+and `REDUCE` are each mechanically and operationally available. The term
+**"availability"** is used throughout, never "eligibility" — eligibility had been
+used ambiguously across the Stage 19 dependency-readiness and policy-design
+inspections to mean either availability or suitability or both. Availability means
+an action is not prevented by campaign status, tracking-based assessability, or the
+relevant approved monetary capacity — it does **not** mean the action is advisable.
+Positive capacity means only that a direction is mechanically possible, never a
+recommendation. Stage 19 does not decide which available action is suitable, which
+action should be recommended, `HOLD`, scoring, priority, ranking, `ReasonCode`, or
+allocation.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 19: exact model, function, and four-input consumption (not recalculation)
+
+**Decision:** `CampaignActionAvailability` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id: str`, `increase_available: bool`, `maintain_available: bool`,
+`reduce_available: bool`) is defined in the new `src/availability.py` module. No
+`hold_available`, `is_eligible`, score, recommendation, `RecommendationAction`,
+`ReasonCode`, explanatory reason field, monetary limit field, classification
+field, or priority field is included. The sole public function is
+`resolve_campaign_action_availability(campaign: CampaignInput, tracking:
+CampaignTrackingAssessment, raw_increase: CampaignRawIncreaseLimit,
+effective_decrease: CampaignEffectiveDecreaseLimit) -> CampaignActionAvailability`;
+it reads exactly eight fields: `campaign.campaign_id`, `campaign.status`,
+`tracking.campaign_id`, `tracking.is_assessable`, `raw_increase.campaign_id`,
+`raw_increase.raw_increase_limit`, `effective_decrease.campaign_id`, and
+`effective_decrease.effective_decrease_limit`. **Stage 19 consumes Stage 8's,
+Stage 16's, and Stage 18's already-approved result objects directly, rather than
+recalculating any of them** — it never calls `assess_campaign_tracking`,
+`resolve_campaign_raw_increase_limit`, `resolve_campaign_effective_decrease_limit`,
+or any other Stage 1–18 production function, consistent with the consumption
+pattern established since Stage 12. Exact mapping:
+```
+is_active = campaign.status is CampaignStatus.ACTIVE
+
+increase_available = (
+    is_active
+    and tracking.is_assessable
+    and raw_increase.raw_increase_limit > Decimal("0.00")
+)
+
+maintain_available = is_active
+
+reduce_available = (
+    is_active
+    and tracking.is_assessable
+    and effective_decrease.effective_decrease_limit > Decimal("0.00")
+)
+```
+Before evaluating `campaign.status`, `tracking.is_assessable`, or either `Decimal`
+comparison, all four `campaign_id` values must match via one combined equality
+check anchored to `campaign.campaign_id`; a mismatch raises exactly
+`ValueError("Campaign IDs must match when resolving action availability.")`, with
+no result returned, no ID silently preferred, and the same exact message
+regardless of which input(s) mismatch or how many.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 19: CampaignInput ownership — no status-wrapper model created
+
+**Decision:** Stage 19 accepts `CampaignInput` directly for campaign identity and
+status, rather than creating a new intermediate status-wrapper model. A wrapper
+would only duplicate `campaign_id` and `status` without producing any new fact —
+this mirrors the precedent already established at Stage 14
+(`resolve_campaign_protection_constraint(campaign: CampaignInput)`), which also
+resolves a raw `CampaignInput` field into a new result without an intermediate
+wrapper. No new model (`CampaignStatusFact` or similar) and no new function
+(`state_campaign_status` or similar) was created.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 19: dedicated src/availability.py module
+
+**Decision:** Stage 19 is implemented in a new, dedicated production module,
+`src/availability.py`, rather than being added to `src/constraints.py`,
+`src/classification.py`, or `src/scoring.py`. Action availability spans campaign
+status, tracking-based assessability, and both directional monetary constraints
+simultaneously — it is not purely a monetary constraint (ruling out
+`src/constraints.py` as a clean fit despite housing Stage 16/18's inputs), not a
+descriptive classification (ruling out `src/classification.py` despite housing
+Stage 8's input), and not a score (ruling out `src/scoring.py`, which remains a
+Sprint 2 placeholder per `MASTER_PROJECT_PLAN.md`). A corresponding dedicated test
+file, `tests/test_availability.py`, was created; `tests/test_constraints.py` and
+every other existing test file are unmodified.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 19: Paused policy, assessability policy, and MAINTAIN/HOLD semantics
+
+**Decision:** For `CampaignStatus.PAUSED`, all three fields are `False` —
+`increase_available=False`, `maintain_available=False`, `reduce_available=False`.
+A Paused campaign always receives one `CampaignActionAvailability` result object
+— it is never omitted, Paused status never raises an error, and Paused status
+never selects `HOLD` or produces a reason code. For an `Active` campaign with
+`tracking.is_assessable=False`, `increase_available=False` and
+`reduce_available=False`, while `maintain_available=True` — acting on unreliable
+data is prevented equally in both budget-change directions, while leaving the
+budget unchanged requires no data confidence and is the natural safe default.
+`TrackingStatus.WARNING` remains assessable purely because Stage 8 already
+returns `is_assessable=True` for it; Stage 19 consumes `is_assessable` only and
+never reopens or reproduces Stage 8's `tracking_status`-to-`is_assessable`
+mapping. `Confidence` (including any `Confidence.NOT_ASSESSABLE` relationship),
+`PacingStatus` (including `PacingStatus.NOT_AVAILABLE`), `PerformanceBand`,
+`TrendDirection`, and `BusinessPriority` are never read — these are
+suitability/scoring inputs, not availability inputs. `MAINTAIN` is a concrete
+decision to leave the budget unchanged, mechanically available for an `Active`
+campaign regardless of tracking assessability or directional monetary capacity,
+since doing nothing requires neither. `HOLD` is excluded entirely from Stage 19
+— no `hold_available` field exists; `HOLD` is a later review/deferral or
+recommendation outcome whose exact trigger remains undecided.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 19: directional capacity policy, reason-code deferral, and cross-campaign-boundary correction
+
+**Decision:** `raw_increase_limit > Decimal("0.00")` and `effective_decrease_limit
+> Decimal("0.00")` are each necessary (alongside active status and assessability)
+for their respective direction's availability; exactly `Decimal("0.00")` makes
+that direction unavailable. Positive capacity is never a recommendation. Upstream
+Stage 10–18 invariants make negative values structurally impossible, so no new
+negative-value correction, clamping, or fallback logic was introduced. No
+arithmetic is performed — only enum-identity comparison, Boolean conjunction, and
+`Decimal` comparison against `Decimal("0.00")`; no local `decimal` context,
+`CURRENCY_QUANTUM`, `ROUND_HALF_UP`, rounding, quantisation, or `float`
+conversion; ambient global `Decimal` precision cannot affect the result. **Stage
+19 outputs no `ReasonCode`** — `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
+`PROTECTED_FROM_REDUCTION`, and every other `ReasonCode` member remain unassigned
+and unmapped, deferred until a later outcome/recommendation stage.
+**Cross-campaign-boundary correction:** per-campaign scoring may remain
+single-campaign — it does not inherently require cross-campaign data. Only
+normalisation, ranking/prioritisation, and allocation genuinely require comparing
+multiple campaigns simultaneously. This corrects the note recorded at Stage 18
+completion, which conflated per-campaign scoring with cross-campaign ranking.
+Action suitability, `HOLD`'s exact trigger, the combined campaign-assessment
+question, scoring, ranking, `RecommendationAction`, `ReasonCode`, allocation, and
+conservation all remain deferred to later stages. No existing test file required
+modification for Stage 19 — a new dedicated test file was created instead.
+**Status:** Frozen.

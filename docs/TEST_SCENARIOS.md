@@ -1,16 +1,18 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 18 populates the Effective Decrease Limit Scenarios
-> section below, backed by the Stage 18 additions to `tests/test_constraints.py`
-> (which now holds 322 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35
-> Stage 13 + 28 Stage 14 + 39 Stage 15 + 40 Stage 16 + 46 Stage 17 + 50 Stage 18), in
-> addition to the Raw Decrease Limit Scenarios (Stage 17, below), the Raw Increase
-> Limit Scenarios (Stage 16, below), the Test-Aware Static Decrease Room Scenarios
-> (Stage 15, below), the Protection Constraint Scenarios (Stage 14, below), the
-> Test-Floor Room Scenarios (Stage 13, below), the Raw Percentage Movement-Cap
-> Scenarios (Stage 12, below), the Applicable Change-Percentage Resolution Scenarios
-> (Stage 11, below), the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9
-> Pacing
+> Sprint 1, Development Stage 19 populates the Campaign Action Availability
+> Scenarios section below, backed by the new `tests/test_availability.py` (61
+> tests, a dedicated file for the new `src/availability.py` module — Stage 19 does
+> not extend `tests/test_constraints.py`, which remains unchanged at 322 tests: 25
+> Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15 +
+> 40 Stage 16 + 46 Stage 17 + 50 Stage 18), in addition to the Effective Decrease
+> Limit Scenarios (Stage 18, below), the Raw Decrease Limit Scenarios (Stage 17,
+> below), the Raw Increase Limit Scenarios (Stage 16, below), the Test-Aware Static
+> Decrease Room Scenarios (Stage 15, below), the Protection Constraint Scenarios
+> (Stage 14, below), the Test-Floor Room Scenarios (Stage 13, below), the Raw
+> Percentage Movement-Cap Scenarios (Stage 12, below), the Applicable
+> Change-Percentage Resolution Scenarios (Stage 11, below), the Static Budget-Bound
+> Scenarios (Stage 10, below), the Stage 9 Pacing
 > Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
 > Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
 > tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
@@ -677,6 +679,60 @@ allocation, or a decision to decrease the campaign.
 | 24 | `CampaignEffectiveDecreaseLimit.model_fields` / result attributes | Contains no `raw_decrease_limit`, `decrease_blocked`, `raw_increase_limit`, `effective_increase_limit`, `eligible`, `eligibility`, `recommendation_action`, `reason_code`, `score`, `allocation`, or `conservation` field. |
 | 25 | `effective_decrease_limit == Decimal("0.00")` | Does not imply whole-campaign ineligibility — no eligibility field exists anywhere on the result, and the zero states only that no decrease room remains under this constraint; `MAINTAIN`/`INCREASE` eligibility remains an entirely open, later-stage question. |
 | 26 | `data/sample_campaigns.csv` validated; Stage 10–17 results independently calculated per campaign, then only the Stage 17 and Stage 14 result objects passed to Stage 18, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=600.00`, `M001=375.00`, `G002=0.00`, `G003=240.00`. Stages 10–17's existing sample results independently re-verified via separate calls, never combined. For G002: `decrease_blocked=True`, `raw_decrease_limit=1000.00`, and `effective_decrease_limit=0.00` all hold simultaneously and separately; Stage 17 remains unchanged; no increase-side rule is applied (`raw_increase_limit=1000.00` unaffected); zero is not described as whole-campaign ineligibility. For G003 (test campaign, unprotected): `raw_decrease_limit=240.00` passes through unchanged to `effective_decrease_limit=240.00`, and Stage 15's test-floor logic is not reopened. |
+
+## Campaign Action Availability Scenarios
+
+All scenarios below use `resolve_campaign_action_availability(campaign:
+CampaignInput, tracking: CampaignTrackingAssessment, raw_increase:
+CampaignRawIncreaseLimit, effective_decrease: CampaignEffectiveDecreaseLimit) ->
+CampaignActionAvailability` from `src/availability.py` (`tests/test_availability.py`
+— a dedicated test file, not an extension of `tests/test_constraints.py`). Every
+result represents mechanical, operational availability only — none of these
+scenarios produces suitability, a recommendation, `HOLD`, a score, a ranking, a
+reason code, or an allocation.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignActionAvailability` field set | Exactly `campaign_id`, `increase_available`, `maintain_available`, `reduce_available`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignActionAvailability` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied from `campaign.campaign_id`, after confirming it matches `tracking.campaign_id`, `raw_increase.campaign_id`, and `effective_decrease.campaign_id`. |
+| 5 | All four IDs equal | Resolves normally. |
+| 6 | `tracking.campaign_id` mismatched | Raises `ValueError("Campaign IDs must match when resolving action availability.")`. |
+| 7 | `raw_increase.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 8 | `effective_decrease.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 9 | Multiple inputs mismatched simultaneously | Raises the same exact `ValueError` — no per-object mismatch reporting, no result returned, no ID silently preferred. |
+| 10 | ID-equality guard | Verified via AST to be the first statement, preceding any read of `campaign.status`/`tracking.is_assessable`/either Decimal comparison. |
+| 11 | `resolve_campaign_action_availability(None, None, None, None)` / dict inputs | Raises a normal Python `AttributeError` — no silent coercion. |
+| 12 | Active, assessable, positive increase, positive decrease | `(True, True, True)`. |
+| 13 | Active, assessable, zero increase, positive decrease | `(False, True, True)`. |
+| 14 | Active, assessable, positive increase, zero decrease | `(True, True, False)`. |
+| 15 | Active, assessable, both zero | `(False, True, False)`. |
+| 16 | Active, unassessable, both positive | `(False, True, False)` — `MAINTAIN` unaffected. |
+| 17 | Active, unassessable, every zero/positive directional combination (parametrised) | Directional limits never override the assessability gate; `increase_available`/`reduce_available` always `False`, `maintain_available` always `True`. |
+| 18 | Paused, assessable, positive limits | `(False, False, False)`. |
+| 19 | Paused, unassessable, positive limits | `(False, False, False)`. |
+| 20 | Paused, zero limits | `(False, False, False)`. |
+| 21 | Paused campaign | Always receives one `CampaignActionAvailability` object — never omitted, never an error, never `HOLD`, never a reason code. |
+| 22 | `Healthy`/assessable tracking, via the real `assess_campaign_tracking` path | Behaves per capacity — `is_assessable=True` confirmed independently. |
+| 23 | `Warning`/assessable tracking, via the real `assess_campaign_tracking` path | Behaves per capacity — `is_assessable=True` confirmed (inherited from Stage 8, not re-derived). |
+| 24 | `Unreliable`/unassessable tracking, via the real `assess_campaign_tracking` path | Blocks both `increase_available` and `reduce_available`; `maintain_available` remains `True`. |
+| 25 | `resolve_campaign_action_availability` source | Reads only `campaign.campaign_id`/`campaign.status`, `tracking.campaign_id`/`tracking.is_assessable`, `raw_increase.campaign_id`/`raw_increase.raw_increase_limit`, `effective_decrease.campaign_id`/`effective_decrease.effective_decrease_limit` — exactly eight authorised field accesses (AST-verified); never references `tracking_status` (source-verified); calls none of `assess_campaign_tracking`/`resolve_campaign_raw_increase_limit`/`resolve_campaign_effective_decrease_limit`/any other Stage 1–18 production function (AST-verified); contains no binary arithmetic, `quantize`, `ROUND_HALF_UP`, `CURRENCY_QUANTUM`, `localcontext`, `float(`, `abs(`, `max(`, or `min(` (source/AST-verified). |
+| 26 | `Decimal("0.00")` exactly, for either limit | Makes that direction unavailable. |
+| 27 | `Decimal("0.01")` (smallest positive currency amount), for either limit | Makes that direction available when status/assessability gates pass. |
+| 28 | Extreme valid positive `Decimal` values (28 significant digits), for either limit | Remain comparable; direction available when other gates pass. |
+| 29 | Global `decimal` context mutated (`prec`/`rounding`) before calling the function | Result unaffected; the global context's `prec`/`rounding` remain exactly as the caller set them after the function returns. |
+| 30 | Protected active campaign, positive raw increase, zero effective decrease | `increase_available=True` (protection has no increase-side effect); `reduce_available=False` (already protection-adjusted upstream at Stage 18); Stage 19 never reads `is_protected`/`decrease_blocked` directly. |
+| 31 | Test campaign, positive limits, active and assessable | `(True, True, True)`; Stage 19 never reads `is_test_campaign`/`test_budget_floor` directly — the test-floor effect is already fully absorbed into `effective_decrease_limit`. |
+| 32 | Synthetic campaign both protected and test | Follows only the already-computed Stage 16/18 capacities; no new interaction is introduced. |
+| 33 | `PerformanceBand`/`TrendDirection`/`Confidence`/`PacingStatus`/`BusinessPriority`/`RecommendationAction`/`ReasonCode` | Never referenced anywhere in `src/availability.py`'s source (AST-verified) or imported into the module (`hasattr` on the module confirms absence). |
+| 34 | `CampaignActionAvailability.model_fields` / result attributes | Contains no `hold_available`, `is_eligible`, `eligible`, `eligibility`, `score`, `recommendation`, `recommendation_action`, `reason_code`, `allocation`, `conservation`, `raw_increase_limit`, or `effective_decrease_limit` field. |
+| 35 | `data/sample_campaigns.csv` validated; Stage 8/10–18 results independently calculated per campaign, then only the four approved Stage 19 inputs passed, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=(True, True, True)`, `M001=(True, True, True)`, `G002=(True, True, False)`, `G003=(True, True, True)`. For G002: `status=Active`, `tracking.is_assessable=True`, `raw_increase_limit=1000.00`, `effective_decrease_limit=0.00` independently re-verified; no protection field is read; no action is recommended anywhere. |
+| 36 | Synthetic integration: Paused campaign | `(False, False, False)`. |
+| 37 | Synthetic integration: unreliable-tracking campaign | `(False, True, False)`. |
+| 38 | Synthetic integration: warning-tracking campaign | Matches capacity-only outcome; `maintain_available=True`. |
+| 39 | Synthetic integration: both directional limits zero | `(False, True, False)`. |
+| 40 | Synthetic integration: protected-and-test campaign | `reduce_available=False`; `increase_available` matches the already-computed raw increase capacity; `maintain_available=True`. |
 
 ## Allocation Scenarios
 

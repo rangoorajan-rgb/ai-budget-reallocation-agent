@@ -1,6 +1,6 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 18. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 19. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
@@ -9,10 +9,11 @@
 > change-percentage resolution rule, the frozen raw percentage-based monetary
 > movement-cap calculation rule, the frozen test-floor distance calculation rule, the
 > frozen protection constraint rule, the frozen test-aware static decrease-room rule,
-> the frozen raw increase limit rule, the frozen raw decrease limit rule, and the
-> frozen protection-adjusted effective decrease limit rule. Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, effective increase, eligibility, scoring, and
-> allocation rules are pending later Sprint 1 stages.
+> the frozen raw increase limit rule, the frozen raw decrease limit rule, the frozen
+> protection-adjusted effective decrease limit rule, and the frozen campaign action
+> availability rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
+> action suitability, `HOLD`, scoring, ranking, `RecommendationAction`, and
+> `ReasonCode` rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -1132,6 +1133,110 @@ either.
   assessment question (performance, trend, confidence, tracking, pacing) both
   remain deferred to later stages.
 
+## Deterministic Campaign Action Availability Rules (Sprint 1, Development Stage 19)
+
+These rules govern `src/availability.py`, a new dedicated module, which determines
+for one already-validated `CampaignInput` and its already-approved Stage 8, Stage
+16, and Stage 18 results whether `INCREASE`, `MAINTAIN`, and `REDUCE` are each
+mechanically and operationally available. Stage 19 is a **narrow mechanical gate
+only** — it does not decide which available action is suitable, which action
+should be recommended, `HOLD`, scoring, priority, ranking, `ReasonCode`, or
+allocation. The term **"availability,"** never "eligibility," is used throughout.
+Availability means an action is not prevented by campaign status, tracking-based
+assessability, or the relevant approved monetary capacity — it does not mean the
+action is advisable. Positive capacity means only that the direction is
+mechanically possible, never a recommendation.
+
+- **Exact calculation input and authorised fields.** `campaign.campaign_id`,
+  `campaign.status`, `tracking.campaign_id`, `tracking.is_assessable`,
+  `raw_increase.campaign_id`, `raw_increase.raw_increase_limit`,
+  `effective_decrease.campaign_id`, and `effective_decrease.effective_decrease_limit`
+  are the only eight fields read, across exactly four input objects
+  (`CampaignInput`, `CampaignTrackingAssessment`, `CampaignRawIncreaseLimit`,
+  `CampaignEffectiveDecreaseLimit`). No other field of any of the four is read —
+  in particular, `tracking_status`, `is_protected`, `decrease_blocked`,
+  `is_test_campaign`, `test_budget_floor`, `minimum_budget`, `maximum_budget`, and
+  every performance/trend/confidence/pacing/business-priority field are never
+  read. `assess_campaign_tracking`, `resolve_campaign_raw_increase_limit`, and
+  `resolve_campaign_effective_decrease_limit` are never called (Stage 19 consumes
+  their already-approved outputs, never recalculates them), nor is any other
+  Stage 1–18 production function.
+- **Campaign-ID policy.** All four `campaign_id` values must match, checked as
+  the first statement before reading `campaign.status`, `tracking.is_assessable`,
+  or comparing either `Decimal` limit — one combined equality check anchored to
+  `campaign.campaign_id`. A mismatch raises exactly
+  `ValueError("Campaign IDs must match when resolving action availability.")`,
+  with no result returned, no ID silently preferred, and no partial evaluation.
+  The same exact message is used regardless of which input(s) mismatch or how
+  many — no per-object mismatch reporting exists.
+- **Exact mapping:**
+  ```
+  is_active = campaign.status is CampaignStatus.ACTIVE
+
+  increase_available = (
+      is_active
+      and tracking.is_assessable
+      and raw_increase.raw_increase_limit > Decimal("0.00")
+  )
+
+  maintain_available = is_active
+
+  reduce_available = (
+      is_active
+      and tracking.is_assessable
+      and effective_decrease.effective_decrease_limit > Decimal("0.00")
+  )
+  ```
+- **Status policy.** For `CampaignStatus.PAUSED`, all three fields are `False`.
+  A Paused campaign always receives one `CampaignActionAvailability` result
+  object — it is never omitted, and Paused status never raises an error, never
+  selects `HOLD`, and never produces a reason code.
+- **Tracking-assessability policy.** `is_assessable=False` on an `Active`
+  campaign blocks `increase_available` and `reduce_available` but not
+  `maintain_available` — acting on unreliable data is prevented in both budget-
+  change directions equally, while leaving the budget unchanged requires no data
+  confidence. `TrackingStatus.WARNING` remains assessable purely because Stage 8
+  already returns `is_assessable=True` for it — Stage 19 consumes
+  `is_assessable` only and never reopens or reproduces Stage 8's
+  `tracking_status`-to-`is_assessable` mapping.
+- **Zero/positive capacity policy.** `raw_increase_limit > Decimal("0.00")` and
+  `effective_decrease_limit > Decimal("0.00")` are each necessary (alongside
+  active status and assessability) for their respective direction's
+  availability; exactly `Decimal("0.00")` makes that direction unavailable.
+  Positive capacity is never a recommendation. Upstream Stage 10–18 invariants
+  make negative values structurally impossible, so no new negative-value
+  correction, clamping, or fallback logic is introduced.
+- **Exclusion of confidence, pacing, performance, trend, and priority.**
+  `Confidence` (including any `Confidence.NOT_ASSESSABLE` relationship),
+  `PacingStatus` (including `PacingStatus.NOT_AVAILABLE`), `PerformanceBand`,
+  `TrendDirection`, and `BusinessPriority` are never read anywhere in Stage 19 —
+  these are suitability/scoring inputs, not availability inputs, and no rule
+  combining them with availability is invented here.
+- **No `ReasonCode` or `HOLD` mapping.** Stage 19 outputs no reason codes.
+  `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`, `PROTECTED_FROM_REDUCTION`, and every
+  other `ReasonCode` member remain unassigned and unmapped by this stage — that
+  mapping is deferred until a later outcome/recommendation stage.
+  `RecommendationAction.HOLD` is never created or selected by Stage 19; `HOLD`'s
+  exact trigger remains undecided, reserved for a later review/deferral or
+  recommendation stage.
+- **Separation from scoring and `RecommendationAction`.** `CampaignActionAvailability`
+  carries no score, priority, ranking, `RecommendationAction`, or allocation
+  field — it is strictly a mechanical availability fact, consumed by a later,
+  still-undesigned suitability/scoring stage that combines it with the excluded
+  classification signals to select exactly one final action per campaign.
+- **`CampaignInput` ownership.** Stage 19 accepts `CampaignInput` directly for
+  campaign identity and status — no separate status-wrapper model was created,
+  since one would only duplicate `campaign_id` and `status` without producing
+  any new fact. This mirrors the precedent already established at Stage 14
+  (`resolve_campaign_protection_constraint(campaign: CampaignInput)`), which
+  also resolves a raw `CampaignInput` field into a new result without an
+  intermediate wrapper.
+- **Dedicated module.** `src/availability.py` is a new production module,
+  distinct from `src/constraints.py`, `src/classification.py`, and
+  `src/scoring.py` — action availability spans campaign status, tracking
+  assessability, and both directional monetary constraints simultaneously, and
+  is not purely a monetary constraint, a descriptive classification, or a score.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -1157,19 +1262,25 @@ either.
   status relate to `Confidence.NOT_ASSESSABLE` remains pending a later combined-
   assessment stage, which must preserve Stage 7's, Stage 8's, and Stage 9's independent
   results rather than overwriting any of them.
-- **Effective increase, eligibility.** Stage 10 resolved the static budget-bound
-  distances (`room_to_static_maximum`/`room_to_static_minimum`), Stage 11 resolved
-  which percentage applies to a campaign (`applicable_max_change_percentage`), Stage
-  12 resolved the raw percentage-based monetary cap (`raw_percentage_movement_cap`),
-  Stage 13 resolved the raw test-floor distance (`room_to_test_floor`), Stage 14
-  resolved the decrease-specific protection constraint (`decrease_blocked`), Stage 15
-  resolved the test-aware static decrease room (`test_aware_static_decrease_room`),
-  Stage 16 resolved the raw increase limit (`raw_increase_limit`), Stage 17 resolved
-  the raw decrease limit (`raw_decrease_limit`), and Stage 18 resolved the
-  protection-adjusted effective decrease limit (`effective_decrease_limit`, see
-  above), but no rule computes an *effective* increase limit — protection has no
-  approved increase-side effect, so `raw_increase_limit` remains the authoritative
-  increase-side constraint. No eligibility concept is defined anywhere in the
-  repository. Both remain pending later stages.
+- **Effective increase, action suitability, `HOLD`.** Stage 10 resolved the static
+  budget-bound distances (`room_to_static_maximum`/`room_to_static_minimum`), Stage
+  11 resolved which percentage applies to a campaign
+  (`applicable_max_change_percentage`), Stage 12 resolved the raw percentage-based
+  monetary cap (`raw_percentage_movement_cap`), Stage 13 resolved the raw test-floor
+  distance (`room_to_test_floor`), Stage 14 resolved the decrease-specific
+  protection constraint (`decrease_blocked`), Stage 15 resolved the test-aware
+  static decrease room (`test_aware_static_decrease_room`), Stage 16 resolved the
+  raw increase limit (`raw_increase_limit`), Stage 17 resolved the raw decrease
+  limit (`raw_decrease_limit`), Stage 18 resolved the protection-adjusted effective
+  decrease limit (`effective_decrease_limit`), and Stage 19 resolved mechanical
+  action availability (`increase_available`/`maintain_available`/
+  `reduce_available`, see above), but no rule computes an *effective* increase
+  limit — protection has no approved increase-side effect, so `raw_increase_limit`
+  remains the authoritative increase-side constraint. No action-suitability concept
+  is defined anywhere in the repository — which *available* action should actually
+  be recommended, and `HOLD`'s exact trigger, both remain pending later stages, as
+  do scoring, ranking, `RecommendationAction`, `ReasonCode`, allocation, and
+  conservation. Per-campaign scoring is not itself known to require cross-campaign
+  data; only normalisation, ranking/prioritisation, and allocation are.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.
