@@ -1695,3 +1695,118 @@ allocation, and conservation all remain deferred to later stages. No
 existing test file required modification for Stage 20 — a new dedicated
 test file was created instead.
 **Status:** Frozen.
+
+## 2026-08-14 — Stage 21 approved responsibility and HOLD-versus-MAINTAIN meaning
+
+**Decision:** Sprint 1, Development Stage 21 selects exactly one
+`RecommendationAction` (`INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`) per campaign,
+using campaign status, tracking assessability, and Stage 20 action
+suitability. It does not produce `ReasonCode`, calculate monetary movement,
+score or rank campaigns, apply `BusinessPriority`, or use pacing or
+confidence. `MAINTAIN` means the campaign was eligible for automated
+assessment, no available action had a uniquely stronger directional
+suitability, and keeping the budget unchanged is the selected recommendation
+— an assessed no-change decision. `HOLD` means the engine must not make an
+automated directional budget recommendation for this review — because the
+campaign is paused, its tracking is unassessable, its suitability input is
+ambiguous, or no valid fallback action is available. `HOLD` is a
+review/deferral outcome; `MAINTAIN` is an assessed no-change recommendation.
+`RecommendationAction` selection here is a **provisional direction only** —
+not a monetary amount, not a `ReasonCode`, and not a final allocated
+movement.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 21: exact model, function, and explicit CampaignInput status ownership
+
+**Decision:** `CampaignRecommendation` (frozen, immutable; `extra="forbid"`;
+exactly `campaign_id: str`, `recommendation_action: RecommendationAction`) is
+defined in the new `src/recommendation.py` module, reusing the existing
+`RecommendationAction` enum unchanged — no second action enum, no numeric
+ordering or weights, no dependence on enum declaration order. The sole
+public function is `resolve_campaign_recommendation_action(campaign:
+CampaignInput, suitability: CampaignActionSuitability, tracking:
+CampaignTrackingAssessment) -> CampaignRecommendation`; it reads exactly
+eight fields: `campaign.campaign_id`, `campaign.status`,
+`suitability.campaign_id`, `suitability.increase_suitability`,
+`suitability.maintain_suitability`, `suitability.reduce_suitability`,
+`tracking.campaign_id`, and `tracking.is_assessable`. **`CampaignInput` is
+accepted directly for explicit campaign status** — Paused status is never
+inferred from suitability shape (e.g. from `maintain_suitability ==
+NOT_APPLICABLE`), even though such an inference happens to be structurally
+valid under Stage 19's current frozen rule (`maintain_available = is_active`,
+unconditionally); explicit reading was chosen for clarity and independence
+from any future change to that rule. `CampaignActionAvailability` is not
+accepted separately, since Stage 20 has already applied availability through
+`NOT_APPLICABLE`. Stage 21 consumes Stage 20's and Stage 8's already-approved
+result objects directly — it never calls
+`resolve_campaign_action_suitability`, `assess_campaign_tracking`,
+`resolve_campaign_action_availability`, or any other Stage 1–20 production
+function, consistent with the consumption pattern established since Stage
+12. Before any status/assessability/suitability evaluation, all three
+`campaign_id` values must match via one combined equality check anchored to
+`campaign.campaign_id`; a mismatch raises exactly `ValueError("Campaign IDs
+must match when resolving recommendation action.")`, checked as the first
+statement in the function body, with no result returned, no ID silently
+preferred, and the same exact message regardless of which input(s)
+mismatch.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 21: exact ordered action-selection rules
+
+**Decision:** After campaign-ID validation, Stage 21 applies exactly these
+six rules in order:
+```
+1. Paused override:             campaign.status is PAUSED           → HOLD
+2. Assessability override:      not tracking.is_assessable          → HOLD
+3. Unique-SUITABLE selection:   exactly one field is SUITABLE       → that action
+4. Multiple-SUITABLE ambiguity: more than one field is SUITABLE     → HOLD
+5. Conservative MAINTAIN:       no SUITABLE, maintain is NEUTRAL    → MAINTAIN
+6. Final HOLD fallback:         no SUITABLE, maintain is UNSUITABLE
+                                 or NOT_APPLICABLE                  → HOLD
+```
+Rules 1 and 2 override every suitability value unconditionally.
+`TrackingStatus.WARNING` remains assessable because Stage 8 already maps it
+to `is_assessable=True`; only `is_assessable` is read, never
+`tracking_status`. Rule 4 applies no fixed precedence, no first-field
+selection, no `MAINTAIN` default, and raises no error — although multiple
+`SUITABLE` values cannot arise through the approved Stage 20 production
+table, a directly constructed `CampaignActionSuitability` could contain
+them, and `HOLD` is the approved deterministic ambiguity outcome. Rule 5's
+`MAINTAIN` fallback does not require `increase_suitability`/
+`reduce_suitability` to be `NEUTRAL` — they may independently be `NEUTRAL`,
+`UNSUITABLE`, or `NOT_APPLICABLE`. `MAINTAIN` is never selected when it is
+itself explicitly `UNSUITABLE` or `NOT_APPLICABLE` (Rule 6). A
+`Suitability.NOT_APPLICABLE` value is never selected as an action —
+`RecommendationAction` has no `NOT_APPLICABLE` member; it participates only
+by preventing that direction from being uniquely `SUITABLE`. A protected
+campaign may still receive `INCREASE` or `MAINTAIN`; `REDUCE` is
+structurally unavailable for a protected campaign through the approved
+Stage 18–20 path (`reduce_suitability` is always `NOT_APPLICABLE`), so
+Rules 3/6 never select it. `is_protected`, `decrease_blocked`,
+`is_test_campaign`, and `test_budget_floor` are never read directly — their
+effects are already fully absorbed upstream into availability and
+suitability.
+**Status:** Frozen.
+
+## 2026-08-14 — Stage 21: excluded-input decisions, dedicated module, and ReasonCode deferral
+
+**Decision:** `Confidence`, `PacingStatus`, and `BusinessPriority` are
+excluded entirely from Stage 21 — none is read anywhere in
+`src/recommendation.py`; no `LOW`-confidence-to-`HOLD`,
+`NOT_ASSESSABLE`-confidence-to-`HOLD`, `NOT_AVAILABLE`-pacing-to-`HOLD`, or
+priority-based selection rule is inferred; all remain unresolved and
+deferred. **Stage 21 outputs no `ReasonCode`** — Paused is not mapped to
+`PAUSED_CAMPAIGN`, unassessable is not mapped to `TRACKING_UNRELIABLE`,
+protected is not mapped to `PROTECTED_FROM_REDUCTION`, suitability is not
+mapped to any performance/trend reason code, and `HOLD` is not mapped to
+`HELD_FOR_MANUAL_REVIEW` — `ReasonCode` remains a separate Stage 22
+responsibility. **Dedicated module:** `src/recommendation.py` was created
+rather than extending `src/suitability.py`, `src/availability.py`,
+`src/scoring.py`, `src/classification.py`, or `src/constraints.py`, because
+Stage 21 selects a recommendation outcome, a responsibility separate from
+classification, constraints, availability, suitability, scoring, and
+allocation. No `Decimal` calculation occurs anywhere in Stage 21. Numeric
+prioritisation scoring, ranking, allocation, and conservation all remain
+deferred to later stages. No existing test file required modification for
+Stage 21 — a new dedicated test file was created instead.
+**Status:** Frozen.

@@ -1,20 +1,22 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 20 populates the Campaign Action Suitability
-> Scenarios section below, backed by the new `tests/test_suitability.py` (67
-> tests, a dedicated file for the new `src/suitability.py` module — Stage 20 does
-> not extend `tests/test_availability.py`, which remains unchanged at 61 tests,
-> nor `tests/test_constraints.py`, which remains unchanged at 322 tests: 25 Stage
-> 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15 + 40
-> Stage 16 + 46 Stage 17 + 50 Stage 18), in addition to the Campaign Action
-> Availability Scenarios (Stage 19, below), the Effective Decrease Limit Scenarios
-> (Stage 18, below), the Raw Decrease Limit Scenarios (Stage 17, below), the Raw
-> Increase Limit Scenarios (Stage 16, below), the Test-Aware Static Decrease Room
-> Scenarios (Stage 15, below), the Protection Constraint Scenarios (Stage 14,
-> below), the Test-Floor Room Scenarios (Stage 13, below), the Raw Percentage
-> Movement-Cap Scenarios (Stage 12, below), the Applicable Change-Percentage
-> Resolution Scenarios (Stage 11, below), the Static Budget-Bound Scenarios (Stage
-> 10, below), the Stage 9 Pacing
+> Sprint 1, Development Stage 21 populates the Campaign Recommendation
+> Scenarios section below, backed by the new `tests/test_recommendation.py`
+> (84 tests, a dedicated file for the new `src/recommendation.py` module —
+> Stage 21 does not extend `tests/test_suitability.py`, which remains
+> unchanged at 67 tests, `tests/test_availability.py`, which remains
+> unchanged at 61 tests, nor `tests/test_constraints.py`, which remains
+> unchanged at 322 tests: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage
+> 13 + 28 Stage 14 + 39 Stage 15 + 40 Stage 16 + 46 Stage 17 + 50 Stage 18),
+> in addition to the Campaign Action Suitability Scenarios (Stage 20, below),
+> the Campaign Action Availability Scenarios (Stage 19, below), the Effective
+> Decrease Limit Scenarios (Stage 18, below), the Raw Decrease Limit Scenarios
+> (Stage 17, below), the Raw Increase Limit Scenarios (Stage 16, below), the
+> Test-Aware Static Decrease Room Scenarios (Stage 15, below), the Protection
+> Constraint Scenarios (Stage 14, below), the Test-Floor Room Scenarios (Stage
+> 13, below), the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the
+> Applicable Change-Percentage Resolution Scenarios (Stage 11, below), the
+> Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
 > Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
 > Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
 > tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
@@ -780,6 +782,63 @@ ranking, a reason code, or an allocation.
 | 37 | `data/sample_campaigns.csv` validated; Stage 5/6/19 results independently calculated per campaign through the real production path, then only those three results passed, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`: `ON_TARGET`/`STABLE`/`(True,True,True)` → `(NEUTRAL, SUITABLE, NEUTRAL)`. `M001`: same shape → `(NEUTRAL, SUITABLE, NEUTRAL)`. `G002` (protected): `ABOVE_TARGET`/`IMPROVING`/`(True,True,False)` → `(SUITABLE, NEUTRAL, NOT_APPLICABLE)` — `REDUCE` is `NOT_APPLICABLE`, never `UNSUITABLE`; protection is never read directly; `INCREASE` being `SUITABLE` does not select `RecommendationAction.INCREASE` (no such field exists). `G003` (test): `ON_TARGET`/`STABLE`/`(True,True,True)` → `(NEUTRAL, SUITABLE, NEUTRAL)`. |
 | 38 | Synthetic integration: all six conflicting/mixed `PerformanceBand`×`TrendDirection` combinations, all available | All three directions `NEUTRAL` in every case. |
 | 39 | Synthetic integration: every availability pattern (8 combinations of the three Booleans) applied to a conflict cell | Each direction is `NEUTRAL` when available and `NOT_APPLICABLE` when unavailable, independently per direction. |
+
+## Campaign Recommendation Scenarios
+
+All scenarios below use `resolve_campaign_recommendation_action(campaign:
+CampaignInput, suitability: CampaignActionSuitability, tracking:
+CampaignTrackingAssessment) -> CampaignRecommendation` from
+`src/recommendation.py` (`tests/test_recommendation.py` — a dedicated test
+file). Every result is a provisional direction only — none of these
+scenarios produces a `ReasonCode`, a monetary amount, a score, a rank, or a
+final allocated movement.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignRecommendation` field set | Exactly `campaign_id`, `recommendation_action`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignRecommendation` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied from `campaign.campaign_id`, after confirming it matches `suitability.campaign_id` and `tracking.campaign_id`. |
+| 5 | All three IDs equal | Resolves normally. |
+| 6 | `suitability.campaign_id` mismatched | Raises `ValueError("Campaign IDs must match when resolving recommendation action.")`. |
+| 7 | `tracking.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 8 | Multiple inputs mismatched simultaneously | Raises the same exact `ValueError` — no per-object mismatch reporting, no result returned, no ID silently preferred. |
+| 9 | ID-equality guard | Verified via AST to be the first statement, preceding any read of `campaign.status`, `tracking.is_assessable`, or any suitability field. |
+| 10–16 | Paused override: assessable + Increase/Maintain/Reduce `SUITABLE`; unassessable; all `NEUTRAL`; multiple `SUITABLE` | All → `HOLD`, unconditionally overriding suitability; Paused is never an error. |
+| 17–21 | Assessability override (Active, unassessable): Increase/Maintain/Reduce `SUITABLE`; all `NEUTRAL`; multiple `SUITABLE` | All → `HOLD`, unconditionally overriding suitability. |
+| 22 | `Warning` tracking, via the real `assess_campaign_tracking` path | `is_assessable=True` (inherited unchanged from Stage 8); ordinary selection logic applies. |
+| 23 | `resolve_campaign_recommendation_action` source | Reads only `campaign.campaign_id`/`campaign.status`, `suitability.campaign_id`/`increase_suitability`/`maintain_suitability`/`reduce_suitability`, `tracking.campaign_id`/`tracking.is_assessable` — exactly eight authorised field accesses (AST-verified); never references `tracking_status` (source-verified); calls none of `assess_campaign_tracking`/`resolve_campaign_action_suitability`/`resolve_campaign_action_availability`/any other Stage 1–20 production function (AST-verified). |
+| 24–28 | Unique-`SUITABLE` selection: Increase only `SUITABLE` (others `NEUTRAL`/`UNSUITABLE`/`NOT_APPLICABLE` in every combination); Maintain only `SUITABLE`; Reduce only `SUITABLE` | `INCREASE`/`MAINTAIN`/`REDUCE` respectively, independent of the other two fields' exact values and independent of `Suitability`'s enum declaration order. |
+| 29 | All `NEUTRAL`, `maintain_suitability=NEUTRAL` | `MAINTAIN`. |
+| 30 | `increase_suitability=UNSUITABLE`, `maintain_suitability=NEUTRAL`, `reduce_suitability=NEUTRAL` | `MAINTAIN` — `INCREASE`'s own value never blocks the fallback. |
+| 31 | `increase_suitability=NEUTRAL`, `maintain_suitability=NEUTRAL`, `reduce_suitability=UNSUITABLE` | `MAINTAIN`. |
+| 32 | `increase_suitability=NOT_APPLICABLE`, `maintain_suitability=NEUTRAL`, `reduce_suitability=NOT_APPLICABLE` | `MAINTAIN`. |
+| 33 | No `SUITABLE`, `maintain_suitability=UNSUITABLE` | `HOLD` — `MAINTAIN` is never selected when it is itself unsuitable. |
+| 34 | No `SUITABLE`, `maintain_suitability=NOT_APPLICABLE` | `HOLD`. |
+| 35 | All three `NOT_APPLICABLE` | `HOLD`. |
+| 36 | All three `UNSUITABLE` | `HOLD`. |
+| 37 | Increase + Maintain `SUITABLE` | `HOLD` — no fixed precedence, no first-field selection, no error. |
+| 38 | Increase + Reduce `SUITABLE` | `HOLD`. |
+| 39 | Maintain + Reduce `SUITABLE` | `HOLD`. |
+| 40 | All three `SUITABLE` | `HOLD`. |
+| 41 | `ABOVE_TARGET`+`IMPROVING`, all applicable, via the real Stage 3/5/6/8/10–20 production path | `INCREASE`. |
+| 42 | `ON_TARGET`+`STABLE`, all applicable, via the real production path | `MAINTAIN`. |
+| 43 | `BELOW_TARGET`+`DECLINING`, all applicable, via the real production path | `REDUCE`. |
+| 44 | Each of the six mixed/conflicting `PerformanceBand`×`TrendDirection` cells, Active and assessable, via the real production path | `MAINTAIN` in every case. |
+| 45 | Protected campaign, `BELOW_TARGET`+`DECLINING`, via the real production path | `reduce_suitability=NOT_APPLICABLE`; `REDUCE` is never selected — structurally unavailable through the approved Stage 18–20 chain. |
+| 46 | Test campaign, via the real production path | Ordinary resolution from its supplied suitability; no special-case logic. |
+| 47 | Protected-and-test campaign, via the real production path | Follows only its already-computed upstream suitability; `REDUCE` never selected. |
+| 48 | `ReasonCode`, `Confidence`, `CampaignConfidenceClass`, `PacingStatus`, `CampaignPacingClass`, `BusinessPriority`, `CampaignActionAvailability`, raw monetary limit fields | Never referenced anywhere in `src/recommendation.py`'s source (AST-verified) or imported into the module (`hasattr` on the module confirms absence). |
+| 49 | `is_protected`/`decrease_blocked`/`is_test_campaign`/`test_budget_floor` | Never referenced in `resolve_campaign_recommendation_action`'s source. |
+| 50 | `CampaignRecommendation.model_fields` / result attributes | Contains no `reason_code`, `reason_codes`, `requires_manual_review`, `confidence`, `score`, `rank`, `priority`, `amount`, `increase_available`/`maintain_available`/`reduce_available`, or `increase_suitability`/`maintain_suitability`/`reduce_suitability` field. |
+| 51 | `data/sample_campaigns.csv` validated; Stage 5/6/8/10–20 results independently calculated per campaign through the real production path, then only the three approved Stage 21 inputs passed, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=MAINTAIN`, `M001=MAINTAIN`, `G002=INCREASE`, `G003=MAINTAIN`. For G002: `status=Active`, `tracking.is_assessable=True`, `suitability=(SUITABLE, NEUTRAL, NOT_APPLICABLE)` independently re-verified; no monetary amount calculated; no `ReasonCode` produced. |
+| 52 | Synthetic integration: Paused campaign, via the real production path | `HOLD`. |
+| 53 | Synthetic integration: unreliable-tracking campaign | `HOLD`. |
+| 54 | Synthetic integration: warning-tracking campaign | Ordinary selection applies. |
+| 55 | Synthetic integration: `BELOW_TARGET`+`DECLINING`, `REDUCE` available | `REDUCE`. |
+| 56 | Synthetic integration: `BELOW_TARGET`+`DECLINING`, `REDUCE` unavailable (protected) | Not `REDUCE` — `reduce_suitability=NOT_APPLICABLE`. |
+| 57 | Synthetic integration: multiple `SUITABLE` (manually constructed) | `HOLD`. |
+| 58 | Synthetic integration: protected-and-test campaign | Not `REDUCE`. |
 
 ## Allocation Scenarios
 

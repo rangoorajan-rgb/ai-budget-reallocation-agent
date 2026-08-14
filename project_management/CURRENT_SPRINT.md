@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, and 20 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, and 21 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -877,35 +877,108 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 20 (and not yet started)
+## Development Stage 21 — Deterministic Ordered Campaign Recommendation-Action Selection (complete)
 
-- Resolution of the six conflicting/mixed performance-trend cells (deliberately
-  left `NEUTRAL` rather than assigning a performance-vs-trend precedence).
-- `RecommendationAction` selection, `HOLD` (exact trigger still undecided).
-- `ReasonCode` assignment.
+- [x] `src/recommendation.py` (new dedicated module — not added to
+      `src/suitability.py`, `src/availability.py`, `src/scoring.py`,
+      `src/classification.py`, or `src/constraints.py`, since Stage 21
+      selects a recommendation outcome, a responsibility separate from
+      classification, constraints, availability, suitability, scoring, and
+      allocation) — `CampaignRecommendation` (frozen, `extra="forbid"`:
+      `campaign_id`, `recommendation_action: RecommendationAction`) and
+      `resolve_campaign_recommendation_action(campaign: CampaignInput,
+      suitability: CampaignActionSuitability, tracking:
+      CampaignTrackingAssessment) -> CampaignRecommendation`. Reuses the
+      existing `RecommendationAction` enum unchanged — no second action
+      enum, no numeric ordering or weights. `RecommendationAction` selection
+      is a **provisional direction only** — no monetary amount is produced.
+      `src/suitability.py`, `src/availability.py`, `src/scoring.py`,
+      `src/classification.py`, `src/constraints.py`, `src/constants.py`,
+      `src/models.py`, `src/validation.py`, `src/metrics.py`,
+      `src/pacing.py` unchanged.
+- [x] **Approved HOLD-versus-MAINTAIN meaning:** `MAINTAIN` means the
+      campaign was eligible for automated assessment, no available action
+      had a uniquely stronger directional suitability, and keeping the
+      budget unchanged is the selected recommendation — an assessed
+      no-change decision. `HOLD` means the engine must not make an
+      automated directional budget recommendation for this review — because
+      the campaign is paused, its tracking is unassessable, its suitability
+      input is ambiguous, or no valid fallback action is available. `HOLD`
+      is a review/deferral outcome; `MAINTAIN` is an assessed no-change
+      recommendation.
+- [x] **Approved exact ordered policy**, applied after campaign-ID
+      validation: (1) Paused override — `campaign.status is
+      CampaignStatus.PAUSED` → `HOLD`, overriding all suitability, read
+      explicitly from `CampaignInput.status`, never inferred from
+      suitability shape; (2) tracking-assessability override — `not
+      tracking.is_assessable` → `HOLD`, overriding all suitability,
+      `WARNING` remains assessable per Stage 8's frozen rule; (3)
+      unique-`SUITABLE` selection — exactly one field `SUITABLE` → that
+      action; (4) multiple-`SUITABLE` ambiguity — more than one field
+      `SUITABLE` → `HOLD`, with no fixed precedence, no first-field
+      selection, no `MAINTAIN` default, and no error; (5) conservative
+      `MAINTAIN` fallback — no `SUITABLE`, `maintain_suitability is
+      Suitability.NEUTRAL` → `MAINTAIN`, regardless of
+      `increase_suitability`/`reduce_suitability`'s own values; (6) final
+      `HOLD` fallback — no `SUITABLE`, `maintain_suitability` is
+      `UNSUITABLE` or `NOT_APPLICABLE` → `HOLD`. A `Suitability.NOT_APPLICABLE`
+      value is never selected as an action.
+- [x] Consumes Stage 20's and Stage 8's already-approved result objects
+      directly (never calls `resolve_campaign_action_suitability`,
+      `assess_campaign_tracking`, `resolve_campaign_action_availability`, or
+      any other Stage 1–20 production function) plus `CampaignInput`
+      directly for explicit status — `CampaignActionAvailability` is not
+      accepted separately, since Stage 20 has already applied availability
+      through `NOT_APPLICABLE`. Requires all three `campaign_id` values to
+      match, raising exactly `ValueError("Campaign IDs must match when
+      resolving recommendation action.")` otherwise, checked before any
+      status/assessability/suitability evaluation. Never reads
+      `is_protected`, `decrease_blocked`, `is_test_campaign`,
+      `test_budget_floor`, or `tracking_status`. Excludes `Confidence`,
+      `PacingStatus`, and `BusinessPriority` entirely. Outputs no
+      `ReasonCode`.
+- [x] `tests/test_recommendation.py` (new dedicated test file —
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests) — 84 new Stage 21
+      tests, all passing. `tests/test_models.py` (Stage 1),
+      `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage
+      3), `tests/test_pacing.py` (Stage 4), `tests/test_classification.py`
+      (Stage 5), `tests/test_trend_classification.py` (Stage 6),
+      `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+      passing — no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 21 (and not yet started)
+
+- `ReasonCode` assignment (deferred to Stage 22).
 - `Confidence`/`Confidence.NOT_ASSESSABLE`, `PacingStatus`, `BusinessPriority`
-  effects on suitability, scoring, or allocation.
+  effects on action selection, scoring, or allocation.
 - Effective increase limit (`CampaignRawIncreaseLimit` remains the authoritative
   increase-side constraint; no approved rule exists to transform it).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Numeric prioritisation scoring, ranking/prioritisation, allocation, conservation.
+- Any monetary amount associated with `RecommendationAction` (Stage 21 selects
+  only a provisional direction).
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
 ## Next Stage
 
-Stage 21 (not started, scope not yet frozen): requires its own dependency and
+Stage 22 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order.
-`RecommendationAction` selection is the leading candidate, consuming
-`CampaignActionSuitability` (Stage 20) to move toward a final action per campaign
-— but selecting among `SUITABLE`/`NEUTRAL`/`UNSUITABLE` results, and deciding
-`HOLD`'s exact trigger, both remain open business decisions requiring their own
-approval. Whether `Confidence`, `PacingStatus`, or `BusinessPriority` first need
-a dedicated readiness/scoring stage before `RecommendationAction` can be
-finalised is not yet resolved. Per-campaign scoring may remain single-campaign;
-only normalisation, ranking/prioritisation, and allocation genuinely require
-comparing multiple campaigns simultaneously (corrected at Stage 19 completion).
-The still-deferred combined campaign-assessment question (performance + trend +
+`ReasonCode` assignment is the leading candidate, consuming
+`CampaignRecommendation` (Stage 21) alongside the underlying Stage 5/6/8/19/20
+facts to explain each selected action. Whether `Confidence`, `PacingStatus`,
+or `BusinessPriority` first need a dedicated readiness/scoring stage before
+per-campaign scoring or ranking can be finalised is not yet resolved.
+Per-campaign scoring may remain single-campaign; only normalisation,
+ranking/prioritisation, and allocation genuinely require comparing multiple
+campaigns simultaneously (corrected at Stage 19 completion). The
+still-deferred combined campaign-assessment question (performance + trend +
 confidence + tracking + pacing) remains a live but not clearly necessary
 candidate on its own, as noted since the Stage 11 inspection.

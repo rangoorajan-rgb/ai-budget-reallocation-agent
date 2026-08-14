@@ -1386,3 +1386,151 @@ All notable changes to this project are documented in this file.
   `RecommendationAction`, and `ReasonCode` explicitly re-confirmed as pending
   later stages), and `docs/TEST_SCENARIOS.md` (39 concrete Stage 20
   scenarios).
+
+- Sprint 1, Development Stage 21: added a new dedicated module,
+  `src/recommendation.py`, containing `CampaignRecommendation` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `recommendation_action:
+  RecommendationAction` only, reusing the existing `RecommendationAction`
+  enum unchanged) and `resolve_campaign_recommendation_action(campaign:
+  CampaignInput, suitability: CampaignActionSuitability, tracking:
+  CampaignTrackingAssessment) -> CampaignRecommendation`. Selects exactly
+  one `RecommendationAction` (`INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`) per
+  campaign, using campaign status, tracking assessability, and Stage 20
+  action suitability. **Approved HOLD-versus-MAINTAIN meaning:** `MAINTAIN`
+  means the campaign was eligible for automated assessment, no available
+  action had a uniquely stronger directional suitability, and keeping the
+  budget unchanged is the selected recommendation — an assessed no-change
+  decision; `HOLD` means the engine must not make an automated directional
+  budget recommendation for this review — because the campaign is paused,
+  its tracking is unassessable, its suitability input is ambiguous, or no
+  valid fallback action is available. `RecommendationAction` selection here
+  is a **provisional direction only** — no monetary amount is calculated.
+  **Approved exact ordered policy**, applied after campaign-ID validation:
+  (1) Paused override — `campaign.status is CampaignStatus.PAUSED` →
+  `HOLD`, overriding all suitability, read explicitly from
+  `CampaignInput.status`, never inferred from suitability shape even though
+  such an inference is currently structurally valid under Stage 19's frozen
+  rule; (2) tracking-assessability override — `not tracking.is_assessable`
+  → `HOLD`, overriding all suitability, with `WARNING` remaining assessable
+  per Stage 8's frozen rule and only `is_assessable` ever read, never
+  `tracking_status`; (3) unique-`SUITABLE` selection — exactly one field
+  `SUITABLE` → that action; (4) multiple-`SUITABLE` ambiguity — more than
+  one field `SUITABLE` → `HOLD`, with no fixed precedence, no first-field
+  selection, no `MAINTAIN` default, and no error, since this cannot arise
+  through the approved Stage 20 production table but a directly
+  constructed `CampaignActionSuitability` could contain it; (5)
+  conservative `MAINTAIN` fallback — no `SUITABLE`, `maintain_suitability
+  is Suitability.NEUTRAL` → `MAINTAIN`, regardless of
+  `increase_suitability`/`reduce_suitability`'s own values; (6) final
+  `HOLD` fallback — no `SUITABLE`, `maintain_suitability` is `UNSUITABLE`
+  or `NOT_APPLICABLE` → `HOLD`. A `Suitability.NOT_APPLICABLE` value is
+  never selected as an action — `RecommendationAction` has no
+  `NOT_APPLICABLE` member. **Consumes Stage 20's and Stage 8's
+  already-approved result objects directly** (never calls
+  `resolve_campaign_action_suitability`, `assess_campaign_tracking`,
+  `resolve_campaign_action_availability`, or any other Stage 1–20
+  production function) plus `CampaignInput` directly for explicit status —
+  `CampaignActionAvailability` is not accepted separately, since Stage 20
+  has already applied availability through `NOT_APPLICABLE`. Requires all
+  three `campaign_id` values to match via one combined equality check
+  anchored to `campaign.campaign_id`, checked before any
+  status/assessability/suitability evaluation, raising exactly
+  `ValueError("Campaign IDs must match when resolving recommendation
+  action.")` otherwise with the same exact message regardless of which
+  input(s) mismatch. Never reads `is_protected`, `decrease_blocked`,
+  `is_test_campaign`, or `test_budget_floor` — a protected campaign may
+  still receive `INCREASE` or `MAINTAIN`, while `REDUCE` is structurally
+  unavailable for a protected campaign through the approved Stage 18–20
+  path. Excludes `Confidence`, `PacingStatus`, and `BusinessPriority`
+  entirely; outputs no `ReasonCode`. A dedicated module was chosen over
+  `src/suitability.py`/`src/availability.py`/`src/scoring.py`/
+  `src/classification.py`/`src/constraints.py` because Stage 21 selects a
+  recommendation outcome, separate from classification, constraints,
+  availability, suitability, scoring, and allocation. No `Decimal`
+  calculation occurs anywhere. `src/suitability.py`, `src/availability.py`,
+  `src/scoring.py`, `src/classification.py`, `src/constraints.py`,
+  `src/constants.py`, `src/models.py`, `src/validation.py`,
+  `src/metrics.py`, and `src/pacing.py` are unchanged.
+- Sprint 1, Development Stage 21: added a new dedicated test file,
+  `tests/test_recommendation.py` (84 tests, all passing;
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests) covering result-model
+  shape/immutability/field-type confirmation (no reason/confidence/score/
+  rank/priority/monetary/availability-or-suitability field),
+  incompatible-input rejection (`AttributeError`, no silent coercion, no
+  broad exception handling), campaign-ID matching (all three IDs equal
+  resolves normally; suitability/tracking mismatches and multiple
+  simultaneous mismatches each raise the exact approved `ValueError`
+  message with no result resolved and no ID silently preferred; the
+  ID-equality guard verified via AST to precede any
+  status/assessability/suitability evaluation), the Paused override (all
+  three single-direction `SUITABLE` cases, unassessable, all-`NEUTRAL`, and
+  multiple-`SUITABLE` cases each producing `HOLD` unconditionally; Paused
+  confirmed never to raise), the tracking-assessability override (the same
+  five sub-cases for an Active-but-unassessable campaign, each producing
+  `HOLD`; `WARNING`/assessable confirmed to follow ordinary selection via
+  the real `assess_campaign_tracking` path; source-verified that only
+  `is_assessable` is read, never `tracking_status`), unique-`SUITABLE`
+  selection (each of `INCREASE`/`MAINTAIN`/`REDUCE` selected when uniquely
+  `SUITABLE`, parametrised across every combination of the other two
+  fields' `NEUTRAL`/`UNSUITABLE`/`NOT_APPLICABLE` values, and confirmed
+  independent of `Suitability`'s enum declaration order), the no-`SUITABLE`
+  fallback (all-`NEUTRAL`, and `INCREASE`-or-`REDUCE`-`UNSUITABLE`-or-
+  `NOT_APPLICABLE`-with-`maintain`-`NEUTRAL` cases all producing
+  `MAINTAIN`; `maintain`-`UNSUITABLE`, `maintain`-`NOT_APPLICABLE`,
+  all-`NOT_APPLICABLE`, and all-`UNSUITABLE` cases all producing `HOLD`),
+  the multiple-`SUITABLE` ambiguity rule (every pairwise and three-way
+  `SUITABLE` combination producing `HOLD`, with explicit confirmation of no
+  fixed precedence, no error, and no silent `MAINTAIN`/`INCREASE`
+  fallback), production-path cases via the real Stage 3/5/6/8/10–20 chain
+  (the three diagonal cells selecting `INCREASE`/`MAINTAIN`/`REDUCE`
+  respectively; all six mixed/conflicting cells selecting `MAINTAIN` when
+  Active and assessable; a protected campaign confirmed unable to resolve
+  `REDUCE`; a test campaign and a protected-and-test campaign both
+  following ordinary resolution from their supplied suitability),
+  independence from `ReasonCode`/`Confidence`/`CampaignConfidenceClass`/
+  `PacingStatus`/`CampaignPacingClass`/`BusinessPriority`/
+  `CampaignActionAvailability`/raw monetary limit fields/`is_protected`/
+  `decrease_blocked`/`is_test_campaign`/`test_budget_floor` (AST- and
+  module-attribute-verified), earlier-stage separation (AST-verified no
+  call to `resolve_campaign_action_suitability`/`assess_campaign_tracking`/
+  `resolve_campaign_action_availability`/any other Stage 1–20 function;
+  exactly eight authorised field accesses verified via AST), no production
+  batch function, and sample-data integration through
+  `validate_campaign_csv` + the real production chain over
+  `data/sample_campaigns.csv` (order preserved; `G001`/`M001`/`G003` all
+  `MAINTAIN`; `G002` `INCREASE`, with its underlying facts — `status=Active`,
+  `tracking.is_assessable=True`,
+  `suitability=(SUITABLE, NEUTRAL, NOT_APPLICABLE)` — independently
+  re-verified, no monetary amount calculated, no `ReasonCode` produced),
+  plus eight synthetic integration cases (Paused, unreliable tracking,
+  warning tracking, `BELOW_TARGET`+`DECLINING` with `REDUCE`
+  available/unavailable, a manually constructed multiple-`SUITABLE` input,
+  and a protected-and-test campaign). `tests/test_models.py` (Stage 1),
+  `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage 3),
+  `tests/test_pacing.py` (Stage 4), `tests/test_classification.py` (Stage
+  5), `tests/test_trend_classification.py` (Stage 6),
+  `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+  passing — no behavioural regression, and no existing test file required
+  modification this stage. Full suite: 875 tests passing (92 Stage 1 + 44
+  Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 +
+  30 Stage 8 + 33 Stage 9 + 322 Stage 10–18 combined in
+  `tests/test_constraints.py` + 61 Stage 19 in `tests/test_availability.py`
+  + 67 Stage 20 in `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignRecommendation` fields; the
+  HOLD-versus-MAINTAIN meaning; the complete ordered action-selection
+  policy; the Paused and assessability overrides; the unique/multiple/no-
+  `SUITABLE` rules; explicit-status ownership; reason-code and monetary
+  exclusions), `docs/DECISION_RULES.md` (frozen Stage 21 ordered campaign
+  recommendation-action selection rule, including the exact six-rule
+  policy, the exact three inputs and eight authorised fields, the
+  campaign-ID policy and error, the explicit Paused rule, the tracking-
+  assessability override, the unique-suitable mapping, the multiple-
+  suitable `HOLD` rule, the `MAINTAIN` fallback boundary, the final `HOLD`
+  fallback, and the deferral of confidence, pacing, priority, and
+  `ReasonCode` explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (58 concrete Stage 21 scenarios).

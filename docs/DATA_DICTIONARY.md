@@ -1,9 +1,8 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 20 (adds deterministic, categorical, per-action
-> campaign suitability — whether the approved `PerformanceBand` and
-> `TrendDirection` classifications provide a clear directional signal supporting
-> each available action, from `src/suitability.py` — to the Stage 1 enumerations,
+> Sprint 1, Development Stage 21 (adds deterministic per-campaign
+> `RecommendationAction` selection — `INCREASE`, `MAINTAIN`, `REDUCE`, or
+> `HOLD` — from `src/recommendation.py` — to the Stage 1 enumerations,
 > numerical constants, core input models, CSV schema, Stage 2 validation reporting,
 > Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance classification,
 > Stage 6 trend classification, Stage 7 conversion-volume confidence classification,
@@ -12,10 +11,10 @@
 > 12 raw percentage-based monetary movement cap, Stage 13 test-floor distance, Stage
 > 14 protection constraint, Stage 15 test-aware static decrease room, Stage 16 raw
 > increase limit, Stage 17 raw decrease limit, Stage 18 protection-adjusted
-> effective decrease limit, and Stage 19 campaign action availability). Combined
-> assessment, `Confidence.NOT_ASSESSABLE` ownership, numeric prioritisation
-> scoring, ranking, `RecommendationAction`, `HOLD`, and `ReasonCode`, and other
-> derived/decision fields, plus export fields, are pending later stages.
+> effective decrease limit, Stage 19 campaign action availability, and Stage 20
+> campaign action suitability). Combined assessment, `Confidence.NOT_ASSESSABLE`
+> ownership, `ReasonCode`, numeric prioritisation scoring, ranking, allocation,
+> and other derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -893,11 +892,73 @@ Stage 19 already marked them unavailable. Stage 20 never decides `MAINTAIN`
 versus `HOLD`. No `RecommendationAction`, `HOLD`, `ReasonCode`, numeric score,
 ranking, or allocation field exists anywhere on this result.
 
+## Campaign Recommendation Fields (`src/recommendation.py`)
+
+Produced by `resolve_campaign_recommendation_action(campaign: CampaignInput,
+suitability: CampaignActionSuitability, tracking: CampaignTrackingAssessment)
+-> CampaignRecommendation`, one result per already-validated `CampaignInput`
+paired with its already-calculated Stage 20 and Stage 8 results.
+`CampaignRecommendation` is frozen (immutable) and rejects unknown fields
+(`extra="forbid"`).
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `campaign.campaign_id`, after confirming it matches `suitability.campaign_id` and `tracking.campaign_id`. |
+| `recommendation_action` | `RecommendationAction` | Exactly one of `INCREASE`, `MAINTAIN`, `REDUCE`, or `HOLD`, selected by the ordered policy below. |
+
+**HOLD versus MAINTAIN.** `MAINTAIN` means the campaign was eligible for
+automated assessment, no available action had a uniquely stronger directional
+suitability, and keeping the budget unchanged is the selected recommendation
+— an *assessed* no-change decision. `HOLD` means the engine must not make an
+automated directional budget recommendation for this review — because the
+campaign is paused, its tracking is unassessable, its suitability input is
+ambiguous, or no valid fallback action is available. `HOLD` is a
+review/deferral outcome; `MAINTAIN` is an assessed no-change recommendation.
+Neither changes the actual budget.
+
+**Complete ordered action-selection policy**, applied after campaign-ID
+validation:
+
+1. **Paused override.** `campaign.status is CampaignStatus.PAUSED` →
+   `HOLD`, overriding all suitability values. Read directly from
+   `CampaignInput.status`.
+2. **Tracking-assessability override.** `not tracking.is_assessable` →
+   `HOLD`, overriding all suitability values. `TrackingStatus.WARNING`
+   remains assessable (inherited unchanged from Stage 8).
+3. **Unique-`SUITABLE` selection.** Exactly one of
+   `increase_suitability`/`maintain_suitability`/`reduce_suitability` equals
+   `Suitability.SUITABLE` → select the corresponding action.
+4. **Multiple-`SUITABLE` ambiguity.** More than one field equals `SUITABLE`
+   → `HOLD`. No fixed precedence, no first-field selection, no `MAINTAIN`
+   default, and no error — this cannot arise through the approved Stage 20
+   production table, but a directly constructed `CampaignActionSuitability`
+   could contain it.
+5. **Conservative `MAINTAIN` fallback.** No field is `SUITABLE`, and
+   `maintain_suitability is Suitability.NEUTRAL` → `MAINTAIN`.
+   `INCREASE`'s and `REDUCE`'s own values are irrelevant to this fallback.
+6. **Final `HOLD` fallback.** No field is `SUITABLE`, and
+   `maintain_suitability` is `UNSUITABLE` or `NOT_APPLICABLE` → `HOLD`.
+
+A `Suitability.NOT_APPLICABLE` value is never selected as an action — it
+participates only by preventing that direction from being uniquely
+`SUITABLE`.
+
+**Explicit status ownership.** Stage 21 accepts `CampaignInput` directly for
+campaign status — Paused status is never inferred from suitability shape;
+`CampaignActionAvailability` is not accepted separately, since Stage 20 has
+already applied availability through `NOT_APPLICABLE`.
+
+**Exclusions.** No `ReasonCode`, monetary amount, score, rank, priority,
+`Confidence`, `PacingStatus`, or `BusinessPriority` is read or produced
+anywhere. `RecommendationAction` selection here is a **provisional
+direction only** — not a final allocated movement, not a monetary amount,
+and not a cross-campaign judgement.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, numeric prioritisation scoring, ranking,
-> `RecommendationAction`, `HOLD`, `ReasonCode`, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, `ReasonCode`, numeric prioritisation
+> scoring, ranking, allocation).
 
 ## Export Fields
 
