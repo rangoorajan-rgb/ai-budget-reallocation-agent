@@ -1103,3 +1103,79 @@ remain deferred to later stages. No existing test file required modification for
 Stage 14 — no approved AST-narrowing exception was needed, since Stage 14 introduces
 no new import beyond what `src/constraints.py` already had available.
 **Status:** Frozen.
+
+## 2026-08-11 — Stage 15: test_budget_floor approved as an additional retained-spend floor for test campaigns
+
+**Decision:** Sprint 1, Development Stage 15 approves the first constraints-domain
+business precedence rule: for a test campaign, `test_budget_floor` is an *additional*
+retained-spend floor alongside `minimum_budget` — not an alternative that replaces
+it, and not a decrease-only-vs-general distinction left unresolved. The **higher**
+monetary floor controls (`effective_decrease_floor = max(minimum_budget,
+test_budget_floor)`), equivalently expressed as the **smaller** of the two
+already-calculated rooms (`min(room_to_static_minimum, room_to_test_floor)`) via the
+identity `c - max(a, b) = min(c - a, c - b)`. A non-test campaign is constrained only
+by `minimum_budget` at this stage (`test_aware_static_decrease_room =
+room_to_static_minimum`). This resolves the precedence question every prior Stage
+10–14 addition deliberately deferred (see each stage's own decision entries above).
+The result remains a **raw, test-aware static constraint only** — not permissible
+decrease, not an effective decrease limit, and it does not mean the campaign should
+be reduced. It does not account for Stage 12's percentage cap or Stage 14's
+protection constraint.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 15: exact model, function, and consumption of Stage 10/13 outputs (not recalculation)
+
+**Decision:** `CampaignTestAwareStaticDecreaseRoom` (frozen, immutable;
+`extra="forbid"`; exactly `campaign_id: str`, `test_aware_static_decrease_room:
+Decimal`) is defined in `src/constraints.py`, alongside but fully separate from
+`CampaignStaticBudgetRoom`, `CampaignApplicableChangePercentage`,
+`CampaignRawPercentageMovementCap`, `CampaignTestFloorRoom`, and
+`CampaignProtectionConstraint`. The sole public function is
+`resolve_campaign_test_aware_static_decrease_room(static_room:
+CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
+CampaignTestAwareStaticDecreaseRoom`; it reads only `static_room.campaign_id`,
+`static_room.room_to_static_minimum`, `test_floor_room.campaign_id`, and
+`test_floor_room.room_to_test_floor`. **Stage 15 consumes Stage 10's and Stage 13's
+already-approved result objects directly, rather than reading `CampaignInput` and
+recalculating either room** — it never accepts or reads `CampaignInput`, and never
+calls `calculate_campaign_static_budget_room` or `calculate_campaign_test_floor_room`.
+This avoids duplicating either stage's already-tested calculation in a second place,
+consistent with the same reasoning that led Stage 12 to consume Stage 11's result
+rather than re-resolving percentage precedence itself. Exact formula:
+```
+room_to_test_floor is None  → test_aware_static_decrease_room = room_to_static_minimum
+otherwise                   → test_aware_static_decrease_room = min(room_to_static_minimum, room_to_test_floor)
+```
+Before resolving any monetary result, `static_room.campaign_id` must equal
+`test_floor_room.campaign_id`; a mismatch raises exactly `ValueError("Campaign IDs
+must match when resolving test-aware static decrease room.")`, checked as the first
+statement in the function body, with no result returned and neither ID silently
+preferred.
+**Status:** Frozen.
+
+## 2026-08-11 — Stage 15: None/zero behaviour, no-arithmetic Decimal policy, and separation from Stages 11, 12, 14
+
+**Decision:** `room_to_test_floor is None` (non-test campaigns) resolves to
+`room_to_static_minimum` unchanged — never replaced with `Decimal("0.00")`; the
+Stage 15 output itself is never `None`. `Decimal("0.00")` is a legitimate result when
+the smaller applicable room is zero — it means there is no static room to reduce
+under the combined floor rule, not an eligibility or recommendation judgement. Stage
+15 performs selection and comparison only: no subtraction, multiplication, or
+division; no local `decimal` context; no `CURRENCY_QUANTUM`; no `ROUND_HALF_UP`; no
+rounding; no quantisation; no `float` conversion. The selected `Decimal` operand is
+returned unchanged, and ambient global `Decimal` precision/rounding cannot affect the
+result, since no arithmetic operation is performed at all.
+`resolve_campaign_test_aware_static_decrease_room` never reads
+`applicable_max_change_percentage`, `raw_percentage_movement_cap`, `decrease_blocked`,
+or `is_protected`, and never calls `resolve_campaign_applicable_change_percentage`,
+`calculate_campaign_raw_percentage_movement_cap`, or
+`resolve_campaign_protection_constraint` (or vice versa) — a protected campaign
+receives exactly the same Stage 15 result as an otherwise identical unprotected
+campaign with matching Stage 10/13 facts; no protection-based zero is calculated
+here. The percentage-cap intersection, protection application, raw increase
+intersection, effective directional constraints, and all later
+eligibility/scoring/recommendation/allocation logic remain deferred to later stages.
+No existing test file required modification for Stage 15 — no approved AST-narrowing
+exception was needed, since Stage 15 introduces no new import beyond what
+`src/constraints.py` already had available.
+**Status:** Frozen.

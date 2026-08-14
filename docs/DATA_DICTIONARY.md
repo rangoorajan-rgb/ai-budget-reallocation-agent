@@ -1,17 +1,17 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 14 (adds a neutral, decrease-specific protection
+> Sprint 1, Development Stage 15 (adds a neutral, test-aware static decrease-room
 > constraint to the Stage 1 enumerations, numerical constants, core input models, CSV
 > schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
 > Stage 5 performance classification, Stage 6 trend classification, Stage 7
 > conversion-volume confidence classification, Stage 8 tracking-based assessability,
 > Stage 9 pacing interpretation, Stage 10 static budget-bound facts, Stage 11
 > applicable-change-percentage resolution, Stage 12 raw percentage-based monetary
-> movement cap, and Stage 13 test-floor distance). Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, effective-floor precedence, static-bound/
-> raw-cap/test-floor/protection intersection, effective constraints, increase-side
-> protection behaviour, eligibility, and other derived/decision fields, plus export
-> fields, are pending later stages.
+> movement cap, Stage 13 test-floor distance, and Stage 14 protection constraint).
+> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, percentage-cap
+> intersection, protection application, raw directional intersections, effective
+> constraints, increase-side protection behaviour, eligibility, and other derived/
+> decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -531,11 +531,62 @@ is modified by this addition. How `decrease_blocked` eventually combines with St
 10's static room, Stage 12's raw cap, and Stage 13's test-floor room into any
 effective decrease limit remains an explicitly undecided later-stage question.
 
+## Campaign Test-Aware Static Decrease Room Fields (`src/constraints.py`)
+
+Produced by `resolve_campaign_test_aware_static_decrease_room(static_room:
+CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
+CampaignTestAwareStaticDecreaseRoom`, one result per already-calculated Stage 10 and
+Stage 13 result pair. `CampaignTestAwareStaticDecreaseRoom` is frozen (immutable) and
+rejects unknown fields (`extra="forbid"`). This is a **raw, test-aware static
+constraint only** — it is **not** permissible decrease, **not** an effective
+decrease limit, and does **not** mean the campaign should be reduced. It does not
+account for Stage 12's percentage cap or Stage 14's protection constraint. Depends
+only on `CampaignStaticBudgetRoom.campaign_id`/`room_to_static_minimum` and
+`CampaignTestFloorRoom.campaign_id`/`room_to_test_floor` — never `CampaignInput`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`,
+`CampaignProtectionConstraint`, or `ReviewSetup`. Stage 15 consumes Stage 10's and
+Stage 13's already-approved facts directly — it never calls
+`calculate_campaign_static_budget_room` or `calculate_campaign_test_floor_room`, and
+never recalculates either room from raw budget fields.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `static_room.campaign_id`, after confirming it matches `test_floor_room.campaign_id`. |
+| `test_aware_static_decrease_room` | Decimal | `room_to_static_minimum` when `room_to_test_floor is None` (non-test campaigns); otherwise `min(room_to_static_minimum, room_to_test_floor)`. Never `None`. |
+
+**Business meaning.** `test_budget_floor` is treated as an *additional* retained-spend
+floor for test campaigns — a non-test campaign is constrained only by
+`minimum_budget` at this stage; a test campaign is constrained by both
+`minimum_budget` and `test_budget_floor`, and the stricter (higher) floor controls.
+This is mathematically equivalent to `effective_decrease_floor =
+max(minimum_budget, test_budget_floor)`, expressed instead as the smaller of the two
+already-calculated rooms to avoid recalculating either floor distance.
+
+**Campaign-ID policy.** `static_room.campaign_id` and `test_floor_room.campaign_id`
+must match; a mismatch raises `ValueError("Campaign IDs must match when resolving
+test-aware static decrease room.")` before any monetary result is resolved — neither
+ID is silently preferred.
+
+**Zero behaviour.** `Decimal("0.00")` is a legitimate result when the smaller
+applicable room is zero — it means there is no static room to reduce under the
+combined floor rule, not an eligibility or recommendation judgement.
+
+**No arithmetic is performed.** The selected `Decimal` operand (`room_to_static_minimum`
+or `room_to_test_floor`) is returned unchanged — no subtraction, multiplication,
+division, quantisation, or rounding occurs, and no `Decimal` context is used.
+
+**Separation from percentage caps and protection.** `CampaignTestAwareStaticDecreaseRoom`
+is a separate, independent result model from `CampaignRawPercentageMovementCap` and
+`CampaignProtectionConstraint` — neither is read, and neither is combined with this
+result. Whether/how this constraint eventually intersects with Stage 12's percentage
+cap, or is overridden by Stage 14's protection constraint, remains pending later
+stages.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, effective-floor precedence, static-bound/
-> raw-cap/test-floor/protection intersection, effective constraints, increase-side
+> `Confidence.NOT_ASSESSABLE` ownership, percentage-cap intersection, protection
+> application, raw directional intersections, effective constraints, increase-side
 > protection behaviour, eligibility, scoring, allocation).
 
 ## Export Fields

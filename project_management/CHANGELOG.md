@@ -721,3 +721,94 @@ All notable changes to this project are documented in this file.
   raw-cap/test-floor/protection intersection, increase-side protection behaviour,
   and eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (18 concrete Stage 14 scenarios).
+
+- Sprint 1, Development Stage 15: added `CampaignTestAwareStaticDecreaseRoom` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `test_aware_static_decrease_room:
+  Decimal` only) and `resolve_campaign_test_aware_static_decrease_room(static_room:
+  CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
+  CampaignTestAwareStaticDecreaseRoom` to `src/constraints.py`, alongside but fully
+  separate from Stage 10's `CampaignStaticBudgetRoom`/
+  `calculate_campaign_static_budget_room`, Stage 11's
+  `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+  Stage 12's `CampaignRawPercentageMovementCap`/
+  `calculate_campaign_raw_percentage_movement_cap`, Stage 13's
+  `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, and Stage 14's
+  `CampaignProtectionConstraint`/`resolve_campaign_protection_constraint`, all
+  unmodified. **First approved constraints-domain business precedence rule:**
+  `test_budget_floor` is an *additional* retained-spend floor for test campaigns —
+  the higher of `minimum_budget`/`test_budget_floor` controls, equivalently the
+  smaller of the two already-calculated rooms — resolving the exact question every
+  prior Stage 10–14 addition had deliberately deferred. Exact formula:
+  `test_aware_static_decrease_room = room_to_static_minimum` when
+  `room_to_test_floor is None` (non-test campaigns); otherwise
+  `min(room_to_static_minimum, room_to_test_floor)` — mathematically equivalent to
+  `max(minimum_budget, test_budget_floor)` via `c - max(a, b) = min(c-a, c-b)`. A
+  raw, test-aware static constraint only — not permissible decrease, not an
+  effective decrease limit, does not mean the campaign should be reduced, and does
+  not account for Stage 12's percentage cap or Stage 14's protection constraint.
+  **Consumes Stage 10's and Stage 13's already-approved result objects directly**
+  (never accepts or reads `CampaignInput`, never calls
+  `calculate_campaign_static_budget_room` or `calculate_campaign_test_floor_room`,
+  never recalculates either room) to avoid duplicating their already-tested
+  calculations. Requires `static_room.campaign_id == test_floor_room.campaign_id`,
+  checked before any monetary result is resolved, raising exactly
+  `ValueError("Campaign IDs must match when resolving test-aware static decrease
+  room.")` otherwise with neither ID silently preferred. No arithmetic is performed
+  — the selected `Decimal` operand is returned unchanged; no local `decimal`
+  context, `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, rounding, quantisation, or `float`
+  conversion; ambient global `Decimal` precision cannot affect the result. Fully
+  independent of Stages 11, 12, and 14 — never reads
+  `applicable_max_change_percentage`, `raw_percentage_movement_cap`,
+  `decrease_blocked`, or `is_protected`; a protected campaign receives exactly the
+  same Stage 15 result as an otherwise identical unprotected campaign with matching
+  Stage 10/13 facts. `src/constants.py`, `src/models.py`, `src/validation.py`,
+  `src/metrics.py`, `src/pacing.py`, and `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 15: extended `tests/test_constraints.py` with 39 new
+  tests (all 147 existing Stage 10/11/12/13/14 tests preserved unchanged; 186 tests
+  total) covering result-model shape/immutability/field-type confirmation,
+  incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
+  matching (matching IDs resolve normally, mismatched IDs raise the exact approved
+  `ValueError` message with no result resolved and neither ID silently preferred,
+  the ID-equality guard verified via AST to precede any Decimal selection),
+  non-test `None`-fallback to `room_to_static_minimum` (never converted to zero, the
+  output itself never `None`), test-campaign precedence (test-floor room above,
+  equal to, and below static-minimum room; both individually zero; both
+  simultaneously zero; a parametrised sweep proving the result always equals
+  `min()` of the two inputs), Decimal behaviour (no float conversion, no
+  arithmetic/subtraction/quantisation/rounding via AST and source-text checks,
+  Decimal-context independence including confirming the global context's
+  `prec`/`rounding` are unchanged after the function returns, extreme
+  28-significant-digit Stage 10/13 values handled exactly), authorised-field-access
+  verification (AST: exactly the four approved fields), earlier-stage separation
+  (AST-verified no call to `calculate_campaign_static_budget_room`/
+  `calculate_campaign_test_floor_room`/Stage 11/12/14/3–9 functions, no reference to
+  `CampaignInput`/`ReviewSetup`), protection independence (protected and
+  unprotected source campaigns with identical Stage 10/13 facts produce identical
+  Stage 15 results, `is_protected`/`decrease_blocked` absent from the function
+  source entirely, a campaign both test and protected resolved only from its Stage
+  10/13 facts, no protection-based zero calculated), and integration with
+  `validate_campaign_csv` + `calculate_campaign_static_budget_room` +
+  `calculate_campaign_test_floor_room` over `data/sample_campaigns.csv` (order
+  preserved; `G001=2500.00`, `M001=2000.00`, `G002=4000.00`, `G003=900.00`; Stages
+  10–14's existing sample results independently re-verified via separate calls,
+  never combined; G002's `decrease_blocked=True` and `4000.00` result both
+  preserved separately; G003's `1100.00` static-minimum room and `900.00`
+  test-floor room both remain visible, with Stage 15 selecting `900.00`).
+  `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage 2),
+  `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this
+  stage. Full suite: 527 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30
+  Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 186
+  Stage 10/11/12/13/14/15 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignTestAwareStaticDecreaseRoom` fields;
+  exact non-test/test-campaign formulas; confirmation the output is never `None`;
+  zero meaning; confirmation the result is a raw constraint only; separation from
+  percentage caps and protection), `docs/DECISION_RULES.md` (frozen Stage 15
+  test-aware static decrease-room rule, including the approved retained-spend-floor
+  business meaning; percentage-cap intersection, protection application, raw
+  directional intersections, and eligibility explicitly re-confirmed as pending
+  later stages), and `docs/TEST_SCENARIOS.md` (23 concrete Stage 15 scenarios).

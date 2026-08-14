@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, and 14).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, 14, and 15).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -41,6 +41,16 @@ minimum_budget/maximum_budget/is_test_campaign/test_budget_floor/
 campaign_max_change_percentage/platform/kpi_type and from Stage 10-13 results, the
 absence of any Decimal/monetary output, and scope boundaries (no eligibility, score,
 recommendation, reason code, allocation, or conservation field).
+
+Also covers Stage 15's CampaignTestAwareStaticDecreaseRoom construction/immutability,
+the exact room_to_static_minimum/min(room_to_static_minimum, room_to_test_floor)
+precedence formula, the campaign-ID mismatch error, non-test None-fallback behaviour,
+zero behaviour, no-arithmetic Decimal selection (no subtraction, quantisation or
+rounding), Decimal-context independence, independence from CampaignInput and from
+Stage 11/12/14 results, consumption (not recalculation) of Stage 10/13 facts, and
+scope boundaries (no percentage-cap intersection, no protection application, no
+effective movement, no eligibility/score/recommendation/reason-code/allocation/
+conservation field).
 """
 
 import ast
@@ -66,12 +76,14 @@ from src.constraints import (
     CampaignProtectionConstraint,
     CampaignRawPercentageMovementCap,
     CampaignStaticBudgetRoom,
+    CampaignTestAwareStaticDecreaseRoom,
     CampaignTestFloorRoom,
     calculate_campaign_raw_percentage_movement_cap,
     calculate_campaign_static_budget_room,
     calculate_campaign_test_floor_room,
     resolve_campaign_applicable_change_percentage,
     resolve_campaign_protection_constraint,
+    resolve_campaign_test_aware_static_decrease_room,
 )
 from src.models import CampaignInput, ReviewSetup
 from src.validation import validate_campaign_csv
@@ -2513,3 +2525,604 @@ def test_sample_campaigns_csv_protection_constraint_exact_values_and_order():
     }
     for result in test_floor_results:
         assert result.room_to_test_floor == expected_room_to_test_floor[result.campaign_id]
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — CampaignTestAwareStaticDecreaseRoom result model
+# ---------------------------------------------------------------------------
+
+
+def _static_room(**overrides) -> CampaignStaticBudgetRoom:
+    kwargs = dict(
+        campaign_id="C001",
+        room_to_static_maximum=Decimal("1000.00"),
+        room_to_static_minimum=Decimal("900.00"),
+    )
+    kwargs.update(overrides)
+    return CampaignStaticBudgetRoom(**kwargs)
+
+
+def _test_floor_room(**overrides) -> CampaignTestFloorRoom:
+    kwargs = dict(
+        campaign_id="C001",
+        room_to_test_floor=None,
+    )
+    kwargs.update(overrides)
+    return CampaignTestFloorRoom(**kwargs)
+
+
+def test_campaign_test_aware_static_decrease_room_accepts_exactly_two_fields():
+    assert set(CampaignTestAwareStaticDecreaseRoom.model_fields.keys()) == {
+        "campaign_id",
+        "test_aware_static_decrease_room",
+    }
+
+
+def test_result_campaign_id_is_str_and_room_is_decimal():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(), _test_floor_room()
+    )
+    assert isinstance(result.campaign_id, str)
+    assert isinstance(result.test_aware_static_decrease_room, Decimal)
+
+
+def test_test_aware_static_decrease_room_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignTestAwareStaticDecreaseRoom(
+            campaign_id="C001",
+            test_aware_static_decrease_room=Decimal("900.00"),
+            extra_field="not allowed",
+        )
+
+
+def test_test_aware_static_decrease_room_is_immutable():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(), _test_floor_room()
+    )
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_test_aware_static_decrease_room_has_no_optional_monetary_output():
+    for field_info in CampaignTestAwareStaticDecreaseRoom.model_fields.values():
+        if field_info.annotation is Decimal:
+            continue
+        assert field_info.annotation is str
+
+
+def test_test_aware_static_decrease_room_has_no_eligibility_action_or_judgement_field():
+    field_names = set(CampaignTestAwareStaticDecreaseRoom.model_fields.keys())
+    forbidden = {
+        "effective_decrease_floor",
+        "effective_decrease_room",
+        "permissible_decrease",
+        "raw_percentage_movement_cap",
+        "applicable_max_change_percentage",
+        "decrease_blocked",
+        "is_protected",
+        "eligibility",
+        "blocked",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+    }
+    assert field_names.isdisjoint(forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — campaign identity
+# ---------------------------------------------------------------------------
+
+
+def test_matching_campaign_ids_return_the_exact_campaign_id():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(campaign_id="MATCH-1"), _test_floor_room(campaign_id="MATCH-1")
+    )
+    assert result.campaign_id == "MATCH-1"
+
+
+def test_mismatched_campaign_ids_raise_value_error_with_exact_message():
+    with pytest.raises(ValueError) as exc_info:
+        resolve_campaign_test_aware_static_decrease_room(
+            _static_room(campaign_id="A"), _test_floor_room(campaign_id="B")
+        )
+    assert (
+        str(exc_info.value)
+        == "Campaign IDs must match when resolving test-aware static decrease room."
+    )
+
+
+def test_no_monetary_result_resolved_after_id_mismatch():
+    try:
+        resolve_campaign_test_aware_static_decrease_room(
+            _static_room(campaign_id="A"), _test_floor_room(campaign_id="B")
+        )
+        assert False, "expected ValueError, no result should be resolved"
+    except ValueError:
+        pass
+
+
+def test_neither_input_campaign_id_silently_preferred_on_mismatch():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    # The ID-equality guard (an `if` raising ValueError) must precede any Decimal
+    # selection (an `Assign` to test_aware_static_decrease_room) in the function body.
+    non_docstring_body = [
+        stmt
+        for stmt in func_def.body
+        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+    ]
+    first_stmt = non_docstring_body[0]
+    assert isinstance(first_stmt, ast.If)
+    raises_value_error = any(
+        isinstance(node, ast.Raise) for node in ast.walk(first_stmt)
+    )
+    assert raises_value_error
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — non-test behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_none_room_to_test_floor_returns_room_to_static_minimum():
+    static_room = _static_room(room_to_static_minimum=Decimal("2500.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=None)
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("2500.00")
+
+
+def test_non_test_returned_decimal_is_unchanged_object_value():
+    static_room = _static_room(room_to_static_minimum=Decimal("2500.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(
+        static_room, _test_floor_room(room_to_test_floor=None)
+    )
+    assert result.test_aware_static_decrease_room == static_room.room_to_static_minimum
+
+
+def test_none_is_not_converted_to_zero():
+    static_room = _static_room(room_to_static_minimum=Decimal("2500.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(
+        static_room, _test_floor_room(room_to_test_floor=None)
+    )
+    assert result.test_aware_static_decrease_room != Decimal("0.00")
+
+
+def test_stage_15_output_is_never_none():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(), _test_floor_room(room_to_test_floor=None)
+    )
+    assert result.test_aware_static_decrease_room is not None
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — test-campaign precedence
+# ---------------------------------------------------------------------------
+
+
+def test_test_floor_room_greater_than_static_minimum_returns_static_minimum():
+    static_room = _static_room(room_to_static_minimum=Decimal("900.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("1100.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("900.00")
+
+
+def test_test_floor_room_equal_to_static_minimum_returns_equal_value():
+    static_room = _static_room(room_to_static_minimum=Decimal("1000.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("1000.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("1000.00")
+
+
+def test_test_floor_room_smaller_than_static_minimum_returns_test_floor_room():
+    static_room = _static_room(room_to_static_minimum=Decimal("1100.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("900.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("900.00")
+
+
+def test_test_floor_room_zero_returns_zero():
+    static_room = _static_room(room_to_static_minimum=Decimal("500.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("0.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("0.00")
+
+
+def test_static_minimum_room_zero_returns_zero():
+    static_room = _static_room(room_to_static_minimum=Decimal("0.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("500.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("0.00")
+
+
+def test_both_rooms_zero_returns_zero():
+    static_room = _static_room(room_to_static_minimum=Decimal("0.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("0.00"))
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    "static_min, test_floor, expected",
+    [
+        (Decimal("900.00"), Decimal("1100.00"), Decimal("900.00")),
+        (Decimal("1000.00"), Decimal("1000.00"), Decimal("1000.00")),
+        (Decimal("1100.00"), Decimal("900.00"), Decimal("900.00")),
+        (Decimal("0.00"), Decimal("500.00"), Decimal("0.00")),
+        (Decimal("500.00"), Decimal("0.00"), Decimal("0.00")),
+    ],
+)
+def test_result_is_always_the_smaller_applicable_room(static_min, test_floor, expected):
+    static_room = _static_room(room_to_static_minimum=static_min)
+    test_floor_room = _test_floor_room(room_to_test_floor=test_floor)
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == expected
+    assert result.test_aware_static_decrease_room == min(static_min, test_floor)
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — Decimal behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_no_float_conversion_in_test_aware_static_decrease_room():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    assert "float(" not in source
+
+
+def test_no_arithmetic_subtraction_quantisation_or_rounding():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    assert "quantize" not in source
+    assert "ROUND_HALF_UP" not in source
+    assert "CURRENCY_QUANTUM" not in source
+    assert "localcontext" not in source
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BinOp) for node in ast.walk(tree))
+
+
+def test_mutated_global_decimal_context_does_not_affect_selection():
+    static_room = _static_room(room_to_static_minimum=Decimal("1100.00"))
+    test_floor_room = _test_floor_room(room_to_test_floor=Decimal("900.00"))
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 2
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+        assert result.test_aware_static_decrease_room == Decimal("900.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_global_decimal_context_unchanged_after_function_returns():
+    static_room = _static_room()
+    test_floor_room = _test_floor_room()
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+
+        resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+
+        assert decimal.getcontext().prec == 5
+        assert decimal.getcontext().rounding == decimal.ROUND_DOWN
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_extreme_already_valid_stage_10_and_stage_13_values_handled_safely():
+    extreme_value = Decimal("9" * 26 + ".99")
+    static_room = _static_room(
+        room_to_static_maximum=Decimal("0.00"),
+        room_to_static_minimum=extreme_value,
+    )
+    test_floor_room = _test_floor_room(room_to_test_floor=extreme_value)
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == extreme_value
+
+    smaller_extreme = Decimal("9" * 25 + "8.99")
+    test_floor_room_smaller = _test_floor_room(room_to_test_floor=smaller_extreme)
+    result_smaller = resolve_campaign_test_aware_static_decrease_room(
+        static_room, test_floor_room_smaller
+    )
+    assert result_smaller.test_aware_static_decrease_room == smaller_extreme
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — authorised access
+# ---------------------------------------------------------------------------
+
+
+def test_function_reads_only_four_authorised_fields():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    static_room_param, test_floor_room_param = (arg.arg for arg in func_def.args.args)
+    assert static_room_param == "static_room"
+    assert test_floor_room_param == "test_floor_room"
+
+    static_room_attrs: set[str] = set()
+    test_floor_room_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == static_room_param:
+                static_room_attrs.add(node.attr)
+            elif node.value.id == test_floor_room_param:
+                test_floor_room_attrs.add(node.attr)
+
+    assert static_room_attrs == {"campaign_id", "room_to_static_minimum"}
+    assert test_floor_room_attrs == {"campaign_id", "room_to_test_floor"}
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — earlier-stage separation
+# ---------------------------------------------------------------------------
+
+
+def test_does_not_call_stage_10_stage_13_or_other_earlier_stage_functions():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "calculate_campaign_static_budget_room",
+        "calculate_campaign_test_floor_room",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_raw_percentage_movement_cap",
+        "resolve_campaign_protection_constraint",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_does_not_reference_campaign_input_or_review_setup():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "CampaignInput" not in referenced_names
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+    assert "campaign" not in referenced_names
+
+
+def test_stage_11_12_14_results_unused():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(), _test_floor_room()
+    )
+    assert not hasattr(result, "applicable_max_change_percentage")
+    assert not hasattr(result, "raw_percentage_movement_cap")
+    assert not hasattr(result, "decrease_blocked")
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — protection independence
+# ---------------------------------------------------------------------------
+
+
+def test_protected_and_unprotected_source_campaigns_produce_identical_results():
+    unprotected_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=False,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    protected_campaign = _campaign(
+        campaign_id="C001",
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    result_unprotected = resolve_campaign_test_aware_static_decrease_room(
+        calculate_campaign_static_budget_room(unprotected_campaign),
+        calculate_campaign_test_floor_room(unprotected_campaign),
+    )
+    result_protected = resolve_campaign_test_aware_static_decrease_room(
+        calculate_campaign_static_budget_room(protected_campaign),
+        calculate_campaign_test_floor_room(protected_campaign),
+    )
+    assert (
+        result_unprotected.test_aware_static_decrease_room
+        == result_protected.test_aware_static_decrease_room
+    )
+
+
+def test_protected_status_unavailable_to_function():
+    source = inspect.getsource(resolve_campaign_test_aware_static_decrease_room)
+    assert "is_protected" not in source
+    assert "decrease_blocked" not in source
+    assert "CampaignProtectionConstraint" not in source
+
+
+def test_campaign_both_test_and_protected_resolved_only_from_stage_10_and_13_facts():
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    static_room = calculate_campaign_static_budget_room(campaign)
+    test_floor_room = calculate_campaign_test_floor_room(campaign)
+    protection = resolve_campaign_protection_constraint(campaign)
+    assert protection.decrease_blocked is True
+
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("900.00")
+
+
+def test_no_protection_based_zero_calculated():
+    # A protected campaign whose floors are both non-zero must not receive a
+    # protection-driven zero result.
+    campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=False,
+        test_budget_floor=None,
+    )
+    static_room = calculate_campaign_static_budget_room(campaign)
+    test_floor_room = calculate_campaign_test_floor_room(campaign)
+    result = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    assert result.test_aware_static_decrease_room == Decimal("1100.00")
+    assert result.test_aware_static_decrease_room != Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — scope protection
+# ---------------------------------------------------------------------------
+
+
+def test_no_percentage_cap_effective_constraint_or_later_judgement_output():
+    result = resolve_campaign_test_aware_static_decrease_room(
+        _static_room(), _test_floor_room()
+    )
+    for attr in (
+        "raw_percentage_movement_cap",
+        "applicable_max_change_percentage",
+        "effective_decrease_room",
+        "effective_decrease_floor",
+        "permissible_decrease",
+        "decrease_blocked",
+        "eligibility",
+        "score",
+        "recommendation_action",
+        "reason_code",
+        "allocation",
+        "conservation",
+        "blocked",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — input contract
+# ---------------------------------------------------------------------------
+
+
+def test_none_and_dict_inputs_are_not_silently_converted():
+    with pytest.raises(AttributeError):
+        resolve_campaign_test_aware_static_decrease_room(None, None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        resolve_campaign_test_aware_static_decrease_room(  # type: ignore[arg-type]
+            _static_room(), {"room_to_test_floor": None, "campaign_id": "C001"}
+        )
+    with pytest.raises(AttributeError):
+        resolve_campaign_test_aware_static_decrease_room(  # type: ignore[arg-type]
+            {"campaign_id": "C001", "room_to_static_minimum": Decimal("900.00")},
+            _test_floor_room(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 15 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_test_aware_static_decrease_room_exact_values_and_order():
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    static_rooms = {
+        c.campaign_id: calculate_campaign_static_budget_room(c) for c in report.valid_campaigns
+    }
+    test_floor_rooms = {
+        c.campaign_id: calculate_campaign_test_floor_room(c) for c in report.valid_campaigns
+    }
+    results = [
+        resolve_campaign_test_aware_static_decrease_room(
+            static_rooms[c.campaign_id], test_floor_rooms[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    ]
+    assert [r.campaign_id for r in results] == ["G001", "M001", "G002", "G003"]
+
+    expected = {
+        "G001": Decimal("2500.00"),
+        "M001": Decimal("2000.00"),
+        "G002": Decimal("4000.00"),
+        "G003": Decimal("900.00"),
+    }
+    for result in results:
+        assert result.test_aware_static_decrease_room == expected[result.campaign_id]
+
+    # Independently preserve and verify the existing Stage 10-14 sample outcomes -
+    # never combined with Stage 15's result.
+    expected_static_minimum = {
+        "G001": Decimal("2500.00"),
+        "M001": Decimal("2000.00"),
+        "G002": Decimal("4000.00"),
+        "G003": Decimal("1100.00"),
+    }
+    for campaign_id, room in static_rooms.items():
+        assert room.room_to_static_minimum == expected_static_minimum[campaign_id]
+
+    expected_test_floor = {
+        "G001": None,
+        "M001": None,
+        "G002": None,
+        "G003": Decimal("900.00"),
+    }
+    for campaign_id, room in test_floor_rooms.items():
+        assert room.room_to_test_floor == expected_test_floor[campaign_id]
+
+    protection_results = [
+        resolve_campaign_protection_constraint(c) for c in report.valid_campaigns
+    ]
+    expected_decrease_blocked = {
+        "G001": False,
+        "M001": False,
+        "G002": True,
+        "G003": False,
+    }
+    for result in protection_results:
+        assert result.decrease_blocked == expected_decrease_blocked[result.campaign_id]
+
+    # G002: protection remains decrease_blocked=True, Stage 15's result remains
+    # 4000.00 - the two are never combined, and 4000.00 is never described as
+    # permissible decrease.
+    g002_result = next(r for r in results if r.campaign_id == "G002")
+    assert g002_result.test_aware_static_decrease_room == Decimal("4000.00")
+    g002_protection = next(r for r in protection_results if r.campaign_id == "G002")
+    assert g002_protection.decrease_blocked is True
+
+    # G003: Stage 10's room_to_static_minimum (1100.00) and Stage 13's
+    # room_to_test_floor (900.00) both remain visible and unaltered; Stage 15
+    # selects the smaller (900.00), never described as permissible decrease.
+    assert static_rooms["G003"].room_to_static_minimum == Decimal("1100.00")
+    assert test_floor_rooms["G003"].room_to_test_floor == Decimal("900.00")
+    g003_result = next(r for r in results if r.campaign_id == "G003")
+    assert g003_result.test_aware_static_decrease_room == Decimal("900.00")

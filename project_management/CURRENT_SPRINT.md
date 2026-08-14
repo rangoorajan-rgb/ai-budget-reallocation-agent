@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, and 15 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -518,14 +518,68 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 14 (and not yet started)
+## Development Stage 15 — Deterministic Test-Aware Static Decrease Room (complete)
 
-- Effective-floor precedence (`minimum_budget` vs. `test_budget_floor` vs.
-  `max(minimum_budget, test_budget_floor)` vs. another formulation — still undecided).
-- Static-bound/raw-cap/test-floor/protection intersection, separate effective
-  increase/decrease limits, the effective (final permissible) budget movement.
-- Increase-side protection behaviour (unaddressed by the one frozen `is_protected`
-  sentence, which is decrease-specific only).
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room`, Stage 11's
+      `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+      Stage 12's `CampaignRawPercentageMovementCap`/
+      `calculate_campaign_raw_percentage_movement_cap`, Stage 13's
+      `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, and Stage 14's
+      `CampaignProtectionConstraint`/`resolve_campaign_protection_constraint`
+      unmodified) — `CampaignTestAwareStaticDecreaseRoom` (frozen, `extra="forbid"`:
+      `campaign_id`, `test_aware_static_decrease_room: Decimal`) and
+      `resolve_campaign_test_aware_static_decrease_room(static_room:
+      CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
+      CampaignTestAwareStaticDecreaseRoom`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`
+      unchanged.
+- [x] **First approved constraints-domain business precedence rule:**
+      `test_budget_floor` is an additional retained-spend floor for test campaigns —
+      the higher of `minimum_budget`/`test_budget_floor` controls, equivalently the
+      smaller of the two already-calculated rooms:
+      `test_aware_static_decrease_room = room_to_static_minimum` when
+      `room_to_test_floor is None`; otherwise
+      `min(room_to_static_minimum, room_to_test_floor)`. Mathematically equivalent to
+      `max(minimum_budget, test_budget_floor)` via `c - max(a, b) = min(c-a, c-b)`.
+      Raw constraint only — not permissible decrease, not an effective decrease
+      limit, does not account for Stage 12's percentage cap or Stage 14's protection
+      constraint.
+- [x] Consumes Stage 10's and Stage 13's already-approved result objects directly —
+      never accepts or reads `CampaignInput`, never calls
+      `calculate_campaign_static_budget_room` or `calculate_campaign_test_floor_room`,
+      never recalculates either room. Requires
+      `static_room.campaign_id == test_floor_room.campaign_id`, raising exactly
+      `ValueError("Campaign IDs must match when resolving test-aware static decrease
+      room.")` otherwise, checked before any monetary result is resolved. No
+      arithmetic — the selected `Decimal` operand is returned unchanged; no local
+      context, quantisation, or rounding; ambient global `Decimal` precision cannot
+      affect the result. Fully independent of Stages 11, 12, and 14 — never reads
+      `applicable_max_change_percentage`, `raw_percentage_movement_cap`,
+      `decrease_blocked`, or `is_protected`.
+- [x] `tests/test_constraints.py` extended (all 147 existing Stage 10/11/12/13/14
+      tests preserved unchanged) with 39 new Stage 15 tests — 186 tests total, all
+      passing. `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage
+      2), `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 15 (and not yet started)
+
+- Percentage-cap intersection (Stage 12's `raw_percentage_movement_cap` combined with
+  Stage 15's `test_aware_static_decrease_room`).
+- Protection application (Stage 14's `decrease_blocked` overriding or adjusting
+  Stage 15's result).
+- Raw increase intersection (Stage 10's `room_to_static_maximum` + Stage 12's raw
+  cap — still no frozen combination formula).
+- Effective directional constraints, the effective (final permissible) budget
+  movement.
+- Increase-side protection behaviour (still unaddressed).
 - Combined campaign assessment (performance + trend + confidence + tracking + pacing
   status), `Confidence.NOT_ASSESSABLE` ownership and trigger.
 - Eligibility, scoring, final `RecommendationAction` assignment, `ReasonCode`
@@ -535,13 +589,13 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 15 (not started, scope not yet frozen): requires its own dependency and
+Stage 16 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. Candidates
-include the effective-floor precedence (`minimum_budget` vs. `test_budget_floor` vs.
-their combination — still no frozen formula), the raw increase intersection (Stage
-10's `room_to_static_maximum` + Stage 12's `raw_percentage_movement_cap` — the two
-inputs are complete, but no combination formula is frozen), and the raw decrease
-intersection (now a four-way combination once Stage 10, 12, 13, and 14 are all
-available — no combination formula is frozen for this either). A combined campaign
-assessment stage remains a live but not clearly necessary candidate, as noted in the
-Stage 11 inspection.
+include the raw increase intersection (Stage 10's `room_to_static_maximum` + Stage
+12's `raw_percentage_movement_cap` — both inputs complete, but no combination formula
+is frozen yet, requiring its own explicit business-rule approval analogous to Stage
+15's), and the raw decrease intersection (now simplified to a clean two-way
+`min(Stage 15's result, Stage 12's raw cap)` given Stage 15's combination already
+resolved the static-minimum/test-floor precedence — still requires its own formula
+approval). A combined campaign assessment stage remains a live but not clearly
+necessary candidate, as noted in the Stage 11 inspection.

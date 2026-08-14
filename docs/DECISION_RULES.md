@@ -1,17 +1,18 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 14. Records the frozen enumerations, frozen numerical
+> Sprint 1, Development Stage 15. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
 > tracking-assessability-classification rules, the frozen neutral pacing-interpretation
 > rules, the frozen static budget-bound calculation rules, the frozen applicable-
 > change-percentage resolution rule, the frozen raw percentage-based monetary
-> movement-cap calculation rule, the frozen test-floor distance calculation rule, and
-> the frozen protection constraint rule. Combined assessment, `Confidence.NOT_ASSESSABLE`
-> ownership, effective-floor precedence, static-bound/raw-cap/test-floor/protection
-> intersection, effective constraints, increase-side protection behaviour, eligibility,
-> scoring, and allocation rules are pending later Sprint 1 stages.
+> movement-cap calculation rule, the frozen test-floor distance calculation rule, the
+> frozen protection constraint rule, and the frozen test-aware static decrease-room
+> rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, percentage-cap
+> intersection, protection application, raw directional intersections, effective
+> constraints, increase-side protection behaviour, eligibility, scoring, and
+> allocation rules are pending later Sprint 1 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -827,6 +828,74 @@ Stages 10–13. `CampaignInput` remains the sole authoritative source of
   `decrease_blocked` will eventually combine with Stage 10's static room, Stage 12's
   raw cap, or Stage 13's test-floor room into any effective decrease limit.
 
+## Deterministic Test-Aware Static Decrease Room Rules (Sprint 1, Development Stage 15)
+
+These rules govern the addition to `src/constraints.py` that combines one
+already-calculated `CampaignStaticBudgetRoom` (Stage 10) and one already-calculated
+`CampaignTestFloorRoom` (Stage 13) into one neutral, test-aware static decrease-room
+constraint. Stage 15 is a **raw constraint only** — it is not permissible decrease,
+not an effective decrease limit, and does not mean the campaign should be reduced. It
+does not account for Stage 12's percentage cap or Stage 14's protection constraint.
+`CampaignStaticBudgetRoom` and `CampaignTestFloorRoom` remain the sole authoritative
+sources of `room_to_static_minimum` and `room_to_test_floor`; `src/constraints.py`
+never recalculates either.
+
+- **Approved business rule: `test_budget_floor` is an additional retained-spend
+  floor for test campaigns.** A non-test campaign is constrained only by
+  `minimum_budget` at this stage. A test campaign is constrained by both
+  `minimum_budget` and `test_budget_floor`, and the **higher monetary floor**
+  controls — equivalently, the corresponding decrease room is the **smaller** of the
+  two already-calculated rooms. This is the first constraints-domain precedence rule
+  explicitly approved as a business decision (as opposed to a pure fact calculation)
+  — every prior Stage 10–14 addition deliberately deferred this exact question.
+- **Exact calculation input and authorised fields.** `static_room.campaign_id`,
+  `static_room.room_to_static_minimum`, `test_floor_room.campaign_id`, and
+  `test_floor_room.room_to_test_floor` are the only fields read. No other field of
+  either model is read — in particular, `room_to_static_maximum` is never read. No
+  `CampaignInput`, `CampaignApplicableChangePercentage`,
+  `CampaignRawPercentageMovementCap`, `CampaignProtectionConstraint`, or
+  `ReviewSetup` is ever read or called; `calculate_campaign_static_budget_room` and
+  `calculate_campaign_test_floor_room` are never called (Stage 15 consumes their
+  already-approved outputs, never recalculates them).
+- **Campaign-ID policy.** `static_room.campaign_id` must equal
+  `test_floor_room.campaign_id`, checked before any monetary result is resolved; a
+  mismatch raises exactly `ValueError("Campaign IDs must match when resolving
+  test-aware static decrease room.")`, and no result is returned. Neither ID is
+  silently preferred.
+- **Exact formula:**
+  ```
+  room_to_test_floor is None  → test_aware_static_decrease_room = room_to_static_minimum
+  otherwise                   → test_aware_static_decrease_room = min(room_to_static_minimum, room_to_test_floor)
+  ```
+  Mathematically equivalent to `effective_decrease_floor = max(minimum_budget,
+  test_budget_floor)` via the identity `c - max(a, b) = min(c - a, c - b)` — expressed
+  as a room to avoid recalculating either floor distance from raw budget fields.
+- **`None` and zero behaviour.** `room_to_test_floor is None` (non-test campaigns)
+  resolves to `room_to_static_minimum` unchanged — never replaced with
+  `Decimal("0.00")`. The Stage 15 output itself is never `None`. `Decimal("0.00")` is
+  a legitimate result when the smaller applicable room is zero — it means there is no
+  static room to reduce under the combined floor rule, not an eligibility or
+  recommendation judgement.
+- **No arithmetic.** Stage 15 performs selection and comparison only — no
+  subtraction, multiplication, or division; no local `decimal` context; no
+  `CURRENCY_QUANTUM`; no `ROUND_HALF_UP`; no rounding; no quantisation; no `float`
+  conversion. The selected `Decimal` operand (one of the two inputs) is returned
+  unchanged. Ambient global `Decimal` precision/rounding cannot affect the result,
+  since no arithmetic operation is performed.
+- **Separation from Stages 11, 12, and 14.** `resolve_campaign_test_aware_static_decrease_room`
+  never reads `applicable_max_change_percentage`, `raw_percentage_movement_cap`, or
+  `decrease_blocked`/`is_protected`, and never calls
+  `resolve_campaign_applicable_change_percentage`,
+  `calculate_campaign_raw_percentage_movement_cap`, or
+  `resolve_campaign_protection_constraint`. A protected campaign receives exactly the
+  same Stage 15 result as an otherwise identical unprotected campaign with matching
+  Stage 10/13 facts — no protection-based zero is calculated here.
+- **No permissible movement calculated.** The result carries no effective decrease
+  limit, no percentage-cap intersection, no eligibility field, no blocking flag, no
+  `RecommendationAction`, no `ReasonCode`, no score, and no allocation field. Raw
+  directional intersections (with Stage 12's percentage cap) and effective
+  constraints (applying Stage 14's protection) both remain pending later stages.
+
 ## Pending
 
 - **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
@@ -856,13 +925,14 @@ Stages 10–13. `CampaignInput` remains the sole authoritative source of
   distances (`room_to_static_maximum`/`room_to_static_minimum`), Stage 11 resolved
   which percentage applies to a campaign (`applicable_max_change_percentage`), Stage
   12 resolved the raw percentage-based monetary cap (`raw_percentage_movement_cap`),
-  Stage 13 resolved the raw test-floor distance (`room_to_test_floor`), and Stage 14
-  resolved the decrease-specific protection constraint (`decrease_blocked`, see
-  above), but the effective-floor precedence (`minimum_budget` vs. `test_budget_floor`
-  vs. their combination) remains undecided, increase-side protection behaviour is
-  entirely unaddressed, and no rule computes the campaign's *effective* permissible
-  budget movement (i.e. the intersection of the raw cap with Stage 10's static room,
-  Stage 13's test floor, and Stage 14's protection constraint). No eligibility concept
-  is defined anywhere in the repository. All remain pending later stages.
+  Stage 13 resolved the raw test-floor distance (`room_to_test_floor`), Stage 14
+  resolved the decrease-specific protection constraint (`decrease_blocked`), and
+  Stage 15 resolved the test-aware static decrease room
+  (`test_aware_static_decrease_room`, see above), but increase-side protection
+  behaviour is entirely unaddressed, and no rule computes the campaign's *effective*
+  permissible budget movement (i.e. the intersection of Stage 15's result with Stage
+  12's raw percentage cap, further adjusted for Stage 14's protection constraint). No
+  eligibility concept is defined anywhere in the repository. All remain pending later
+  stages.
 - The full set of `ReasonCode` trigger conditions.
 - Allocation and conservation rules.

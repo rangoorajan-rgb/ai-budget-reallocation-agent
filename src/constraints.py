@@ -89,6 +89,28 @@ no `Decimal` calculation — it is a plain boolean selection, so no `Decimal` im
 local context, quantisation, or rounding is used. Increase-side protection behaviour
 remains entirely unaddressed, since the one frozen sentence about `is_protected` is
 decrease-specific only.
+
+Also implements Sprint 1 — Development Stage 15: for one already-calculated
+`CampaignStaticBudgetRoom` (Stage 10's result) and one already-calculated
+`CampaignTestFloorRoom` (Stage 13's result), combines the two into one neutral,
+test-aware static decrease-room constraint — treating `test_budget_floor` as an
+*additional* retained-spend floor for test campaigns, so the higher of
+`minimum_budget`/`test_budget_floor` controls, equivalently expressed as the smaller
+of the two already-calculated rooms:
+`test_aware_static_decrease_room = room_to_static_minimum` when
+`room_to_test_floor is None` (non-test campaigns), otherwise
+`min(room_to_static_minimum, room_to_test_floor)`. This is a **raw, test-aware static
+constraint only** — not permissible decrease, not an effective decrease limit, and it
+does not mean the campaign should be reduced. It does not account for Stage 12's
+percentage cap or Stage 14's protection constraint. Stage 15 consumes Stage 10's and
+Stage 13's already-approved result objects directly — it never accepts or reads
+`CampaignInput`, never calls `calculate_campaign_static_budget_room` or
+`calculate_campaign_test_floor_room`, and never reads or imports
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`,
+`CampaignProtectionConstraint`, or `ReviewSetup`. It requires
+`static_room.campaign_id == test_floor_room.campaign_id`, raising `ValueError`
+otherwise. No arithmetic is performed — the selected `Decimal` operand is returned
+unchanged, so no local `decimal` context, quantisation, or rounding is used.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -315,4 +337,53 @@ def resolve_campaign_protection_constraint(
     return CampaignProtectionConstraint(
         campaign_id=campaign.campaign_id,
         decrease_blocked=campaign.is_protected,
+    )
+
+
+class CampaignTestAwareStaticDecreaseRoom(BaseModel):
+    """A raw, test-aware static decrease-room constraint for one campaign.
+
+    Not permissible decrease, not an effective decrease limit, and does not mean the
+    campaign should be reduced. Does not account for the Stage 12 percentage cap or
+    the Stage 14 protection constraint.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    test_aware_static_decrease_room: Decimal
+
+
+def resolve_campaign_test_aware_static_decrease_room(
+    static_room: CampaignStaticBudgetRoom,
+    test_floor_room: CampaignTestFloorRoom,
+) -> CampaignTestAwareStaticDecreaseRoom:
+    """Combine one campaign's Stage 10 static-minimum room and Stage 13 test-floor
+    room into one raw, test-aware static decrease-room constraint.
+
+    `test_budget_floor` is treated as an additional retained-spend floor for test
+    campaigns, so the higher of `minimum_budget`/`test_budget_floor` controls —
+    equivalently, the smaller of the two already-calculated rooms:
+    `room_to_static_minimum` when `room_to_test_floor is None` (non-test campaigns),
+    otherwise `min(room_to_static_minimum, room_to_test_floor)`. Requires
+    `static_room.campaign_id == test_floor_room.campaign_id`, raising `ValueError`
+    otherwise. The selected `Decimal` operand is returned unchanged — no arithmetic,
+    quantisation, or rounding is performed.
+    """
+    if static_room.campaign_id != test_floor_room.campaign_id:
+        raise ValueError(
+            "Campaign IDs must match when resolving test-aware static decrease room."
+        )
+
+    if test_floor_room.room_to_test_floor is None:
+        test_aware_static_decrease_room = static_room.room_to_static_minimum
+    else:
+        test_aware_static_decrease_room = min(
+            static_room.room_to_static_minimum,
+            test_floor_room.room_to_test_floor,
+        )
+
+    return CampaignTestAwareStaticDecreaseRoom(
+        campaign_id=static_room.campaign_id,
+        test_aware_static_decrease_room=test_aware_static_decrease_room,
     )

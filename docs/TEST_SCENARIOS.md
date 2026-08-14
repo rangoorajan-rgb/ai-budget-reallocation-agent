@@ -1,15 +1,16 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 14 populates the Protection Constraint Scenarios
-> section below, backed by the Stage 14 additions to `tests/test_constraints.py`
-> (which now holds 147 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35
-> Stage 13 + 28 Stage 14), in addition to the Test-Floor Room Scenarios (Stage 13,
-> below), the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the Applicable
-> Change-Percentage Resolution Scenarios (Stage 11, below), the Static Budget-Bound
-> Scenarios (Stage 10, below), the Stage 9 Pacing Interpretation Scenarios
-> (`tests/test_pacing_interpretation.py`, 33 tests), the Stage 8 Tracking
-> Assessability Scenarios (`tests/test_tracking_assessment.py`, 30 tests), the Stage 7
-> Conversion-Volume Confidence Classification Scenarios
+> Sprint 1, Development Stage 15 populates the Test-Aware Static Decrease Room
+> Scenarios section below, backed by the Stage 15 additions to
+> `tests/test_constraints.py` (which now holds 186 tests total: 25 Stage 10 + 24
+> Stage 11 + 35 Stage 12 + 35 Stage 13 + 28 Stage 14 + 39 Stage 15), in addition to
+> the Protection Constraint Scenarios (Stage 14, below), the Test-Floor Room
+> Scenarios (Stage 13, below), the Raw Percentage Movement-Cap Scenarios (Stage 12,
+> below), the Applicable Change-Percentage Resolution Scenarios (Stage 11, below),
+> the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
+> Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
+> Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
+> tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
 > (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
 > Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
 > Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
@@ -525,6 +526,41 @@ combination with Stages 10–13.
 | 16 | `calculate_campaign_static_budget_room` and `resolve_campaign_protection_constraint` called on the same campaign | Both succeed independently; the protection result contains no `room_to_static_maximum`/`room_to_static_minimum`/`applicable_max_change_percentage`/`raw_percentage_movement_cap`/`room_to_test_floor` field. |
 | 17 | `CampaignProtectionConstraint.model_fields` / result attributes | Contains no `Decimal`-typed field, no `room_to_protection_limit`, `effective_floor`, `permissible_decrease`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
 | 18 | `data/sample_campaigns.csv` validated, each `CampaignInput` processed directly, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001`/`M001`/`G003` (`is_protected=False`) → `decrease_blocked=False`. `G002` (`is_protected=True`) → `decrease_blocked=True`. Stages 10, 11, 12, and 13's existing sample results for all four independently re-verified via separate calls in the same test, never combined or intersected with Stage 14's result. `decrease_blocked=False` is never described as permission to reduce a campaign; `decrease_blocked=True` is never described as eligibility, a recommendation, or final movement. |
+
+## Test-Aware Static Decrease Room Scenarios
+
+All scenarios below use `resolve_campaign_test_aware_static_decrease_room(static_room:
+CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
+CampaignTestAwareStaticDecreaseRoom` from `src/constraints.py`. Every result is a
+**raw, test-aware static constraint only** — none of these scenarios produces
+permissible decrease, an effective decrease limit, a percentage-cap intersection, a
+protection application, eligibility, a recommendation, or an allocation outcome.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignTestAwareStaticDecreaseRoom` field set | Exactly `campaign_id`, `test_aware_static_decrease_room`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignTestAwareStaticDecreaseRoom` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied from `static_room.campaign_id`, after confirming it matches `test_floor_room.campaign_id`. |
+| 5 | Matching campaign IDs on both inputs | Resolves normally. |
+| 6 | Mismatched campaign IDs (e.g. `"A"` vs. `"B"`) | Raises `ValueError("Campaign IDs must match when resolving test-aware static decrease room.")`; no result is resolved; neither ID is silently preferred. |
+| 7 | `resolve_campaign_test_aware_static_decrease_room(None, None)` / dict inputs (not `CampaignStaticBudgetRoom`/`CampaignTestFloorRoom`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | `test_floor_room.room_to_test_floor is None` (non-test campaign) | Returns `static_room.room_to_static_minimum` unchanged — never converted to `Decimal("0.00")`; the output itself is never `None`. |
+| 9 | `room_to_test_floor` greater than `room_to_static_minimum` | Returns `room_to_static_minimum` (the smaller room). |
+| 10 | `room_to_test_floor` equal to `room_to_static_minimum` | Returns the equal value. |
+| 11 | `room_to_test_floor` smaller than `room_to_static_minimum` | Returns `room_to_test_floor` (the smaller room) — G003's actual case. |
+| 12 | `room_to_test_floor = Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 13 | `room_to_static_minimum = Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 14 | Both rooms `Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 15 | Parametrised precedence sweep (five static-minimum/test-floor pairs) | Result always equals `min(room_to_static_minimum, room_to_test_floor)`. |
+| 16 | `resolve_campaign_test_aware_static_decrease_room` source | Reads only `static_room.campaign_id`/`static_room.room_to_static_minimum`/`test_floor_room.campaign_id`/`test_floor_room.room_to_test_floor` (AST-verified); never references `CampaignInput` or `ReviewSetup` (AST-verified); calls none of Stage 10/13's or Stage 3–9's functions (AST-verified); contains no binary arithmetic, `quantize`, `ROUND_HALF_UP`, `CURRENCY_QUANTUM`, `localcontext`, or `float(` (source/AST-verified). |
+| 17 | Global `decimal` context mutated (`prec=2`, `ROUND_DOWN`) before calling the function | Result unaffected — no arithmetic occurs; the global context's `prec`/`rounding` remain exactly as the caller set them after the function returns. |
+| 18 | Extreme already-valid Stage 10/13 values (28-significant-digit `Decimal`) | Handled safely and exactly — the larger or smaller extreme value is selected unchanged, with no precision loss. |
+| 19 | `calculate_campaign_static_budget_room`/`calculate_campaign_test_floor_room` not called by Stage 15 | Confirmed via AST — Stage 15 consumes their already-computed results without recalculating either room from raw budget fields. |
+| 20 | `is_protected=False` vs. `is_protected=True`, same Stage 10/13 facts | Same `test_aware_static_decrease_room` — `is_protected`/`decrease_blocked` never read; no protection-based zero is calculated. |
+| 21 | Campaign both test and protected | Resolved only from its Stage 10/13 facts — `resolve_campaign_protection_constraint`'s `decrease_blocked=True` for the same campaign has no bearing on the Stage 15 result. |
+| 22 | `CampaignTestAwareStaticDecreaseRoom.model_fields` / result attributes | Contains no `effective_decrease_floor`, `effective_decrease_room`, `permissible_decrease`, `raw_percentage_movement_cap`, `applicable_max_change_percentage`, `decrease_blocked`, `is_protected`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
+| 23 | `data/sample_campaigns.csv` validated; Stage 10 and Stage 13 results independently calculated per campaign, then passed to Stage 15, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001 = 2500.00`, `M001 = 2000.00`, `G002 = 4000.00`, `G003 = 900.00`. Stages 10–14's existing sample results independently re-verified via separate calls, never combined. For G002, `decrease_blocked=True` and `test_aware_static_decrease_room=4000.00` both hold simultaneously and separately — `4000.00` is never described as permissible decrease. For G003, `room_to_static_minimum=1100.00` and `room_to_test_floor=900.00` both remain visible; Stage 15 selects `900.00`, never described as permissible decrease. |
 
 ## Allocation Scenarios
 
