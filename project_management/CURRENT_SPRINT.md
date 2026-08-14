@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, and 16 complete)
+**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, and 17 complete)
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -619,13 +619,70 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
       updated.
 
-## Explicitly Out of Scope for Stage 16 (and not yet started)
+## Development Stage 17 — Deterministic Raw Decrease Limit (complete)
 
-- Raw decrease intersection (Stage 15's `test_aware_static_decrease_room` combined
-  with Stage 12's `raw_percentage_movement_cap`).
-- Combined increase/decrease model.
+- [x] `src/constraints.py` (additions only — Stage 10's `CampaignStaticBudgetRoom`/
+      `calculate_campaign_static_budget_room`, Stage 11's
+      `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+      Stage 12's `CampaignRawPercentageMovementCap`/
+      `calculate_campaign_raw_percentage_movement_cap`, Stage 13's
+      `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, Stage 14's
+      `CampaignProtectionConstraint`/`resolve_campaign_protection_constraint`, Stage
+      15's `CampaignTestAwareStaticDecreaseRoom`/
+      `resolve_campaign_test_aware_static_decrease_room`, and Stage 16's
+      `CampaignRawIncreaseLimit`/`resolve_campaign_raw_increase_limit` unmodified) —
+      `CampaignRawDecreaseLimit` (frozen, `extra="forbid"`: `campaign_id`,
+      `raw_decrease_limit: Decimal`) and `resolve_campaign_raw_decrease_limit(decrease_room:
+      CampaignTestAwareStaticDecreaseRoom, raw_cap: CampaignRawPercentageMovementCap) ->
+      CampaignRawDecreaseLimit`. `src/constants.py`, `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`
+      unchanged.
+- [x] **Approved business rule:** both decrease-side constraints apply
+      simultaneously — `test_aware_static_decrease_room` preserves the approved
+      minimum-budget/test-floor constraint (Stage 15); `raw_percentage_movement_cap`
+      limits the size of a change under the applicable percentage rule (Stage 12) —
+      so the smaller value is the binding limit:
+      `raw_decrease_limit = min(test_aware_static_decrease_room,
+      raw_percentage_movement_cap)`. Raw, decrease-specific constraint only — not
+      permission to decrease a budget, not an effective decrease, not eligibility,
+      not a recommendation, and not a final movement amount. A protected campaign
+      still receives its neutral Stage 17 raw result; Stage 14's protection
+      constraint is not applied here.
+- [x] Consumes Stage 15's and Stage 12's already-approved result objects directly —
+      never accepts or reads `CampaignInput`/`ReviewSetup`, never calls
+      `resolve_campaign_test_aware_static_decrease_room` or
+      `calculate_campaign_raw_percentage_movement_cap`, never recalculates either
+      fact. Requires `decrease_room.campaign_id == raw_cap.campaign_id`, raising
+      exactly `ValueError("Campaign IDs must match when resolving raw decrease
+      limit.")` otherwise, checked before any Decimal selection. No arithmetic — the
+      selected `Decimal` operand is returned unchanged; no local context,
+      quantisation, or rounding; ambient global `Decimal` precision cannot affect the
+      result. Fully independent of Stages 10, 11, 13, 14, and 16 — never reads
+      `room_to_static_maximum`, `room_to_static_minimum`,
+      `applicable_max_change_percentage`, `room_to_test_floor`, `decrease_blocked`,
+      `is_protected`, or `raw_increase_limit`; never reopens `minimum_budget`,
+      `test_budget_floor`, `is_test_campaign`, or Stage 15's stricter-floor
+      precedence. Test-campaign status affects Stage 17 only through Stage 15's
+      already-resolved value; protected campaigns receive the same neutral result as
+      otherwise identical unprotected campaigns.
+- [x] `tests/test_constraints.py` extended (all 226 existing Stage 10/11/12/13/14/15/16
+      tests preserved unchanged) with 46 new Stage 17 tests — 272 tests total, all
+      passing. `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage
+      2), `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+      `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+      (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing —
+      no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 17 (and not yet started)
+
 - Protection application (Stage 14's `decrease_blocked` overriding or adjusting
   either direction).
+- Combined increase/decrease model (combining Stage 16's `raw_increase_limit` and
+  Stage 17's `raw_decrease_limit` into one result).
 - Effective directional constraints, the effective (final permissible) budget
   movement.
 - Increase-side protection behaviour (still unaddressed).
@@ -638,11 +695,12 @@ and initial project-management documentation) is complete and is not re-tracked 
 
 ## Next Stage
 
-Stage 17 (not started, scope not yet frozen): requires its own dependency and
+Stage 18 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order. The leading
-candidate is the raw decrease intersection — a clean two-way
-`min(Stage 15's test_aware_static_decrease_room, Stage 12's raw_percentage_movement_cap)`,
-mirroring Stage 16's raw increase limit now that both raw directional intersections
-would share the same shape — still requires its own explicit formula approval. A
-combined campaign assessment stage remains a live but not clearly necessary
-candidate, as noted in the Stage 11 inspection.
+candidate is effective directional constraints — combining Stage 16's
+`raw_increase_limit`, Stage 17's `raw_decrease_limit`, and Stage 14's
+`decrease_blocked` into effective per-direction limits — still requires its own
+explicit business-rule approval (e.g. how protection zeroes or gates the decrease
+side, and whether the increase side needs an analogous rule). A combined campaign
+assessment stage remains a live but not clearly necessary candidate, as noted in the
+Stage 11 inspection.

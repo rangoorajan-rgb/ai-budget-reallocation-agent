@@ -133,6 +133,30 @@ decrease-specific — neither is read. It requires `static_room.campaign_id ==
 raw_cap.campaign_id`, raising `ValueError` otherwise. No arithmetic is performed —
 the selected `Decimal` operand is returned unchanged, so no local `decimal` context,
 quantisation, or rounding is used.
+
+Also implements Sprint 1 — Development Stage 17: for one already-calculated
+`CampaignTestAwareStaticDecreaseRoom` (Stage 15's result) and one already-calculated
+`CampaignRawPercentageMovementCap` (Stage 12's result), combines the two into one
+neutral raw decrease limit — both decrease-side constraints apply simultaneously
+(`test_aware_static_decrease_room` preserves the approved minimum-budget/test-floor
+constraint; `raw_percentage_movement_cap` limits the size of a change under the
+applicable percentage rule), so the smaller value is the binding limit:
+`raw_decrease_limit = min(test_aware_static_decrease_room,
+raw_percentage_movement_cap)`. This is a **raw, decrease-specific constraint only**
+— not permission to decrease a budget, not an effective decrease, not eligibility,
+not a recommendation, and not a final movement amount. A protected campaign still
+receives its neutral Stage 17 raw result — Stage 14's protection constraint is not
+applied here and remains pending a later effective-constraint stage. Stage 17
+consumes Stage 15's and Stage 12's already-approved result objects directly — it
+never accepts or reads `CampaignInput` or `ReviewSetup`, never calls
+`resolve_campaign_test_aware_static_decrease_room` or
+`calculate_campaign_raw_percentage_movement_cap`, and never reads or imports
+`CampaignStaticBudgetRoom`, `CampaignApplicableChangePercentage`,
+`CampaignTestFloorRoom`, `CampaignProtectionConstraint`, or
+`CampaignRawIncreaseLimit`. It requires `decrease_room.campaign_id ==
+raw_cap.campaign_id`, raising `ValueError` otherwise. No arithmetic is performed —
+the selected `Decimal` operand is returned unchanged, so no local `decimal` context,
+quantisation, or rounding is used.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -454,4 +478,51 @@ def resolve_campaign_raw_increase_limit(
     return CampaignRawIncreaseLimit(
         campaign_id=static_room.campaign_id,
         raw_increase_limit=raw_increase_limit,
+    )
+
+
+class CampaignRawDecreaseLimit(BaseModel):
+    """A raw decrease limit for one campaign, intersecting Stage 15's test-aware
+    static decrease room and Stage 12's raw percentage movement cap.
+
+    Not permission to decrease a budget, an effective decrease, eligibility, a
+    recommendation, or a final movement amount.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    raw_decrease_limit: Decimal
+
+
+def resolve_campaign_raw_decrease_limit(
+    decrease_room: CampaignTestAwareStaticDecreaseRoom,
+    raw_cap: CampaignRawPercentageMovementCap,
+) -> CampaignRawDecreaseLimit:
+    """Combine one campaign's Stage 15 test-aware static decrease room and Stage 12
+    raw percentage movement cap into one raw decrease limit.
+
+    Both decrease-side constraints apply simultaneously —
+    `test_aware_static_decrease_room` preserves the approved minimum-budget/test-floor
+    constraint, and `raw_percentage_movement_cap` limits the size of a change under the
+    applicable percentage rule — so the smaller value is the binding limit:
+    `raw_decrease_limit = min(test_aware_static_decrease_room,
+    raw_percentage_movement_cap)`. Requires `decrease_room.campaign_id ==
+    raw_cap.campaign_id`, raising `ValueError` otherwise. The selected `Decimal`
+    operand is returned unchanged — no arithmetic, quantisation, or rounding is
+    performed.
+    """
+    if decrease_room.campaign_id != raw_cap.campaign_id:
+        raise ValueError(
+            "Campaign IDs must match when resolving raw decrease limit."
+        )
+
+    raw_decrease_limit = min(
+        decrease_room.test_aware_static_decrease_room,
+        raw_cap.raw_percentage_movement_cap,
+    )
+
+    return CampaignRawDecreaseLimit(
+        campaign_id=decrease_room.campaign_id,
+        raw_decrease_limit=raw_decrease_limit,
     )
