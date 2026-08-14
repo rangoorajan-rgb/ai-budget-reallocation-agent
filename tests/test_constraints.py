@@ -1,4 +1,4 @@
-"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, 14, 15, 16, and 17).
+"""Tests for src.constraints (Sprint 1 — Development Stages 10, 11, 12, 13, 14, 15, 16, 17, and 18).
 
 Covers CampaignStaticBudgetRoom construction/immutability, the exact
 room_to_static_maximum/room_to_static_minimum formulas, boundary-zero behaviour
@@ -69,6 +69,17 @@ protection independence, test-campaign handling through the Stage 15 result only
 scope boundaries (no raw increase result, no combined directional model, no effective
 decrease, no eligibility/score/recommendation/reason-code/allocation/conservation
 field).
+
+Also covers Stage 18's CampaignEffectiveDecreaseLimit construction/immutability, the
+exact Decimal("0.00")-if-decrease_blocked-else-raw_decrease_limit mapping, the
+campaign-ID mismatch error, the exact two-decimal zero exponent for the protected
+branch, unprotected-operand preservation, Decimal-context independence,
+independence from CampaignInput/ReviewSetup and from Stage 10-13/15/16 results,
+consumption (not recalculation) of Stage 14/17 facts, raw-fact traceability across
+the separately-held Stage 14/17/18 result objects, the eligibility boundary (no
+eligible/ineligible output), and scope boundaries (no effective increase, no
+combined directional model, no eligibility/score/recommendation/reason-code/
+allocation/conservation field).
 """
 
 import ast
@@ -91,6 +102,7 @@ from src.constants import (
 )
 from src.constraints import (
     CampaignApplicableChangePercentage,
+    CampaignEffectiveDecreaseLimit,
     CampaignProtectionConstraint,
     CampaignRawDecreaseLimit,
     CampaignRawIncreaseLimit,
@@ -102,6 +114,7 @@ from src.constraints import (
     calculate_campaign_static_budget_room,
     calculate_campaign_test_floor_room,
     resolve_campaign_applicable_change_percentage,
+    resolve_campaign_effective_decrease_limit,
     resolve_campaign_protection_constraint,
     resolve_campaign_raw_decrease_limit,
     resolve_campaign_raw_increase_limit,
@@ -3173,6 +3186,24 @@ def _decrease_room(**overrides) -> CampaignTestAwareStaticDecreaseRoom:
     return CampaignTestAwareStaticDecreaseRoom(**kwargs)
 
 
+def _protection(**overrides) -> CampaignProtectionConstraint:
+    kwargs = dict(
+        campaign_id="C001",
+        decrease_blocked=False,
+    )
+    kwargs.update(overrides)
+    return CampaignProtectionConstraint(**kwargs)
+
+
+def _raw_decrease(**overrides) -> CampaignRawDecreaseLimit:
+    kwargs = dict(
+        campaign_id="C001",
+        raw_decrease_limit=Decimal("600.00"),
+    )
+    kwargs.update(overrides)
+    return CampaignRawDecreaseLimit(**kwargs)
+
+
 def test_campaign_raw_increase_limit_accepts_exactly_two_fields():
     assert set(CampaignRawIncreaseLimit.model_fields.keys()) == {
         "campaign_id",
@@ -4442,3 +4473,676 @@ def test_sample_campaigns_csv_raw_decrease_limit_exact_values_and_order():
     assert decrease_rooms["G003"].test_aware_static_decrease_room == Decimal("900.00")
     g003_result = next(r for r in results if r.campaign_id == "G003")
     assert g003_result.raw_decrease_limit == Decimal("240.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — CampaignEffectiveDecreaseLimit result model
+# ---------------------------------------------------------------------------
+
+
+def test_campaign_effective_decrease_limit_accepts_exactly_two_fields():
+    assert set(CampaignEffectiveDecreaseLimit.model_fields.keys()) == {
+        "campaign_id",
+        "effective_decrease_limit",
+    }
+
+
+def test_effective_decrease_limit_campaign_id_is_str_and_limit_is_decimal():
+    result = resolve_campaign_effective_decrease_limit(_raw_decrease(), _protection())
+    assert isinstance(result.campaign_id, str)
+    assert isinstance(result.effective_decrease_limit, Decimal)
+
+
+def test_campaign_effective_decrease_limit_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        CampaignEffectiveDecreaseLimit(
+            campaign_id="C001",
+            effective_decrease_limit=Decimal("600.00"),
+            extra_field="not allowed",
+        )
+
+
+def test_campaign_effective_decrease_limit_is_immutable():
+    result = resolve_campaign_effective_decrease_limit(_raw_decrease(), _protection())
+    with pytest.raises(ValidationError):
+        result.campaign_id = "C002"
+
+
+def test_effective_decrease_limit_does_not_repeat_raw_decrease_limit_field():
+    assert "raw_decrease_limit" not in CampaignEffectiveDecreaseLimit.model_fields
+
+
+def test_effective_decrease_limit_does_not_repeat_decrease_blocked_field():
+    assert "decrease_blocked" not in CampaignEffectiveDecreaseLimit.model_fields
+
+
+def test_effective_decrease_limit_has_no_increase_eligibility_action_score_or_allocation_field():
+    field_names = set(CampaignEffectiveDecreaseLimit.model_fields.keys())
+    forbidden = {
+        "raw_increase_limit",
+        "effective_increase_limit",
+        "raw_decrease_limit",
+        "decrease_blocked",
+        "is_protected",
+        "eligibility",
+        "eligible",
+        "action",
+        "recommendation_action",
+        "reason_code",
+        "score",
+        "allocation",
+        "conservation",
+        "blocked",
+    }
+    assert field_names.isdisjoint(forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — campaign identity
+# ---------------------------------------------------------------------------
+
+
+def test_matching_campaign_ids_preserve_campaign_id_exactly_stage18():
+    result = resolve_campaign_effective_decrease_limit(
+        _raw_decrease(campaign_id="MATCH-1"), _protection(campaign_id="MATCH-1")
+    )
+    assert result.campaign_id == "MATCH-1"
+
+
+def test_effective_decrease_limit_mismatched_campaign_ids_raise_value_error_with_exact_message():
+    with pytest.raises(ValueError) as exc_info:
+        resolve_campaign_effective_decrease_limit(
+            _raw_decrease(campaign_id="A"), _protection(campaign_id="B")
+        )
+    assert (
+        str(exc_info.value)
+        == "Campaign IDs must match when resolving effective decrease limit."
+    )
+
+
+def test_id_validation_occurs_before_boolean_and_decimal_selection_stage18():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    non_docstring_body = [
+        stmt
+        for stmt in func_def.body
+        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+    ]
+    first_stmt = non_docstring_body[0]
+    assert isinstance(first_stmt, ast.If)
+    assert any(isinstance(node, ast.Raise) for node in ast.walk(first_stmt))
+
+
+def test_neither_campaign_id_silently_preferred_after_mismatch_stage18():
+    with pytest.raises(ValueError):
+        resolve_campaign_effective_decrease_limit(
+            _raw_decrease(campaign_id="A"), _protection(campaign_id="B")
+        )
+
+
+def test_no_result_returned_after_effective_decrease_limit_mismatch():
+    try:
+        resolve_campaign_effective_decrease_limit(
+            _raw_decrease(campaign_id="A"), _protection(campaign_id="B")
+        )
+        assert False, "expected ValueError, no result should be returned"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — Boolean mapping
+# ---------------------------------------------------------------------------
+
+
+def test_protected_positive_raw_value_returns_zero():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+
+
+def test_unprotected_positive_raw_value_returns_raw_value_unchanged():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=False)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("600.00")
+
+
+def test_protected_zero_raw_value_returns_zero():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("0.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+
+
+def test_unprotected_zero_raw_value_returns_existing_zero_unchanged():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("0.00"))
+    protection = _protection(decrease_blocked=False)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+
+
+@pytest.mark.parametrize("decrease_blocked", [True, False])
+def test_true_and_false_behaviours_are_exhaustive(decrease_blocked):
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("750.00"))
+    protection = _protection(decrease_blocked=decrease_blocked)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    if decrease_blocked:
+        assert result.effective_decrease_limit == Decimal("0.00")
+    else:
+        assert result.effective_decrease_limit == Decimal("750.00")
+
+
+def test_no_truthiness_fallback_changes_approved_boolean_meaning():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BoolOp) for node in ast.walk(tree))
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — exact zero representation
+# ---------------------------------------------------------------------------
+
+
+def test_protected_result_has_same_tuple_as_decimal_zero_dot_zero_zero():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit.as_tuple() == Decimal("0.00").as_tuple()
+
+
+def test_protected_result_does_not_use_decimal_zero_without_exponent():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit.as_tuple() != Decimal("0").as_tuple()
+
+
+def test_protected_result_is_never_none():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit is not None
+
+
+def test_protected_campaign_does_not_raise():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — Decimal behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_no_float_conversion_in_effective_decrease_limit():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    assert "float(" not in source
+
+
+def test_no_arithmetic_rounding_or_quantisation_in_effective_decrease_limit():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    assert "quantize" not in source
+    assert "ROUND_HALF_UP" not in source
+    assert "CURRENCY_QUANTUM" not in source
+    assert "localcontext" not in source
+    tree = ast.parse(source)
+    assert not any(isinstance(node, ast.BinOp) for node in ast.walk(tree))
+
+
+def test_unprotected_operand_returned_unchanged():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=False)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == raw_decrease.raw_decrease_limit
+
+
+def test_mutated_global_decimal_precision_does_not_affect_effective_decrease_limit():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=False)
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 2
+        result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+        assert result.effective_decrease_limit == Decimal("600.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_mutated_global_decimal_rounding_does_not_affect_protected_branch():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+        result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+        assert result.effective_decrease_limit == Decimal("0.00")
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+
+
+def test_global_decimal_context_restored_after_effective_decrease_limit_test():
+    raw_decrease = _raw_decrease()
+    protection = _protection()
+
+    original_prec = decimal.getcontext().prec
+    original_rounding = decimal.getcontext().rounding
+    try:
+        decimal.getcontext().prec = 5
+        decimal.getcontext().rounding = decimal.ROUND_DOWN
+        resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+        assert decimal.getcontext().prec == 5
+        assert decimal.getcontext().rounding == decimal.ROUND_DOWN
+    finally:
+        decimal.getcontext().prec = original_prec
+        decimal.getcontext().rounding = original_rounding
+    assert decimal.getcontext().prec == original_prec
+    assert decimal.getcontext().rounding == original_rounding
+
+
+def test_extreme_valid_raw_decrease_value_unchanged_when_unprotected():
+    extreme_value = Decimal("9" * 26 + ".99")
+    raw_decrease = _raw_decrease(raw_decrease_limit=extreme_value)
+    protection = _protection(decrease_blocked=False)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == extreme_value
+
+
+def test_extreme_valid_raw_decrease_value_becomes_zero_when_protected():
+    extreme_value = Decimal("9" * 26 + ".99")
+    raw_decrease = _raw_decrease(raw_decrease_limit=extreme_value)
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — authorised access
+# ---------------------------------------------------------------------------
+
+
+def test_effective_decrease_limit_function_reads_only_four_authorised_fields():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    raw_decrease_param, protection_param = (arg.arg for arg in func_def.args.args)
+    assert raw_decrease_param == "raw_decrease"
+    assert protection_param == "protection"
+
+    raw_decrease_attrs: set[str] = set()
+    protection_attrs: set[str] = set()
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id == raw_decrease_param:
+                raw_decrease_attrs.add(node.attr)
+            elif node.value.id == protection_param:
+                protection_attrs.add(node.attr)
+
+    assert raw_decrease_attrs == {"campaign_id", "raw_decrease_limit"}
+    assert protection_attrs == {"campaign_id", "decrease_blocked"}
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — earlier-stage separation
+# ---------------------------------------------------------------------------
+
+
+def test_does_not_call_stage_14_stage_17_or_other_earlier_stage_functions():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    called_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called_names.add(node.func.id)
+
+    forbidden_calls = {
+        "resolve_campaign_protection_constraint",
+        "resolve_campaign_raw_decrease_limit",
+        "calculate_campaign_static_budget_room",
+        "resolve_campaign_applicable_change_percentage",
+        "calculate_campaign_raw_percentage_movement_cap",
+        "calculate_campaign_test_floor_room",
+        "resolve_campaign_test_aware_static_decrease_room",
+        "resolve_campaign_raw_increase_limit",
+        "calculate_campaign_metrics",
+        "calculate_campaign_pacing",
+        "classify_campaign_performance",
+        "classify_campaign_trend",
+        "classify_campaign_confidence",
+        "assess_campaign_tracking",
+        "classify_campaign_pacing",
+    }
+    assert called_names.isdisjoint(forbidden_calls)
+
+
+def test_effective_decrease_limit_does_not_reference_campaign_input_or_review_setup():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "CampaignInput" not in referenced_names
+    assert "ReviewSetup" not in referenced_names
+    assert "review" not in referenced_names
+    assert "campaign" not in referenced_names
+
+
+def test_effective_decrease_limit_does_not_reopen_upstream_fields():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    assert "is_protected" not in source
+    assert "current_budget" not in source
+    assert "minimum_budget" not in source
+    assert "maximum_budget" not in source
+    assert "test_budget_floor" not in source
+    assert "is_test_campaign" not in source
+    assert "applicable_max_change_percentage" not in source
+    assert "room_to_static_minimum" not in source
+    assert "room_to_test_floor" not in source
+    assert "test_aware_static_decrease_room" not in source
+    assert "raw_percentage_movement_cap" not in source
+
+
+def test_stage_10_11_12_13_15_16_results_unused_in_effective_decrease_limit():
+    result = resolve_campaign_effective_decrease_limit(_raw_decrease(), _protection())
+    assert not hasattr(result, "room_to_static_maximum")
+    assert not hasattr(result, "room_to_static_minimum")
+    assert not hasattr(result, "applicable_max_change_percentage")
+    assert not hasattr(result, "raw_percentage_movement_cap")
+    assert not hasattr(result, "room_to_test_floor")
+    assert not hasattr(result, "test_aware_static_decrease_room")
+    assert not hasattr(result, "raw_increase_limit")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — increase-side separation
+# ---------------------------------------------------------------------------
+
+
+def test_effective_decrease_limit_does_not_accept_campaign_raw_increase_limit():
+    source = inspect.getsource(resolve_campaign_effective_decrease_limit)
+    tree = ast.parse(source)
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "CampaignRawIncreaseLimit" not in referenced_names
+    assert "raw_increase_limit" not in referenced_names
+    assert "resolve_campaign_raw_increase_limit" not in referenced_names
+
+
+def test_no_effective_increase_limit_field_or_model_exists():
+    assert "effective_increase_limit" not in CampaignEffectiveDecreaseLimit.model_fields
+    import src.constraints as constraints_module
+
+    assert not hasattr(constraints_module, "CampaignEffectiveIncreaseLimit")
+    assert not hasattr(constraints_module, "resolve_campaign_effective_increase_limit")
+
+
+def test_protected_status_given_no_increase_side_meaning():
+    protected_campaign = _campaign(
+        current_budget=Decimal("5000.00"),
+        minimum_budget=Decimal("1000.00"),
+        maximum_budget=Decimal("8000.00"),
+        spend_to_date=Decimal("4950.00"),
+        is_protected=True,
+    )
+    percentage = _applicable_percentage(
+        campaign_id=protected_campaign.campaign_id,
+        applicable_max_change_percentage=Decimal("0.20"),
+    )
+    static_room = calculate_campaign_static_budget_room(protected_campaign)
+    raw_cap = calculate_campaign_raw_percentage_movement_cap(protected_campaign, percentage)
+    increase_result = resolve_campaign_raw_increase_limit(static_room, raw_cap)
+    assert increase_result.raw_increase_limit == min(
+        static_room.room_to_static_maximum, raw_cap.raw_percentage_movement_cap
+    )
+
+
+def test_no_combined_directional_result_created():
+    field_names = set(CampaignEffectiveDecreaseLimit.model_fields.keys())
+    assert "raw_increase_limit" not in field_names
+    assert "effective_increase_limit" not in field_names
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — traceability
+# ---------------------------------------------------------------------------
+
+
+def test_stage14_boolean_remains_preserved_separately():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert protection.decrease_blocked is True
+
+
+def test_stage17_raw_decimal_remains_preserved_separately():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert raw_decrease.raw_decrease_limit == Decimal("600.00")
+
+
+def test_resolving_effective_decrease_limit_does_not_mutate_either_input():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    with pytest.raises(ValidationError):
+        raw_decrease.raw_decrease_limit = Decimal("999.00")
+    with pytest.raises(ValidationError):
+        protection.decrease_blocked = False
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — eligibility boundary
+# ---------------------------------------------------------------------------
+
+
+def test_no_eligible_or_ineligible_output():
+    result = resolve_campaign_effective_decrease_limit(_raw_decrease(), _protection())
+    assert not hasattr(result, "eligible")
+    assert not hasattr(result, "ineligible")
+    assert not hasattr(result, "eligibility")
+
+
+def test_zero_effective_decrease_does_not_imply_whole_campaign_ineligibility():
+    raw_decrease = _raw_decrease(raw_decrease_limit=Decimal("600.00"))
+    protection = _protection(decrease_blocked=True)
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+    # No eligibility field exists anywhere on the result - a zero
+    # effective_decrease_limit says only that no decrease room remains; it
+    # says nothing about MAINTAIN or INCREASE eligibility.
+    assert set(CampaignEffectiveDecreaseLimit.model_fields.keys()) == {
+        "campaign_id",
+        "effective_decrease_limit",
+    }
+
+
+def test_no_recommendation_action_reason_code_score_or_allocation_output():
+    result = resolve_campaign_effective_decrease_limit(_raw_decrease(), _protection())
+    for attr in (
+        "recommendation_action",
+        "reason_code",
+        "score",
+        "prioritisation",
+        "allocation",
+        "conservation",
+    ):
+        assert not hasattr(result, attr)
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — input contract
+# ---------------------------------------------------------------------------
+
+
+def test_effective_decrease_limit_none_and_dict_inputs_not_silently_converted():
+    with pytest.raises(AttributeError):
+        resolve_campaign_effective_decrease_limit(None, None)  # type: ignore[arg-type]
+    with pytest.raises(AttributeError):
+        resolve_campaign_effective_decrease_limit(  # type: ignore[arg-type]
+            _raw_decrease(), {"decrease_blocked": True, "campaign_id": "C001"}
+        )
+    with pytest.raises(AttributeError):
+        resolve_campaign_effective_decrease_limit(  # type: ignore[arg-type]
+            {"campaign_id": "C001", "raw_decrease_limit": Decimal("600.00")},
+            _protection(),
+        )
+
+
+def test_no_production_batch_function_for_effective_decrease_limit():
+    import src.constraints as constraints_module
+
+    assert not hasattr(constraints_module, "resolve_campaign_effective_decrease_limits")
+    assert not hasattr(constraints_module, "calculate_effective_decrease_limits")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — protected test campaign
+# ---------------------------------------------------------------------------
+
+
+def test_protected_test_campaign_produces_zero_effective_decrease_limit():
+    protected_test_campaign = _campaign(
+        current_budget=Decimal("1200.00"),
+        minimum_budget=Decimal("100.00"),
+        maximum_budget=Decimal("2000.00"),
+        spend_to_date=Decimal("300.00"),
+        is_protected=True,
+        is_test_campaign=True,
+        test_budget_floor=Decimal("300.00"),
+    )
+    percentage = _applicable_percentage(
+        campaign_id=protected_test_campaign.campaign_id,
+        applicable_max_change_percentage=Decimal("0.20"),
+    )
+    static_room = calculate_campaign_static_budget_room(protected_test_campaign)
+    test_floor_room = calculate_campaign_test_floor_room(protected_test_campaign)
+    decrease_room = resolve_campaign_test_aware_static_decrease_room(static_room, test_floor_room)
+    raw_cap = calculate_campaign_raw_percentage_movement_cap(protected_test_campaign, percentage)
+    raw_decrease = resolve_campaign_raw_decrease_limit(decrease_room, raw_cap)
+    protection = resolve_campaign_protection_constraint(protected_test_campaign)
+
+    assert protection.decrease_blocked is True
+    assert raw_decrease.raw_decrease_limit == min(
+        decrease_room.test_aware_static_decrease_room, raw_cap.raw_percentage_movement_cap
+    )
+
+    result = resolve_campaign_effective_decrease_limit(raw_decrease, protection)
+    assert result.effective_decrease_limit == Decimal("0.00")
+    # Raw value remains independently approved and unaltered - not recalculated
+    # inside Stage 18.
+    assert raw_decrease.raw_decrease_limit != Decimal("0.00")
+
+
+# ---------------------------------------------------------------------------
+# Stage 18 — sample-data integration
+# ---------------------------------------------------------------------------
+
+
+def test_sample_campaigns_csv_effective_decrease_limit_exact_values_and_order():
+    review = _review(default_max_change_percentage=Decimal("0.20"))
+    with open(DATA_DIR / "sample_campaigns.csv", newline="", encoding="utf-8") as f:
+        report = validate_campaign_csv(f)
+    assert report.is_valid is True
+    assert len(report.valid_campaigns) == 4
+
+    static_rooms = {
+        c.campaign_id: calculate_campaign_static_budget_room(c) for c in report.valid_campaigns
+    }
+    percentages = {
+        c.campaign_id: resolve_campaign_applicable_change_percentage(review, c)
+        for c in report.valid_campaigns
+    }
+    raw_caps = {
+        c.campaign_id: calculate_campaign_raw_percentage_movement_cap(c, percentages[c.campaign_id])
+        for c in report.valid_campaigns
+    }
+    test_floor_rooms = {
+        c.campaign_id: calculate_campaign_test_floor_room(c) for c in report.valid_campaigns
+    }
+    decrease_rooms = {
+        c.campaign_id: resolve_campaign_test_aware_static_decrease_room(
+            static_rooms[c.campaign_id], test_floor_rooms[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    }
+    protection_results = {
+        c.campaign_id: resolve_campaign_protection_constraint(c) for c in report.valid_campaigns
+    }
+    increase_results = {
+        c.campaign_id: resolve_campaign_raw_increase_limit(
+            static_rooms[c.campaign_id], raw_caps[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    }
+    raw_decrease_results = {
+        c.campaign_id: resolve_campaign_raw_decrease_limit(
+            decrease_rooms[c.campaign_id], raw_caps[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    }
+
+    results = [
+        resolve_campaign_effective_decrease_limit(
+            raw_decrease_results[c.campaign_id], protection_results[c.campaign_id]
+        )
+        for c in report.valid_campaigns
+    ]
+    assert [r.campaign_id for r in results] == ["G001", "M001", "G002", "G003"]
+
+    expected = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("0.00"),
+        "G003": Decimal("240.00"),
+    }
+    for result in results:
+        assert result.effective_decrease_limit == expected[result.campaign_id]
+
+    # Independently preserve and verify existing Stage 10-17 sample outcomes -
+    # never combined with Stage 18's result.
+    expected_raw_decrease = {
+        "G001": Decimal("600.00"),
+        "M001": Decimal("375.00"),
+        "G002": Decimal("1000.00"),
+        "G003": Decimal("240.00"),
+    }
+    for campaign_id, raw_result in raw_decrease_results.items():
+        assert raw_result.raw_decrease_limit == expected_raw_decrease[campaign_id]
+
+    expected_decrease_blocked = {
+        "G001": False,
+        "M001": False,
+        "G002": True,
+        "G003": False,
+    }
+    for campaign_id, protection in protection_results.items():
+        assert protection.decrease_blocked == expected_decrease_blocked[campaign_id]
+
+    for campaign_id, increase_result in increase_results.items():
+        assert increase_result.raw_increase_limit == expected_raw_decrease[campaign_id]
+
+    # G002: decrease_blocked=True, raw_decrease_limit=1000.00, and
+    # effective_decrease_limit=0.00 all hold simultaneously and separately.
+    # Stage 17 remains unchanged; no increase-side rule is applied; zero is not
+    # described as whole-campaign ineligibility.
+    assert protection_results["G002"].decrease_blocked is True
+    assert raw_decrease_results["G002"].raw_decrease_limit == Decimal("1000.00")
+    g002_result = next(r for r in results if r.campaign_id == "G002")
+    assert g002_result.effective_decrease_limit == Decimal("0.00")
+    assert increase_results["G002"].raw_increase_limit == Decimal("1000.00")
+
+    # G003: test campaign, unprotected. raw_decrease_limit=240.00 passes through
+    # unchanged; Stage 15's test-floor logic is not reopened.
+    assert protection_results["G003"].decrease_blocked is False
+    assert raw_decrease_results["G003"].raw_decrease_limit == Decimal("240.00")
+    g003_result = next(r for r in results if r.campaign_id == "G003")
+    assert g003_result.effective_decrease_limit == Decimal("240.00")

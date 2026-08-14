@@ -1,18 +1,18 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 17 (adds a neutral raw decrease limit, intersecting
-> Stage 15's test-aware static decrease room and Stage 12's raw percentage movement
-> cap, to the Stage 1 enumerations, numerical constants, core input models, CSV
-> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts,
-> Stage 5 performance classification, Stage 6 trend classification, Stage 7
-> conversion-volume confidence classification, Stage 8 tracking-based assessability,
-> Stage 9 pacing interpretation, Stage 10 static budget-bound facts, Stage 11
-> applicable-change-percentage resolution, Stage 12 raw percentage-based monetary
-> movement cap, Stage 13 test-floor distance, Stage 14 protection constraint, Stage 15
-> test-aware static decrease room, and Stage 16 raw increase limit). Combined
-> assessment, `Confidence.NOT_ASSESSABLE` ownership, protection application, combined
-> directional limits, effective constraints, eligibility, and other derived/decision
-> fields, plus export fields, are pending later stages.
+> Sprint 1, Development Stage 18 (adds a protection-adjusted effective decrease
+> limit, applying Stage 14's protection constraint to Stage 17's raw decrease limit,
+> to the Stage 1 enumerations, numerical constants, core input models, CSV schema,
+> Stage 2 validation reporting, Stage 3 metric facts, Stage 4 pacing facts, Stage 5
+> performance classification, Stage 6 trend classification, Stage 7 conversion-volume
+> confidence classification, Stage 8 tracking-based assessability, Stage 9 pacing
+> interpretation, Stage 10 static budget-bound facts, Stage 11 applicable-change-
+> percentage resolution, Stage 12 raw percentage-based monetary movement cap, Stage 13
+> test-floor distance, Stage 14 protection constraint, Stage 15 test-aware static
+> decrease room, Stage 16 raw increase limit, and Stage 17 raw decrease limit).
+> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, effective increase,
+> eligibility, and other derived/decision fields, plus export fields, are pending
+> later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -689,11 +689,75 @@ combined increase/decrease model is produced. Whether/how this constraint eventu
 combines with Stage 14's protection constraint, or is adjusted for effective
 constraints, remains pending later stages.
 
+## Campaign Effective Decrease Limit Fields (`src/constraints.py`)
+
+Produced by `resolve_campaign_effective_decrease_limit(raw_decrease:
+CampaignRawDecreaseLimit, protection: CampaignProtectionConstraint) ->
+CampaignEffectiveDecreaseLimit`, one result per already-calculated Stage 17 and
+Stage 14 result pair. `CampaignEffectiveDecreaseLimit` is frozen (immutable) and
+rejects unknown fields (`extra="forbid"`). The output represents the effective
+decrease limit under the currently approved static minimum-budget constraint,
+test-floor constraint, percentage movement constraint, and protection constraint.
+It is **still not** eligibility, a recommendation, a final movement amount, an
+allocation, or a decision to decrease the campaign — a campaign with
+`effective_decrease_limit == Decimal("0.00")` may still later be eligible for
+`MAINTAIN` or `INCREASE`. Depends only on
+`CampaignRawDecreaseLimit.campaign_id`/`raw_decrease_limit` and
+`CampaignProtectionConstraint.campaign_id`/`decrease_blocked` — never
+`CampaignInput`, `ReviewSetup`, `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`,
+`CampaignTestFloorRoom`, `CampaignTestAwareStaticDecreaseRoom`, or
+`CampaignRawIncreaseLimit`/`raw_increase_limit`. Stage 18 consumes Stage 17's and
+Stage 14's already-approved facts directly — it never calls
+`resolve_campaign_raw_decrease_limit` or `resolve_campaign_protection_constraint`,
+and never recalculates either fact.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `raw_decrease.campaign_id`, after confirming it matches `protection.campaign_id`. |
+| `effective_decrease_limit` | Decimal | `Decimal("0.00")` when `decrease_blocked` is `True`; otherwise `raw_decrease_limit` unchanged. Never `None`. |
+
+**Protected mapping.** When `decrease_blocked=True`, protection prohibits reducing
+the campaign, so `effective_decrease_limit = Decimal("0.00")` — a deliberate,
+computed effective constraint, never missing data, regardless of whether
+`raw_decrease_limit` was positive, zero, or an extreme valid monetary value. The
+raw Stage 17 decrease limit remains preserved separately and unaltered in
+`CampaignRawDecreaseLimit`.
+
+**Unprotected mapping.** When `decrease_blocked=False`, protection itself adds no
+further restriction — `effective_decrease_limit = raw_decrease_limit`, returned
+unchanged. This does not mean that a decrease should occur.
+
+**Zero and `None` behaviour.** `Decimal("0.00")` is always a legitimate effective
+result, whether it originates from the protected branch or from an already-zero raw
+decrease limit passing through unchanged (Stage 18 does not distinguish or record
+which cause produced it — that distinction remains independently visible via the
+separately-held Stage 14/17 results). Neither input field is optional, and the
+output is never `None` — no fallback value is ever substituted.
+
+**No arithmetic is performed.** The unprotected branch returns the selected
+`Decimal` operand unchanged; the protected branch constructs the literal
+`Decimal("0.00")`. No subtraction, multiplication, division, quantisation, or
+rounding occurs, and no `Decimal` context is used.
+
+**Raw and protection facts remain separate.** `CampaignEffectiveDecreaseLimit` does
+not repeat `raw_decrease_limit` or `decrease_blocked` as fields — a caller retains
+traceability by holding `CampaignProtectionConstraint` (Stage 14),
+`CampaignRawDecreaseLimit` (Stage 17), and `CampaignEffectiveDecreaseLimit` (Stage
+18) as three separate, independently inspectable result objects.
+
+**No effective increase is produced.** Stage 18 does not create
+`CampaignEffectiveIncreaseLimit`, an `effective_increase_limit` field, or any
+combined effective-directional result. No approved constraint remains to transform
+Stage 16's raw increase limit, and protection has no approved increase-side effect
+— `CampaignRawIncreaseLimit` remains the authoritative increase-side constraint
+unless a later approved rule changes it.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, protection application, combined directional
-> limits, effective constraints, eligibility, scoring, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, effective increase, eligibility, scoring,
+> allocation).
 
 ## Export Fields
 

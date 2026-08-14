@@ -1,12 +1,13 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 17 populates the Raw Decrease Limit Scenarios section
-> below, backed by the Stage 17 additions to `tests/test_constraints.py` (which now
-> holds 272 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage 13 + 28
-> Stage 14 + 39 Stage 15 + 40 Stage 16 + 46 Stage 17), in addition to the Raw
-> Increase Limit Scenarios (Stage 16, below), the Test-Aware Static Decrease Room
-> Scenarios (Stage 15, below), the Protection Constraint Scenarios (Stage 14, below),
-> the Test-Floor Room Scenarios (Stage 13, below), the Raw Percentage Movement-Cap
+> Sprint 1, Development Stage 18 populates the Effective Decrease Limit Scenarios
+> section below, backed by the Stage 18 additions to `tests/test_constraints.py`
+> (which now holds 322 tests total: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35
+> Stage 13 + 28 Stage 14 + 39 Stage 15 + 40 Stage 16 + 46 Stage 17 + 50 Stage 18), in
+> addition to the Raw Decrease Limit Scenarios (Stage 17, below), the Raw Increase
+> Limit Scenarios (Stage 16, below), the Test-Aware Static Decrease Room Scenarios
+> (Stage 15, below), the Protection Constraint Scenarios (Stage 14, below), the
+> Test-Floor Room Scenarios (Stage 13, below), the Raw Percentage Movement-Cap
 > Scenarios (Stage 12, below), the Applicable Change-Percentage Resolution Scenarios
 > (Stage 11, below), the Static Budget-Bound Scenarios (Stage 10, below), the Stage 9
 > Pacing
@@ -637,6 +638,45 @@ movement amount.
 | 24 | `CampaignRawIncreaseLimit`/`raw_increase_limit`/`resolve_campaign_raw_increase_limit` | Never referenced by Stage 17's source (AST-verified); `CampaignRawDecreaseLimit.model_fields` contains no `raw_increase_limit` field — no combined directional model is created. |
 | 25 | `CampaignRawDecreaseLimit.model_fields` / result attributes | Contains no `raw_increase_limit`, `room_to_static_maximum`, `decrease_blocked`, `is_protected`, `effective_decrease`, `permissible_decrease`, `eligibility`, `blocked`, `score`, `recommendation_action`, `reason_code`, `allocation`, or `conservation` field. |
 | 26 | `data/sample_campaigns.csv` validated; Stage 10–16 results independently calculated per campaign, then only the Stage 15 and Stage 12 result objects passed to Stage 17, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=600.00`, `M001=375.00`, `G002=1000.00`, `G003=240.00`. Stages 10–16's existing sample results independently re-verified via separate calls, never combined. For G002, `decrease_blocked=True` and `raw_decrease_limit=1000.00` both hold simultaneously and separately — never combined, and `Decimal("1000.00")` is never described as permissible decrease. For G003, Stage 13's `room_to_test_floor=900.00` and Stage 15's `test_aware_static_decrease_room=900.00` remain unaltered; Stage 17's `raw_decrease_limit=240.00` is bound by the percentage cap, and the test-floor rule is not reopened or recalculated. |
+
+## Effective Decrease Limit Scenarios
+
+All scenarios below use `resolve_campaign_effective_decrease_limit(raw_decrease:
+CampaignRawDecreaseLimit, protection: CampaignProtectionConstraint) ->
+CampaignEffectiveDecreaseLimit` from `src/constraints.py`. Every result represents
+the effective decrease limit under the currently approved static minimum-budget,
+test-floor, percentage movement, and protection constraints — none of these
+scenarios produces eligibility, a recommendation, a final movement amount, an
+allocation, or a decision to decrease the campaign.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignEffectiveDecreaseLimit` field set | Exactly `campaign_id`, `effective_decrease_limit`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignEffectiveDecreaseLimit` instance | Rejected (`frozen=True`). |
+| 4 | `campaign_id` on the result | Copied from `raw_decrease.campaign_id`, after confirming it matches `protection.campaign_id`. |
+| 5 | Matching campaign IDs on both inputs | Resolves normally. |
+| 6 | Mismatched campaign IDs (e.g. `"A"` vs. `"B"`) | Raises `ValueError("Campaign IDs must match when resolving effective decrease limit.")`; no result is resolved; neither ID is silently preferred. |
+| 7 | `resolve_campaign_effective_decrease_limit(None, None)` / dict inputs (not `CampaignRawDecreaseLimit`/`CampaignProtectionConstraint`) | Raises a normal Python `AttributeError` — no silent coercion. |
+| 8 | Protected campaign (`decrease_blocked=True`), positive raw decrease value | Returns `Decimal("0.00")`. |
+| 9 | Unprotected campaign (`decrease_blocked=False`), positive raw decrease value | Returns the raw value unchanged. |
+| 10 | Protected campaign, raw decrease value already `Decimal("0.00")` | Returns `Decimal("0.00")`. |
+| 11 | Unprotected campaign, raw decrease value already `Decimal("0.00")` | Returns the existing zero unchanged. |
+| 12 | `decrease_blocked` at every value (`True`/`False`), exhaustive parametrised sweep | `True` always yields `Decimal("0.00")`; `False` always yields the raw value unchanged — no `BoolOp`/truthiness fallback alters the mapping (AST-verified). |
+| 13 | Protected result's `Decimal` tuple | Equals `Decimal("0.00").as_tuple()` exactly — the two-decimal currency exponent is preserved, never `Decimal("0")`'s zero-exponent tuple. |
+| 14 | Protected campaign | Never returns `None`; never raises. |
+| 15 | Unprotected operand | Returned unchanged — equals `raw_decrease.raw_decrease_limit` by identity of value. |
+| 16 | `resolve_campaign_effective_decrease_limit` source | Reads only `raw_decrease.campaign_id`/`raw_decrease.raw_decrease_limit`/`protection.campaign_id`/`protection.decrease_blocked` (AST-verified); never references `CampaignInput` or `ReviewSetup` (AST-verified); calls none of `resolve_campaign_raw_decrease_limit`/`resolve_campaign_protection_constraint`/Stage 10/11/12/13/15/16/3–9's functions (AST-verified); contains no binary arithmetic, `quantize`, `ROUND_HALF_UP`, `CURRENCY_QUANTUM`, `localcontext`, or `float(` (source/AST-verified); the campaign-ID equality guard is verified via AST to precede any Boolean/Decimal selection; source text contains no reference to `is_protected`/`current_budget`/`minimum_budget`/`maximum_budget`/`test_budget_floor`/`is_test_campaign`/`applicable_max_change_percentage`/`room_to_static_minimum`/`room_to_test_floor`/`test_aware_static_decrease_room`/`raw_percentage_movement_cap`, confirming no upstream fact is reopened. |
+| 17 | Global `decimal` context mutated (`prec`/`rounding`) before calling the function, for both the protected and unprotected branches | Result unaffected in both branches — no arithmetic occurs; the global context's `prec`/`rounding` remain exactly as the caller set them after the function returns. |
+| 18 | Extreme already-valid Stage 17 value (28-significant-digit `Decimal`), unprotected | Passed through unchanged, no precision loss. |
+| 19 | Extreme already-valid Stage 17 value, protected | Becomes `Decimal("0.00")` regardless of magnitude. |
+| 20 | `resolve_campaign_raw_decrease_limit`/`resolve_campaign_protection_constraint` not called by Stage 18 | Confirmed via AST — Stage 18 consumes their already-computed results without recalculating either fact. |
+| 21 | `CampaignRawIncreaseLimit`/`raw_increase_limit`/`resolve_campaign_raw_increase_limit` | Never referenced by Stage 18's source (AST-verified); no `effective_increase_limit` field or `CampaignEffectiveIncreaseLimit` model exists anywhere in `src/constraints.py`; protected status is never given increase-side meaning; no combined directional result is created. |
+| 22 | Protected test campaign (synthetic fixture: `is_protected=True`, `is_test_campaign=True`, `test_budget_floor` set) | Produces `Decimal("0.00")` — Stage 15's test-floor precedence and Stage 14's protection are each independently resolved upstream and simply consumed, never recalculated inside Stage 18. |
+| 23 | Stage 14 `CampaignProtectionConstraint.decrease_blocked` and Stage 17 `CampaignRawDecreaseLimit.raw_decrease_limit`, after resolving Stage 18 | Both remain unchanged on their own frozen objects — Stage 18 never mutates either input. |
+| 24 | `CampaignEffectiveDecreaseLimit.model_fields` / result attributes | Contains no `raw_decrease_limit`, `decrease_blocked`, `raw_increase_limit`, `effective_increase_limit`, `eligible`, `eligibility`, `recommendation_action`, `reason_code`, `score`, `allocation`, or `conservation` field. |
+| 25 | `effective_decrease_limit == Decimal("0.00")` | Does not imply whole-campaign ineligibility — no eligibility field exists anywhere on the result, and the zero states only that no decrease room remains under this constraint; `MAINTAIN`/`INCREASE` eligibility remains an entirely open, later-stage question. |
+| 26 | `data/sample_campaigns.csv` validated; Stage 10–17 results independently calculated per campaign, then only the Stage 17 and Stage 14 result objects passed to Stage 18, iterating in the test (no production batch function) | Order preserved (`G001`, `M001`, `G002`, `G003`). `G001=600.00`, `M001=375.00`, `G002=0.00`, `G003=240.00`. Stages 10–17's existing sample results independently re-verified via separate calls, never combined. For G002: `decrease_blocked=True`, `raw_decrease_limit=1000.00`, and `effective_decrease_limit=0.00` all hold simultaneously and separately; Stage 17 remains unchanged; no increase-side rule is applied (`raw_increase_limit=1000.00` unaffected); zero is not described as whole-campaign ineligibility. For G003 (test campaign, unprotected): `raw_decrease_limit=240.00` passes through unchanged to `effective_decrease_limit=240.00`, and Stage 15's test-floor logic is not reopened. |
 
 ## Allocation Scenarios
 

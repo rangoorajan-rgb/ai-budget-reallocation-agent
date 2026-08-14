@@ -1001,3 +1001,119 @@ All notable changes to this project are documented in this file.
   protection application, combined directional limits, effective constraints, and
   eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (26 concrete Stage 17 scenarios).
+
+- Sprint 1, Development Stage 18: added `CampaignEffectiveDecreaseLimit` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `effective_decrease_limit: Decimal`
+  only) and `resolve_campaign_effective_decrease_limit(raw_decrease:
+  CampaignRawDecreaseLimit, protection: CampaignProtectionConstraint) ->
+  CampaignEffectiveDecreaseLimit` to `src/constraints.py`, alongside but fully
+  separate from Stage 10's `CampaignStaticBudgetRoom`/
+  `calculate_campaign_static_budget_room`, Stage 11's
+  `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
+  Stage 12's `CampaignRawPercentageMovementCap`/
+  `calculate_campaign_raw_percentage_movement_cap`, Stage 13's
+  `CampaignTestFloorRoom`/`calculate_campaign_test_floor_room`, Stage 14's
+  `CampaignProtectionConstraint`/`resolve_campaign_protection_constraint`, Stage 15's
+  `CampaignTestAwareStaticDecreaseRoom`/`resolve_campaign_test_aware_static_decrease_room`,
+  Stage 16's `CampaignRawIncreaseLimit`/`resolve_campaign_raw_increase_limit`, and
+  Stage 17's `CampaignRawDecreaseLimit`/`resolve_campaign_raw_decrease_limit`, all
+  unmodified. **Approved business rule:** `decrease_blocked=True` means protection
+  prohibits reducing the campaign, so `effective_decrease_limit = Decimal("0.00")`
+  — a deliberate, computed effective constraint, never missing data, regardless of
+  whether the raw value was positive, zero, or extreme; `decrease_blocked=False`
+  means protection adds no further restriction, so `raw_decrease_limit` passes
+  through unchanged. Still not eligibility, a recommendation, a final movement
+  amount, an allocation, or a decision to decrease the campaign — a campaign with
+  `effective_decrease_limit == Decimal("0.00")` may still later be eligible for
+  `MAINTAIN` or `INCREASE`. `Decimal("0.00")` is used instead of `None` because
+  protection-triggered zero is a computed, deliberate fact, not a
+  non-applicability signal. **Consumes Stage 17's and Stage 14's already-approved
+  result objects directly** (never accepts or reads `CampaignInput`/`ReviewSetup`,
+  never calls `resolve_campaign_raw_decrease_limit` or
+  `resolve_campaign_protection_constraint`, never reopens `is_protected`,
+  `current_budget`, `minimum_budget`, `maximum_budget`, `test_budget_floor`,
+  `is_test_campaign`, `applicable_max_change_percentage`, `room_to_static_minimum`,
+  `room_to_test_floor`, `test_aware_static_decrease_room`, or
+  `raw_percentage_movement_cap`) to avoid duplicating their already-tested
+  calculations. Requires `raw_decrease.campaign_id == protection.campaign_id`,
+  checked before reading `decrease_blocked` for selection or resolving any Decimal
+  result, raising exactly `ValueError("Campaign IDs must match when resolving
+  effective decrease limit.")` otherwise with neither ID silently preferred. No
+  arithmetic is performed — the unprotected branch returns the selected `Decimal`
+  operand unchanged, the protected branch constructs the literal `Decimal("0.00")`
+  using the existing `Decimal` import (no new `ZERO` constant added to
+  `src/constants.py`, which is unmodified); no local `decimal` context,
+  `CURRENCY_QUANTUM`, `ROUND_HALF_UP`, rounding, quantisation, or `float`
+  conversion; ambient global `Decimal` precision cannot affect either branch. Does
+  **not** create `CampaignEffectiveIncreaseLimit`, `effective_increase_limit`, or a
+  combined effective-directional result — no approved constraint remains to
+  transform Stage 16's raw increase limit, and protection has no approved
+  increase-side effect, so `CampaignRawIncreaseLimit` remains the authoritative
+  increase-side constraint. `src/constants.py`, `src/models.py`,
+  `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
+  `src/classification.py` are unchanged.
+- Sprint 1, Development Stage 18: extended `tests/test_constraints.py` with 50 new
+  tests (all 272 existing Stage 10/11/12/13/14/15/16/17 tests preserved unchanged;
+  322 tests total) covering result-model shape/immutability/field-type
+  confirmation (no `raw_decrease_limit`/`decrease_blocked`/`raw_increase_limit`/
+  `effective_increase_limit`/eligibility/action/score/allocation field),
+  incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
+  matching (matching IDs resolve normally, mismatched IDs raise the exact approved
+  `ValueError` message with no result resolved and neither ID silently preferred,
+  the ID-equality guard verified via AST to precede any Boolean/Decimal
+  selection), Boolean mapping (protected positive-raw, unprotected positive-raw,
+  protected zero-raw, unprotected zero-raw, an exhaustive True/False parametrised
+  sweep, no `BoolOp`/truthiness fallback), exact zero representation (protected
+  result's `Decimal` tuple equals `Decimal("0.00")`'s exactly, never
+  `Decimal("0")`'s, never `None`, never raises), Decimal behaviour (no float
+  conversion, no arithmetic/rounding/quantisation via AST and source-text checks,
+  unprotected operand returned unchanged, Decimal-context independence including
+  confirming the global context's `prec`/`rounding` are unchanged after the
+  function returns, extreme 28-significant-digit Stage 17 values handled exactly
+  in both branches), authorised-field-access verification (AST: exactly the four
+  approved fields), earlier-stage separation (AST-verified no call to
+  `resolve_campaign_raw_decrease_limit`/`resolve_campaign_protection_constraint`/
+  Stage 10/11/12/13/15/16/3–9 functions, no reference to `CampaignInput`/
+  `ReviewSetup`, source-text confirmation that `is_protected`/`current_budget`/
+  `minimum_budget`/`maximum_budget`/`test_budget_floor`/`is_test_campaign`/
+  `applicable_max_change_percentage`/`room_to_static_minimum`/`room_to_test_floor`/
+  `test_aware_static_decrease_room`/`raw_percentage_movement_cap` are never
+  reopened), increase-side separation (`CampaignRawIncreaseLimit`/
+  `raw_increase_limit` never referenced, no `effective_increase_limit` field or
+  `CampaignEffectiveIncreaseLimit` model exists, protected status given no
+  increase-side meaning, no combined directional result), traceability (Stage 14's
+  Boolean and Stage 17's raw Decimal remain preserved and unmutated on their own
+  frozen objects after Stage 18 resolves), eligibility boundary (no eligible/
+  ineligible output, a zero effective decrease limit does not imply whole-campaign
+  ineligibility, no `RecommendationAction`/`ReasonCode`/score/allocation/
+  conservation output), a synthetic protected-test-campaign case (Stage 15's
+  precedence and Stage 14's protection each independently resolved upstream, not
+  recalculated inside Stage 18), no production batch function, and integration
+  with `validate_campaign_csv` + Stage 10–17's approved functions over
+  `data/sample_campaigns.csv` (order preserved; `G001=600.00`, `M001=375.00`,
+  `G002=0.00`, `G003=240.00`; Stages 10–17's existing sample results independently
+  re-verified via separate calls, never combined; G002's `decrease_blocked=True`,
+  `raw_decrease_limit=1000.00`, and `effective_decrease_limit=0.00` all hold
+  simultaneously and separately, with `raw_increase_limit=1000.00` confirmed
+  unaffected; G003's `raw_decrease_limit=240.00` passes through unchanged to
+  `effective_decrease_limit=240.00`, with Stage 15's test-floor logic not
+  reopened). `tests/test_models.py` (Stage 1), `tests/test_validation.py` (Stage
+  2), `tests/test_metrics.py` (Stage 3), `tests/test_pacing.py` (Stage 4),
+  `tests/test_classification.py` (Stage 5), `tests/test_trend_classification.py`
+  (Stage 6), `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed passing — no
+  behavioural regression, and no existing test file required modification this
+  stage. Full suite: 663 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30
+  Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 322
+  Stage 10/11/12/13/14/15/16/17/18 combined in `tests/test_constraints.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignEffectiveDecreaseLimit` fields; exact
+  protected/unprotected mapping; meaning of `effective_decrease_limit`; exact zero
+  and `None` behaviour; confirmation raw/protection facts remain separate;
+  confirmation no effective increase is produced; confirmation this is not
+  eligibility or a recommendation), `docs/DECISION_RULES.md` (frozen Stage 18
+  protection-adjusted effective decrease limit rule, including why `Decimal("0.00")`
+  is used instead of `None`; separation from Stage 16; confirmation protection has
+  no approved increase-side effect; deferral of eligibility and combined campaign
+  assessment explicitly re-confirmed as pending later stages), and
+  `docs/TEST_SCENARIOS.md` (26 concrete Stage 18 scenarios).

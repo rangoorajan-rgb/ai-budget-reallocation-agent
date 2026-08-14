@@ -157,6 +157,34 @@ never accepts or reads `CampaignInput` or `ReviewSetup`, never calls
 raw_cap.campaign_id`, raising `ValueError` otherwise. No arithmetic is performed —
 the selected `Decimal` operand is returned unchanged, so no local `decimal` context,
 quantisation, or rounding is used.
+
+Also implements Sprint 1 — Development Stage 18: for one already-calculated
+`CampaignRawDecreaseLimit` (Stage 17's result) and one already-calculated
+`CampaignProtectionConstraint` (Stage 14's result), applies the approved protection
+constraint to the raw decrease limit, producing one protection-adjusted effective
+decrease limit — `effective_decrease_limit = Decimal("0.00")` when
+`decrease_blocked` is `True` (protection prohibits reducing the campaign, so no
+decrease room remains — a deliberate, computed effective constraint, never missing
+data), otherwise `raw_decrease_limit` unchanged (protection itself adds no further
+restriction; this does not mean a decrease should occur). This is **still not**
+eligibility, a recommendation, a final movement amount, an allocation, or a decision
+to decrease the campaign — a campaign with `effective_decrease_limit =
+Decimal("0.00")` may still later be eligible for `MAINTAIN` or `INCREASE`. Stage 18
+consumes Stage 17's and Stage 14's already-approved result objects directly — it
+never accepts or reads `CampaignInput` or `ReviewSetup`, never calls
+`resolve_campaign_raw_decrease_limit` or `resolve_campaign_protection_constraint`,
+and never reads or imports `CampaignStaticBudgetRoom`,
+`CampaignApplicableChangePercentage`, `CampaignRawPercentageMovementCap`,
+`CampaignTestFloorRoom`, `CampaignTestAwareStaticDecreaseRoom`, or
+`CampaignRawIncreaseLimit`. It requires `raw_decrease.campaign_id ==
+protection.campaign_id`, raising `ValueError` otherwise. No arithmetic is
+performed — the unprotected branch returns the selected `Decimal` operand
+unchanged, and the protected branch constructs the literal `Decimal("0.00")` — so no
+local `decimal` context, quantisation, or rounding is used. Stage 18 deliberately
+does **not** produce an effective increase limit: no approved constraint remains to
+transform Stage 16's raw increase limit, and protection has no approved
+increase-side effect, so `CampaignRawIncreaseLimit` remains the authoritative
+increase-side constraint unless a later approved rule changes it.
 """
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
@@ -525,4 +553,50 @@ def resolve_campaign_raw_decrease_limit(
     return CampaignRawDecreaseLimit(
         campaign_id=decrease_room.campaign_id,
         raw_decrease_limit=raw_decrease_limit,
+    )
+
+
+class CampaignEffectiveDecreaseLimit(BaseModel):
+    """A protection-adjusted effective decrease limit for one campaign.
+
+    Not eligibility, a recommendation, a final movement amount, an allocation, or a
+    decision to decrease the campaign. A campaign with `effective_decrease_limit ==
+    Decimal("0.00")` may still later be eligible for `MAINTAIN` or `INCREASE`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    campaign_id: str
+    effective_decrease_limit: Decimal
+
+
+def resolve_campaign_effective_decrease_limit(
+    raw_decrease: CampaignRawDecreaseLimit,
+    protection: CampaignProtectionConstraint,
+) -> CampaignEffectiveDecreaseLimit:
+    """Apply one campaign's Stage 14 protection constraint to its Stage 17 raw
+    decrease limit, producing one protection-adjusted effective decrease limit.
+
+    `effective_decrease_limit = Decimal("0.00")` when `decrease_blocked` is `True` —
+    protection prohibits reducing the campaign, so no decrease room remains; this is
+    a deliberate, computed effective constraint, never missing data. Otherwise
+    `raw_decrease_limit` is returned unchanged — protection itself adds no further
+    restriction, but this does not mean a decrease should occur. Requires
+    `raw_decrease.campaign_id == protection.campaign_id`, raising `ValueError`
+    otherwise. No arithmetic is performed.
+    """
+    if raw_decrease.campaign_id != protection.campaign_id:
+        raise ValueError(
+            "Campaign IDs must match when resolving effective decrease limit."
+        )
+
+    effective_decrease_limit = (
+        Decimal("0.00")
+        if protection.decrease_blocked
+        else raw_decrease.raw_decrease_limit
+    )
+
+    return CampaignEffectiveDecreaseLimit(
+        campaign_id=raw_decrease.campaign_id,
+        effective_decrease_limit=effective_decrease_limit,
     )
