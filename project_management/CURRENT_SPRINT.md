@@ -967,18 +967,120 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 22 — Deterministic Campaign Recommendation Reasons (complete)
+
+- [x] `src/reasons.py` (new dedicated module — not added to
+      `src/recommendation.py`, `src/suitability.py`, `src/availability.py`,
+      `src/classification.py`, `src/constraints.py`, or `src/scoring.py`,
+      since Stage 22 explains an already-selected action, a responsibility
+      separate from selecting it) — `CampaignRecommendationReason` (frozen,
+      `extra="forbid"`: `campaign_id`, `reason_codes:
+      tuple[ReasonCode, ...]`) and `resolve_campaign_recommendation_reason(
+      recommendation: CampaignRecommendation, campaign: CampaignInput,
+      suitability: CampaignActionSuitability, tracking:
+      CampaignTrackingAssessment, performance: CampaignPerformanceClass,
+      trend: CampaignTrendClass) -> CampaignRecommendationReason`. Does not
+      duplicate `recommendation_action` on the result. `src/recommendation.py`,
+      `src/suitability.py`, `src/availability.py`, `src/scoring.py`,
+      `src/classification.py`, `src/constraints.py`, `src/constants.py`
+      (including the existing `ReasonCode` enum, unmodified), `src/models.py`,
+      `src/validation.py`, `src/metrics.py`, `src/pacing.py` unchanged.
+- [x] **Approved HOLD precedence**, mirroring Stage 21's exact rule order:
+      Paused alone → `(PAUSED_CAMPAIGN,)`, remaining the sole reason even
+      when tracking is also unassessable (Stage 21's own short-circuit logic
+      never reaches the assessability check once Paused has already
+      resolved `HOLD`); otherwise unassessable → `(TRACKING_UNRELIABLE,)`;
+      otherwise (multiple-`SUITABLE` ambiguity or no valid `MAINTAIN`
+      fallback) → `(HELD_FOR_MANUAL_REVIEW,)`. Never used for a non-HOLD
+      action, since `MAINTAIN` is itself an assessed, confident decision,
+      not a deferral.
+- [x] **Approved INCREASE/MAINTAIN/REDUCE mapping**: two fixed, immutable
+      lookup tables applied to `performance.performance_band`/
+      `trend.trend_direction` — `ABOVE_TARGET`→`ABOVE_TARGET_STRONG`,
+      `ON_TARGET`→`NEAR_TARGET`, `BELOW_TARGET`→no performance reason (no
+      approved severity classification exists to choose between
+      `BELOW_TARGET_MODERATE` and `BELOW_TARGET_SEVERE`);
+      `IMPROVING`/`STABLE`/`DECLINING`→`RECENT_TREND_IMPROVING`/`STABLE`/
+      `DECLINING` unconditionally; performance reason (when available)
+      precedes trend reason. Reproduces exactly the seven approved
+      `MAINTAIN` cells plus the two cells reachable only via a Stage 19
+      availability block on an otherwise diagonal-`SUITABLE` direction,
+      using the identical already-approved mapping — not a new invented
+      rule.
+- [x] Consumes Stage 21's, Stage 20's, Stage 8's, Stage 5's, and Stage 6's
+      already-approved result objects directly (never calls
+      `resolve_campaign_recommendation_action` or any other Stage 1–21
+      production function). Requires all six `campaign_id` values to match,
+      raising exactly `ValueError("Campaign IDs must match when resolving
+      recommendation reasons.")` otherwise, checked before any reason is
+      resolved. Reads exactly the fourteen authorised fields. Never reads
+      raw metrics, monetary constraint results, `Confidence`,
+      `PacingStatus`, `tracking_status`, `is_protected`,
+      `is_test_campaign`, `test_budget_floor`, or `BusinessPriority`.
+- [x] **Approved reason-code scope**: exactly eight existing `ReasonCode`
+      members (`PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
+      `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,
+      `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`,
+      `RECENT_TREND_DECLINING`) — no new enum member added, no severity
+      threshold invented. `TRACKING_WARNING`,
+      `INSUFFICIENT_CONVERSION_VOLUME`, `PROTECTED_FROM_REDUCTION`,
+      `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`,
+      `STRONG_LONG_TERM_RECENT_DECLINE`, `CAMPAIGN_CAP_REACHED`,
+      `CAMPAIGN_FLOOR_REACHED`, `TEST_BUDGET_FLOOR_APPLIED`,
+      `MAX_CHANGE_LIMIT_APPLIED`, `NO_ELIGIBLE_RECIPIENT`, and
+      `ACCOUNT_RESERVE_REQUIRED` are never emitted.
+- [x] `tests/test_reasons.py` (new dedicated test file —
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests) — 69 new Stage 22
+      tests, all passing. `tests/test_models.py` (Stage 1),
+      `tests/test_validation.py` (Stage 2), `tests/test_metrics.py` (Stage
+      3), `tests/test_pacing.py` (Stage 4), `tests/test_classification.py`
+      (Stage 5), `tests/test_trend_classification.py` (Stage 6),
+      `tests/test_confidence_classification.py` (Stage 7),
+      `tests/test_tracking_assessment.py` (Stage 8), and
+      `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+      passing — no regression, no existing test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 22 (and not yet started)
+
+- The remaining twelve `ReasonCode` members' trigger conditions:
+  `BELOW_TARGET_MODERATE`/`BELOW_TARGET_SEVERE`/`STRONG_LONG_TERM_RECENT_DECLINE`
+  (pending an approved performance-severity classification),
+  `CAMPAIGN_CAP_REACHED`/`CAMPAIGN_FLOOR_REACHED`/`TEST_BUDGET_FLOOR_APPLIED`/
+  `MAX_CHANGE_LIMIT_APPLIED` (pending preserved constraint binding-source
+  identity), `NO_ELIGIBLE_RECIPIENT`/`ACCOUNT_RESERVE_REQUIRED` (pending a
+  later allocation/conservation stage), and
+  `INSUFFICIENT_CONVERSION_VOLUME`/`TRACKING_WARNING`/`PROTECTED_FROM_REDUCTION`
+  (intentionally and permanently excluded from action-reason scope).
+- `Confidence`/`Confidence.NOT_ASSESSABLE`, `PacingStatus`, `BusinessPriority`
+  effects on action selection, scoring, or allocation.
+- Numeric prioritisation scoring, ranking/prioritisation, allocation, conservation.
+- Any monetary amount associated with `RecommendationAction`.
+- Streamlit interface, Gemini integration, approval workflow, audit, exports.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 22 (not started, scope not yet frozen): requires its own dependency and
+Stage 23 (not started, scope not yet frozen): requires its own dependency and
 decision-readiness inspection before being frozen, not file-list order.
-`ReasonCode` assignment is the leading candidate, consuming
-`CampaignRecommendation` (Stage 21) alongside the underlying Stage 5/6/8/19/20
-facts to explain each selected action. Whether `Confidence`, `PacingStatus`,
-or `BusinessPriority` first need a dedicated readiness/scoring stage before
+Numeric prioritisation scoring is the leading candidate, potentially
+consuming `CampaignRecommendation` (Stage 21) and/or
+`CampaignRecommendationReason` (Stage 22) alongside the underlying
+Stage 5/6/8/19/20 facts. Whether `Confidence`, `PacingStatus`, or
+`BusinessPriority` first need a dedicated readiness/scoring stage before
 per-campaign scoring or ranking can be finalised is not yet resolved.
 Per-campaign scoring may remain single-campaign; only normalisation,
 ranking/prioritisation, and allocation genuinely require comparing multiple
 campaigns simultaneously (corrected at Stage 19 completion). The
 still-deferred combined campaign-assessment question (performance + trend +
 confidence + tracking + pacing) remains a live but not clearly necessary
-candidate on its own, as noted since the Stage 11 inspection.
+candidate on its own, as noted since the Stage 11 inspection. The remaining
+twelve `ReasonCode` members' trigger conditions (see Stage 22's
+Explicitly-Out-of-Scope list above) remain open, with two of the four
+blocking categories (performance severity, constraint binding-source
+identity) each potentially warranting their own dedicated stage before
+further `ReasonCode` coverage is possible.

@@ -840,6 +840,61 @@ final allocated movement.
 | 57 | Synthetic integration: multiple `SUITABLE` (manually constructed) | `HOLD`. |
 | 58 | Synthetic integration: protected-and-test campaign | Not `REDUCE`. |
 
+## Campaign Recommendation Reason Scenarios
+
+All scenarios below use `resolve_campaign_recommendation_reason(recommendation:
+CampaignRecommendation, campaign: CampaignInput, suitability:
+CampaignActionSuitability, tracking: CampaignTrackingAssessment,
+performance: CampaignPerformanceClass, trend: CampaignTrendClass) ->
+CampaignRecommendationReason` from `src/reasons.py` (`tests/test_reasons.py`
+— a dedicated test file). Every result explains an already-selected
+action — none of these scenarios selects or changes `RecommendationAction`,
+calculates a monetary amount, scores, ranks, or allocates.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignRecommendationReason` field set | Exactly `campaign_id`, `reason_codes`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignRecommendationReason` instance, or its `reason_codes` tuple | Rejected (`frozen=True`; tuples have no `append`, index assignment raises `TypeError`). |
+| 4 | `model_dump()` / `model_dump(mode="json")` | `reason_codes` is a `tuple` of `ReasonCode` members / a `list` of their string values. |
+| 5 | `campaign_id` on the result | Copied from `recommendation.campaign_id`, after confirming it matches `campaign.campaign_id`, `suitability.campaign_id`, `tracking.campaign_id`, `performance.campaign_id`, and `trend.campaign_id`. |
+| 6 | All six IDs equal | Resolves normally. |
+| 7 | `campaign.campaign_id` mismatched | Raises `ValueError("Campaign IDs must match when resolving recommendation reasons.")`. |
+| 8 | `suitability.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 9 | `tracking.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 10 | `performance.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 11 | `trend.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 12 | All five non-anchor inputs mismatched simultaneously | Raises the same exact `ValueError` — no per-object mismatch reporting, no result returned, no ID silently preferred. |
+| 13 | ID-equality guard | Verified via AST to be the first statement, preceding any reason resolution. |
+| 14 | Paused, assessable | `(PAUSED_CAMPAIGN,)`. |
+| 15 | Paused, also unassessable | `(PAUSED_CAMPAIGN,)` only — `TRACKING_UNRELIABLE` never added. |
+| 16 | Active, unassessable | `(TRACKING_UNRELIABLE,)`. |
+| 17 | Active, assessable, multiple `SUITABLE` | `(HELD_FOR_MANUAL_REVIEW,)`. |
+| 18 | Active, assessable, no valid `MAINTAIN` fallback (`maintain_suitability=UNSUITABLE`) | `(HELD_FOR_MANUAL_REVIEW,)`. |
+| 19 | `HELD_FOR_MANUAL_REVIEW` on a non-HOLD action | Never occurs — confirmed for `INCREASE`, `MAINTAIN`, and `REDUCE`. |
+| 20 | `ABOVE_TARGET`+`IMPROVING`, `INCREASE` selected, direct construction | `(ABOVE_TARGET_STRONG, RECENT_TREND_IMPROVING)`. |
+| 21 | `ABOVE_TARGET`+`IMPROVING`, `INCREASE` selected, via the real Stage 3/5/6/8/10–21 production path | Same exact tuple. |
+| 22–28 | Direct construction of all seven approved `MAINTAIN` cells (`ABOVE_TARGET`+`STABLE`/`DECLINING`, `ON_TARGET`+`IMPROVING`/`STABLE`/`DECLINING`, `BELOW_TARGET`+`IMPROVING`/`STABLE`) | Exact mappings per the approved table; `BELOW_TARGET` cells omit a performance reason. |
+| 29–35 | The same seven cells via the real production path (reusing Stage 21's exact KPI fixtures) | Same exact tuples. |
+| 36 | `ABOVE_TARGET`+`IMPROVING` with `INCREASE` unavailable (campaign at maximum budget) → `MAINTAIN`, via the real production path | `(ABOVE_TARGET_STRONG, RECENT_TREND_IMPROVING)` — the same mapping as `INCREASE`'s own diagonal, applied consistently. |
+| 37 | `BELOW_TARGET`+`DECLINING` with `REDUCE` unavailable (protected) → `MAINTAIN`, via the real production path | `(RECENT_TREND_DECLINING,)`. |
+| 38 | `BELOW_TARGET`+`DECLINING`, `REDUCE` selected, direct construction | `(RECENT_TREND_DECLINING,)` — never `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`, or `STRONG_LONG_TERM_RECENT_DECLINE`. |
+| 39 | `BELOW_TARGET`+`DECLINING`, `REDUCE` selected, via the real production path | Same exact tuple. |
+| 40 | Every `PerformanceBand`×`TrendDirection` combination for every non-HOLD action | Tuple always non-empty, never contains a duplicate. |
+| 41 | Every reachable HOLD-producing scenario | Tuple always non-empty. |
+| 42 | Performance reason position | Always precedes the trend reason when both are present. |
+| 43 | Ordering source | Verified not derived from `ReasonCode`'s enum declaration order or any `sorted()` call (source/AST-verified). |
+| 44 | Exhaustive sweep across every HOLD cause and every `PerformanceBand`×`TrendDirection` combination for every non-HOLD action | Only the eight approved `ReasonCode` members ever appear; the remaining twelve never appear. |
+| 45 | `TRACKING_WARNING`/`INSUFFICIENT_CONVERSION_VOLUME`/`PROTECTED_FROM_REDUCTION`/`BELOW_TARGET_MODERATE`/`BELOW_TARGET_SEVERE`/`STRONG_LONG_TERM_RECENT_DECLINE`/`CAMPAIGN_CAP_REACHED`/`CAMPAIGN_FLOOR_REACHED`/`TEST_BUDGET_FLOOR_APPLIED`/`MAX_CHANGE_LIMIT_APPLIED`/`NO_ELIGIBLE_RECIPIENT`/`ACCOUNT_RESERVE_REQUIRED` | Never referenced anywhere in `src/reasons.py`'s source (AST-verified). |
+| 46 | `Warning` tracking, assessable, via the real production path | Ordinary action-specific reasons apply; `TRACKING_WARNING` never added. |
+| 47 | Protected campaign with `INCREASE` selected, via the real production path | Ordinary `INCREASE` reasons; `PROTECTED_FROM_REDUCTION` never added. |
+| 48 | Test campaign with `MAINTAIN` selected, via the real production path | Ordinary `MAINTAIN` reasons; `TEST_BUDGET_FLOOR_APPLIED` never added. |
+| 49 | Campaign with a tighter `campaign_max_change_percentage`, `REDUCE` selected, via the real production path | Ordinary `REDUCE` reason; `MAX_CHANGE_LIMIT_APPLIED`/`CAMPAIGN_FLOOR_REACHED` never added. |
+| 50 | `resolve_campaign_recommendation_reason` source | Reads only the fourteen authorised fields across `recommendation`, `campaign`, `suitability`, `tracking`, `performance`, `trend` (AST-verified); calls none of `resolve_campaign_recommendation_action`/`resolve_campaign_action_suitability`/`resolve_campaign_action_availability`/`assess_campaign_tracking`/`classify_campaign_performance`/`classify_campaign_trend`/any other Stage 1–21 production function (AST-verified). |
+| 51 | `CampaignRecommendationReason.model_fields` / result attributes | Contains no `recommendation_action`, `reason_code`, `primary_reason`, `supporting_reasons`, `confidence`, `score`, `rank`, `priority`, `amount`, or `increase_suitability`/`maintain_suitability`/`reduce_suitability` field. |
+| 52 | `None`/dict inputs | Raise `AttributeError`, not silently converted; no broad `except` anywhere in the function source; no production batch function exists. |
+| 53 | `data/sample_campaigns.csv` validated; Stage 5/6/8/10–21 results independently calculated per campaign through the real production path, then only the six approved Stage 22 inputs passed, iterating in the test (no production batch function) | `G001=(NEAR_TARGET, RECENT_TREND_STABLE)`, `M001=(NEAR_TARGET, RECENT_TREND_STABLE)`, `G002=(ABOVE_TARGET_STRONG, RECENT_TREND_IMPROVING)`, `G003=(NEAR_TARGET, RECENT_TREND_STABLE)`. |
+
 ## Allocation Scenarios
 
 > Pending a later Sprint 1 stage.

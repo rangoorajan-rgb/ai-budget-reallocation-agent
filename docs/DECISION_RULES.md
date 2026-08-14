@@ -1448,14 +1448,115 @@ final allocated movement.
   classification, constraints, availability, suitability, scoring, or
   allocation.
 
+### Stage 22 — Deterministic Campaign Recommendation Reasons
+
+- **Rule.** For one already-selected `CampaignRecommendation` (Stage 21),
+  `resolve_campaign_recommendation_reason` produces a non-empty, ordered,
+  deduplicated tuple of `ReasonCode` explaining only the facts that
+  causally participated in Stage 21's decision — never a diagnostic fact
+  Stage 21 never consulted, an explanation for an unavailable alternative
+  action, or a monetary constraint.
+- **HOLD precedence**, mirroring Stage 21's exact rule order:
+  ```
+  1. campaign.status is PAUSED           → (PAUSED_CAMPAIGN,)
+  2. not tracking.is_assessable          → (TRACKING_UNRELIABLE,)
+  3. otherwise (multiple-SUITABLE ambiguity,
+     or no valid MAINTAIN fallback)      → (HELD_FOR_MANUAL_REVIEW,)
+  ```
+  Rule 1 remains the sole reason even when tracking is simultaneously
+  unassessable — Stage 21's own short-circuit logic never reaches the
+  assessability check once Paused has already resolved `HOLD`, so citing
+  `TRACKING_UNRELIABLE` too would cite a fact Stage 21 never actually
+  consulted on that execution path. Rule 3 covers both remaining ways
+  Stage 21 can produce `HOLD` (multiple-`SUITABLE` ambiguity and no valid
+  `MAINTAIN` fallback) with the same code, since no more specific approved
+  code exists for either. `HELD_FOR_MANUAL_REVIEW` is never used for a
+  non-HOLD action — `MAINTAIN` is itself an assessed, confident decision,
+  not a deferral.
+- **INCREASE/MAINTAIN/REDUCE mapping.** Two fixed, immutable lookup
+  tables, applied to `performance.performance_band`/`trend.trend_direction`
+  — the same pair Stage 20 used to determine suitability — with the
+  performance reason (when available) preceding the trend reason:
+  ```
+  ABOVE_TARGET → ABOVE_TARGET_STRONG      BELOW_TARGET → (no performance reason)
+  ON_TARGET    → NEAR_TARGET
+
+  IMPROVING → RECENT_TREND_IMPROVING
+  STABLE    → RECENT_TREND_STABLE
+  DECLINING → RECENT_TREND_DECLINING
+  ```
+  `BELOW_TARGET` intentionally omits a performance reason — no approved
+  severity classification exists to choose between `BELOW_TARGET_MODERATE`
+  and `BELOW_TARGET_SEVERE`; this is a documented limitation, not an
+  invitation to invent a threshold. This produces exactly the seven
+  approved `MAINTAIN` mappings (`ABOVE_TARGET`+`STABLE`,
+  `ABOVE_TARGET`+`DECLINING`, `ON_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`,
+  `ON_TARGET`+`DECLINING`, `BELOW_TARGET`+`IMPROVING`,
+  `BELOW_TARGET`+`STABLE`) and additionally, consistently, the two
+  `MAINTAIN` outcomes reachable only when Stage 19 availability blocks an
+  otherwise diagonal-`SUITABLE` direction (`ABOVE_TARGET`+`IMPROVING` with
+  `INCREASE` unavailable; `BELOW_TARGET`+`DECLINING` with `REDUCE`
+  unavailable) — the identical, already-approved performance/trend mapping
+  applied unchanged, not a new invented rule.
+- **Exact calculation input and authorised fields.**
+  `recommendation.campaign_id`, `recommendation.recommendation_action`,
+  `campaign.campaign_id`, `campaign.status`, `suitability.campaign_id`,
+  `suitability.increase_suitability`, `suitability.maintain_suitability`,
+  `suitability.reduce_suitability`, `tracking.campaign_id`,
+  `tracking.is_assessable`, `performance.campaign_id`,
+  `performance.performance_band`, `trend.campaign_id`, and
+  `trend.trend_direction` are the only fourteen fields read, across
+  exactly six input objects (`CampaignRecommendation`, `CampaignInput`,
+  `CampaignActionSuitability`, `CampaignTrackingAssessment`,
+  `CampaignPerformanceClass`, `CampaignTrendClass`).
+  `resolve_campaign_recommendation_action` and every other Stage 1–21
+  production function are never called — Stage 22 consumes their
+  already-approved outputs, never recalculates them. No raw metric,
+  monetary constraint result, `Confidence`, `PacingStatus`,
+  `tracking_status`, `is_protected`, `is_test_campaign`,
+  `test_budget_floor`, or `BusinessPriority` is read.
+- **Campaign-ID policy.** All six `campaign_id` values must match, checked
+  as the first statement before any reason is resolved — one combined
+  equality check anchored to `recommendation.campaign_id`. A mismatch
+  raises exactly `ValueError("Campaign IDs must match when resolving
+  recommendation reasons.")`, with no result returned, no ID silently
+  preferred, and the same exact message regardless of which input(s)
+  mismatch.
+- **Approved reason-code scope.** Exactly eight existing `ReasonCode`
+  members may be emitted: `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
+  `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,
+  `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`, and
+  `RECENT_TREND_DECLINING`. No new `ReasonCode` member is added and no
+  severity threshold is invented.
+- **Permanent exclusions.** `TRACKING_WARNING`,
+  `INSUFFICIENT_CONVERSION_VOLUME`, and `PROTECTED_FROM_REDUCTION` are
+  never emitted — none causally participates in Stage 21's decision, even
+  though each is diagnostically true in some cases (`WARNING` tracking,
+  low `Confidence`, or a protected campaign's blocked `REDUCE`).
+  `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`, and
+  `STRONG_LONG_TERM_RECENT_DECLINE` are never emitted — no approved
+  severity classification exists. `CAMPAIGN_CAP_REACHED`,
+  `CAMPAIGN_FLOOR_REACHED`, `TEST_BUDGET_FLOOR_APPLIED`, and
+  `MAX_CHANGE_LIMIT_APPLIED` are never emitted — no Stage 15–18 result
+  preserves which constraint operand was actually binding.
+  `NO_ELIGIBLE_RECIPIENT` and `ACCOUNT_RESERVE_REQUIRED` are never
+  emitted — both are cross-campaign allocation-domain outcomes, out of
+  scope for a single-campaign explanation.
+- **Result model.** `CampaignRecommendationReason` (frozen, immutable,
+  `extra="forbid"`; exactly `campaign_id: str`, `reason_codes:
+  tuple[ReasonCode, ...]`) does not duplicate `recommendation_action` —
+  callers retain the separately-resolved `CampaignRecommendation` for
+  that. The tuple is never empty under this scope, since every reachable
+  HOLD cause and every `PerformanceBand`×`TrendDirection` combination has
+  at least one approved code (trend always supplies one).
+- **Dedicated module.** `src/reasons.py` is a new production module,
+  distinct from `src/recommendation.py`, `src/suitability.py`,
+  `src/availability.py`, `src/classification.py`, `src/constraints.py`,
+  and `src/scoring.py` — Stage 22 explains an already-selected action, a
+  responsibility separate from selecting it.
+
 ## Pending
 
-- **Trend-to-ReasonCode mapping.** Stage 6 resolved how `TREND_THRESHOLD` classifies
-  `trend_delta` into a neutral `TrendDirection` (see above) — but a `TrendDirection` is
-  not a `ReasonCode`. Whether/how `TrendDirection.IMPROVING`/`STABLE`/`DECLINING` maps to
-  `ReasonCode.RECENT_TREND_IMPROVING`/`STABLE`/`DECLINING`, and how trend combines with
-  `PerformanceBand`, confidence, or tracking into any final judgement, remains pending a
-  later stage.
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
   `MAINTAIN_THRESHOLD` classify `weighted_performance_ratio` into a neutral
   `PerformanceBand` (see above) — but a `PerformanceBand` is not a `RecommendationAction`.
@@ -1494,9 +1595,27 @@ final allocated movement.
   only — no monetary amount is calculated. The six conflicting performance/trend
   cells' precedence remains deliberately left `NEUTRAL` rather than resolved;
   `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` and `BusinessPriority`
-  effects, `ReasonCode` assignment, numeric prioritisation scoring, ranking,
-  allocation, and conservation all remain pending later stages. Per-campaign
-  scoring is not itself known to require cross-campaign data; only
-  normalisation, ranking/prioritisation, and allocation are.
-- The full set of `ReasonCode` trigger conditions.
+  effects, the remaining `ReasonCode` trigger conditions (see below), numeric
+  prioritisation scoring, ranking, allocation, and conservation all remain
+  pending later stages. Per-campaign scoring is not itself known to require
+  cross-campaign data; only normalisation, ranking/prioritisation, and
+  allocation are.
+- **Remaining `ReasonCode` trigger conditions.** Stage 22 resolved the trigger
+  conditions for `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
+  `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,
+  `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`, and
+  `RECENT_TREND_DECLINING` (see above). The remaining twelve members stay
+  pending: `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`, and
+  `STRONG_LONG_TERM_RECENT_DECLINE` pending an approved performance-severity
+  classification (`PerformanceBand` currently has only three bands,
+  insufficient to distinguish them); `CAMPAIGN_CAP_REACHED`,
+  `CAMPAIGN_FLOOR_REACHED`, `TEST_BUDGET_FLOOR_APPLIED`, and
+  `MAX_CHANGE_LIMIT_APPLIED` pending a redesign that preserves which Stage
+  15–18 constraint operand was actually binding (no current result exposes
+  this); `NO_ELIGIBLE_RECIPIENT` and `ACCOUNT_RESERVE_REQUIRED` pending a
+  later cross-campaign allocation/conservation stage; `INSUFFICIENT_CONVERSION_VOLUME`,
+  `TRACKING_WARNING`, and `PROTECTED_FROM_REDUCTION` intentionally and
+  permanently excluded from Stage 22's action-reason scope — each is
+  diagnostically true in some cases but never causally participates in
+  Stage 21's decision.
 - Allocation and conservation rules.

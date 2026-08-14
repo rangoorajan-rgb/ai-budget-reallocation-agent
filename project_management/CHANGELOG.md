@@ -1534,3 +1534,143 @@ All notable changes to this project are documented in this file.
   fallback, and the deferral of confidence, pacing, priority, and
   `ReasonCode` explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (58 concrete Stage 21 scenarios).
+
+- Sprint 1, Development Stage 22: added a new dedicated module,
+  `src/reasons.py`, containing `CampaignRecommendationReason` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `reason_codes:
+  tuple[ReasonCode, ...]` only — does not duplicate `recommendation_action`)
+  and `resolve_campaign_recommendation_reason(recommendation:
+  CampaignRecommendation, campaign: CampaignInput, suitability:
+  CampaignActionSuitability, tracking: CampaignTrackingAssessment,
+  performance: CampaignPerformanceClass, trend: CampaignTrendClass) ->
+  CampaignRecommendationReason`. Explains, for one already-selected
+  `CampaignRecommendation` (Stage 21), why that action was selected — a
+  non-empty, ordered, deduplicated tuple of `ReasonCode` containing only
+  facts that causally participated in Stage 21's decision. **Approved HOLD
+  precedence**, mirroring Stage 21's exact rule order: `campaign.status is
+  CampaignStatus.PAUSED` → `(PAUSED_CAMPAIGN,)`, remaining the sole reason
+  even when tracking is also unassessable, since Stage 21's own
+  short-circuit logic never reaches the assessability check once Paused has
+  already resolved `HOLD`; otherwise `not tracking.is_assessable` →
+  `(TRACKING_UNRELIABLE,)`; otherwise (multiple-`SUITABLE` ambiguity or no
+  valid `MAINTAIN` fallback — the only two remaining ways Stage 21 can
+  produce `HOLD`) → `(HELD_FOR_MANUAL_REVIEW,)`, never used for a non-HOLD
+  action. **Approved INCREASE/MAINTAIN/REDUCE mapping**: two fixed,
+  immutable lookup tables applied to `performance.performance_band`/
+  `trend.trend_direction` — the same pair Stage 20 used to determine
+  suitability — `ABOVE_TARGET`→`ABOVE_TARGET_STRONG`, `ON_TARGET`→
+  `NEAR_TARGET`, `BELOW_TARGET`→no performance reason (no approved severity
+  classification exists to choose between `BELOW_TARGET_MODERATE` and
+  `BELOW_TARGET_SEVERE` — a documented limitation, not an invitation to
+  invent a threshold); `IMPROVING`/`STABLE`/`DECLINING`→
+  `RECENT_TREND_IMPROVING`/`STABLE`/`DECLINING` unconditionally; the
+  performance reason (when available) precedes the trend reason. This
+  table-driven approach reproduces exactly the seven approved `MAINTAIN`
+  mappings and additionally, consistently, the two `MAINTAIN` outcomes
+  reachable only when Stage 19 availability blocks an otherwise
+  diagonal-`SUITABLE` direction (`ABOVE_TARGET`+`IMPROVING` with `INCREASE`
+  unavailable; `BELOW_TARGET`+`DECLINING` with `REDUCE` unavailable) — the
+  identical, already-approved mapping applied unchanged, not a new invented
+  rule. **Approved reason-code scope**: exactly eight existing `ReasonCode`
+  members may be emitted (`PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
+  `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,
+  `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`, `RECENT_TREND_DECLINING`)
+  — no new enum member added, no severity threshold invented.
+  `TRACKING_WARNING`, `INSUFFICIENT_CONVERSION_VOLUME`,
+  `PROTECTED_FROM_REDUCTION`, `BELOW_TARGET_MODERATE`,
+  `BELOW_TARGET_SEVERE`, `STRONG_LONG_TERM_RECENT_DECLINE`,
+  `CAMPAIGN_CAP_REACHED`, `CAMPAIGN_FLOOR_REACHED`,
+  `TEST_BUDGET_FLOOR_APPLIED`, `MAX_CHANGE_LIMIT_APPLIED`,
+  `NO_ELIGIBLE_RECIPIENT`, and `ACCOUNT_RESERVE_REQUIRED` are never
+  emitted — the first three because none causally participates in Stage
+  21's decision even though each is diagnostically true in some cases; the
+  next three pending an approved performance-severity classification; the
+  next four pending preserved constraint binding-source identity (no Stage
+  15–18 result exposes which operand was actually binding); the last two
+  as cross-campaign allocation-domain outcomes. Under this scope, the
+  result tuple is never empty for any reachable production path. **Consumes
+  Stage 21's, Stage 20's, Stage 8's, Stage 5's, and Stage 6's
+  already-approved result objects directly** (never calls
+  `resolve_campaign_recommendation_action` or any other Stage 1–21
+  production function). Requires all six `campaign_id` values to match via
+  one combined equality check anchored to `recommendation.campaign_id`,
+  checked before any reason is resolved, raising exactly
+  `ValueError("Campaign IDs must match when resolving recommendation
+  reasons.")` otherwise with the same exact message regardless of which
+  input(s) mismatch. Reads exactly fourteen authorised fields across six
+  input objects — the largest interface of any stage to date. A dedicated
+  module was chosen over `src/recommendation.py`/`src/suitability.py`/
+  `src/availability.py`/`src/classification.py`/`src/constraints.py`/
+  `src/scoring.py` because Stage 22 explains an already-selected action, a
+  responsibility separate from selecting it. No `Decimal` calculation
+  occurs anywhere. `src/recommendation.py`, `src/suitability.py`,
+  `src/availability.py`, `src/scoring.py`, `src/classification.py`,
+  `src/constraints.py`, `src/constants.py` (including the existing
+  `ReasonCode` enum, unmodified), `src/models.py`, `src/validation.py`,
+  `src/metrics.py`, and `src/pacing.py` are unchanged.
+- Sprint 1, Development Stage 22: added a new dedicated test file,
+  `tests/test_reasons.py` (69 tests, all passing;
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests) covering result-model
+  shape/immutability/tuple-serialization (no `recommendation_action`,
+  `reason_code`, `primary_reason`, `supporting_reasons`, confidence, score,
+  rank, priority, amount, or suitability field), incompatible-input
+  rejection (`AttributeError`, no silent coercion, no broad exception
+  handling), campaign-ID matching (all six IDs equal resolves normally;
+  each of the five non-anchor mismatches and a five-way simultaneous
+  mismatch each raise the exact approved `ValueError` message with no
+  result resolved and no ID silently preferred; the ID-equality guard
+  verified via AST to precede any reason resolution), the exact HOLD
+  precedence (Paused alone; Paused-and-unassessable yielding
+  `PAUSED_CAMPAIGN` only; unassessable alone; multiple-`SUITABLE`
+  ambiguity; no-valid-fallback — the last two both producing
+  `HELD_FOR_MANUAL_REVIEW`; confirmed never used for a non-HOLD action),
+  the exact INCREASE mapping, all seven approved `MAINTAIN` mappings via
+  both direct construction and the real Stage 3/5/6/8/10–21 production
+  path (reusing Stage 21's exact KPI fixtures), the exact REDUCE mapping,
+  the two additional `MAINTAIN` outcomes reachable only via a Stage 19
+  availability block on an otherwise diagonal-`SUITABLE` direction (a
+  campaign at maximum budget blocking `INCREASE` on
+  `ABOVE_TARGET`+`IMPROVING`; a protected campaign blocking `REDUCE` on
+  `BELOW_TARGET`+`DECLINING`), non-empty/deduplicated tuples across every
+  `PerformanceBand`×`TrendDirection` combination and every HOLD-producing
+  scenario, performance-reason-precedes-trend-reason ordering confirmed
+  independent of `ReasonCode`'s enum declaration order and not derived
+  from any `sorted()` call, an exhaustive sweep confirming only the eight
+  approved codes ever appear and the remaining twelve never appear,
+  diagnostic-fact independence (`WARNING` tracking, protection, test
+  status, and a tighter `campaign_max_change_percentage` each confirmed to
+  add no reason), earlier-stage separation (AST-verified no call to
+  `resolve_campaign_recommendation_action`/any other Stage 1–21 function;
+  exactly fourteen authorised field accesses verified via AST), no
+  production batch function, and sample-data integration through
+  `validate_campaign_csv` + the real production chain over
+  `data/sample_campaigns.csv` (`G001`/`M001`/`G003` all
+  `(NEAR_TARGET, RECENT_TREND_STABLE)`; `G002`
+  `(ABOVE_TARGET_STRONG, RECENT_TREND_IMPROVING)`). `tests/test_models.py`
+  (Stage 1), `tests/test_validation.py` (Stage 2), `tests/test_metrics.py`
+  (Stage 3), `tests/test_pacing.py` (Stage 4), `tests/test_classification.py`
+  (Stage 5), `tests/test_trend_classification.py` (Stage 6),
+  `tests/test_confidence_classification.py` (Stage 7),
+  `tests/test_tracking_assessment.py` (Stage 8), and
+  `tests/test_pacing_interpretation.py` (Stage 9) re-run and confirmed
+  passing — no behavioural regression, and no existing test file required
+  modification this stage. Full suite: 944 tests passing (92 Stage 1 + 44
+  Stage 2 + 28 Stage 3 + 30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 +
+  30 Stage 8 + 33 Stage 9 + 322 Stage 10–18 combined in
+  `tests/test_constraints.py` + 61 Stage 19 in `tests/test_availability.py`
+  + 67 Stage 20 in `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py` + 69 Stage 22 in `tests/test_reasons.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignRecommendationReason` fields;
+  the HOLD-precedence mirroring Stage 21; the INCREASE/MAINTAIN/REDUCE
+  performance/trend mapping tables; the approved reason-code scope and
+  exclusions), `docs/DECISION_RULES.md` (frozen Stage 22 deterministic
+  campaign recommendation reasons rule, including the exact HOLD
+  precedence, the exact INCREASE/MAINTAIN/REDUCE mapping, the exact six
+  inputs and fourteen authorised fields, the campaign-ID policy and error,
+  the approved reason-code scope, the permanent exclusions and their
+  reasons, and the revised Pending section reflecting the eight now-frozen
+  `ReasonCode` trigger conditions and the twelve still-pending), and
+  `docs/TEST_SCENARIOS.md` (53 concrete Stage 22 scenarios).

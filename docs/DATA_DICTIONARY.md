@@ -954,11 +954,82 @@ anywhere. `RecommendationAction` selection here is a **provisional
 direction only** — not a final allocated movement, not a monetary amount,
 and not a cross-campaign judgement.
 
+## Campaign Recommendation Reason Fields (`src/reasons.py`)
+
+Produced by `resolve_campaign_recommendation_reason(recommendation:
+CampaignRecommendation, campaign: CampaignInput, suitability:
+CampaignActionSuitability, tracking: CampaignTrackingAssessment,
+performance: CampaignPerformanceClass, trend: CampaignTrendClass) ->
+CampaignRecommendationReason`, one result per already-selected Stage 21
+recommendation paired with the exact upstream facts Stage 21 itself
+consumed or could have consumed. `CampaignRecommendationReason` is frozen
+(immutable) and rejects unknown fields (`extra="forbid"`).
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | Copied from `recommendation.campaign_id`, after confirming it matches `campaign.campaign_id`, `suitability.campaign_id`, `tracking.campaign_id`, `performance.campaign_id`, and `trend.campaign_id`. |
+| `reason_codes` | `tuple[ReasonCode, ...]` | A non-empty, ordered, deduplicated set of `ReasonCode` explaining only the facts that causally participated in Stage 21's decision. |
+
+**Explains, does not select.** Stage 22 explains an already-selected
+`RecommendationAction`; it does not select or change it, and never calls
+`resolve_campaign_recommendation_action` or any other Stage 1–21
+production function.
+
+**HOLD precedence**, mirroring Stage 21's exact rule order:
+
+1. `campaign.status is CampaignStatus.PAUSED` → `(PAUSED_CAMPAIGN,)`.
+   Remains the sole reason even when tracking is simultaneously
+   unassessable — Stage 21's own short-circuit logic never reaches the
+   assessability check once Paused has already resolved `HOLD`.
+2. Otherwise, `not tracking.is_assessable` → `(TRACKING_UNRELIABLE,)`.
+3. Otherwise (multiple-`SUITABLE` ambiguity or no valid `MAINTAIN`
+   fallback — the only two remaining ways Stage 21 can produce `HOLD`) →
+   `(HELD_FOR_MANUAL_REVIEW,)`. Never used for a non-HOLD action.
+
+**INCREASE/MAINTAIN/REDUCE mapping.** Two fixed, immutable lookup tables
+applied to `performance.performance_band`/`trend.trend_direction` — the
+same pair Stage 20 used to determine suitability:
+
+| `PerformanceBand` | Reason |
+|---|---|
+| `ABOVE_TARGET` | `ABOVE_TARGET_STRONG` |
+| `ON_TARGET` | `NEAR_TARGET` |
+| `BELOW_TARGET` | *(no performance reason — no approved severity classification exists)* |
+
+| `TrendDirection` | Reason |
+|---|---|
+| `IMPROVING` | `RECENT_TREND_IMPROVING` |
+| `STABLE` | `RECENT_TREND_STABLE` |
+| `DECLINING` | `RECENT_TREND_DECLINING` |
+
+The performance reason (when available) precedes the trend reason. This
+reproduces exactly the seven approved `MAINTAIN` cells (`ABOVE_TARGET`+`STABLE`,
+`ABOVE_TARGET`+`DECLINING`, `ON_TARGET`+`IMPROVING`, `ON_TARGET`+`STABLE`,
+`ON_TARGET`+`DECLINING`, `BELOW_TARGET`+`IMPROVING`, `BELOW_TARGET`+`STABLE`)
+and additionally, consistently, the two `MAINTAIN` outcomes reachable only
+when Stage 19 availability blocks an otherwise diagonal-`SUITABLE`
+direction — the identical, already-approved mapping applied unchanged, not
+a new invented rule.
+
+**Exclusions.** `TRACKING_WARNING`, `INSUFFICIENT_CONVERSION_VOLUME`, and
+`PROTECTED_FROM_REDUCTION` are never emitted — none causally participates
+in Stage 21's decision. `BELOW_TARGET_MODERATE`, `BELOW_TARGET_SEVERE`,
+and `STRONG_LONG_TERM_RECENT_DECLINE` are never emitted — no approved
+severity classification exists; this is an intentional, documented
+limitation, not an invitation to invent a threshold.
+`CAMPAIGN_CAP_REACHED`, `CAMPAIGN_FLOOR_REACHED`,
+`TEST_BUDGET_FLOOR_APPLIED`, and `MAX_CHANGE_LIMIT_APPLIED` are never
+emitted — no Stage 15–18 result preserves which constraint operand was
+actually binding. `NO_ELIGIBLE_RECIPIENT` and `ACCOUNT_RESERVE_REQUIRED`
+are never emitted — both are cross-campaign allocation-domain outcomes.
+`recommendation_action` is never duplicated on this result — callers
+retain the separately-resolved `CampaignRecommendation`.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, `ReasonCode`, numeric prioritisation
-> scoring, ranking, allocation).
+> `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
+> conditions, numeric prioritisation scoring, ranking, allocation).
 
 ## Export Fields
 
