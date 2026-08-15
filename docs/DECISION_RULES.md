@@ -1657,6 +1657,115 @@ final allocated movement.
   the first time at Stage 23, rather than a new dedicated module being
   created as at Stages 19–22.
 
+### Stage 24 — Deterministic Cross-Campaign Reallocation Ranking
+
+- **Rule.** Stage 24 is the first genuinely cross-campaign responsibility
+  in this repository. For a collection of already-selected
+  `CampaignRecommendation` (Stage 21) matched by `campaign_id` against a
+  collection of already-calculated `CampaignReallocationPriorityScore`
+  (Stage 23), `rank_campaign_reallocation_priorities` produces two
+  completely independent, dense-ranked, direction-scoped sequences —
+  `increase_rankings` and `reduce_rankings` — for later consumption by an
+  allocation stage. It never changes any recommendation, recalculates any
+  score, normalises any score, or calculates any monetary amount.
+- **Direction separation.** `INCREASE` and `REDUCE` candidates are never
+  compared against each other, consistent with Stage 23's frozen rule that
+  its score is comparable only within the same direction. The
+  first-ranked `INCREASE` campaign and the first-ranked `REDUCE` campaign
+  may both hold rank `1`; their ranks carry no relationship to one
+  another. No global combined rank is ever constructed, and no campaign
+  ever crosses direction.
+- **Eligible population.** Only a directional recommendation
+  (`INCREASE`/`REDUCE`) paired with a strictly positive
+  `reallocation_priority_score` is ranked:
+  ```
+  INCREASE + score > 0   → included in increase_rankings
+  REDUCE   + score > 0   → included in reduce_rankings
+  INCREASE + score == 0  → excluded
+  REDUCE   + score == 0  → excluded
+  MAINTAIN (any score)   → excluded
+  HOLD     (any score)   → excluded
+  ```
+  A zero-scored directional recommendation — reachable through Stage 23's
+  `Confidence.NOT_ASSESSABLE` override — is excluded because Stage 23 has
+  already determined it has no reliable ranking priority. Exclusion
+  produces no output record, no reason code, and no error, and never
+  changes the excluded campaign's `CampaignRecommendation` or
+  `CampaignReallocationPriorityScore`. No excluded-campaign collection is
+  created.
+- **Sorting and dense ranking.** Within each direction: sort by
+  `reallocation_priority_score` descending, then by `campaign_id`
+  ascending solely to fix the serialization order of tied-score records —
+  `campaign_id` never affects the assigned rank and is never used as a
+  business-priority key. Ranks are dense, start at `1`, and are plain
+  `int`: equal scores share the same rank with no gap in the next rank
+  (`100, 80, 80, 60` → `1, 2, 2, 3`; all equal → `1, 1, 1`). No other
+  field — `confidence_component`, `business_priority_component`, input
+  position, platform, budget, performance, trend, pacing, or monetary
+  capacity — is ever used as a sort key, since every component the score
+  already reflects must not receive additional weight through secondary
+  sorting.
+- **No normalisation.** Stage 23's score is used completely unchanged —
+  no percentage, percentile, portfolio-relative transform, min-max
+  normalisation, z-score, or direction-relative transformation is ever
+  computed. A single candidate scoring `20` remains `20`.
+- **Matching, not positional pairing.** `recommendations` and `scores`
+  are matched exclusively by `campaign_id` value equality — never by
+  tuple position, and `zip` is never used. Every `campaign_id` must be
+  unique within each tuple, and the two tuples' `campaign_id` sets must
+  be exactly equal. Validation completes fully before any filtering,
+  sorting, or rank assignment: a repeated `campaign_id` within
+  `recommendations` raises exactly `ValueError("Recommendation campaign
+  IDs must be unique when ranking reallocation priorities.")`; a repeated
+  `campaign_id` within `scores` raises exactly `ValueError("Score
+  campaign IDs must be unique when ranking reallocation priorities.")`
+  (checked only after recommendation-uniqueness passes); a mismatched
+  `campaign_id` set between the two tuples raises exactly
+  `ValueError("Recommendation and score campaign IDs must match when
+  ranking reallocation priorities.")`. Two empty input tuples are valid
+  and return `CampaignReallocationRanking(increase_rankings=(),
+  reduce_rankings=())` without error.
+- **Exact calculation input and authorised fields.**
+  `recommendation.campaign_id`, `recommendation.recommendation_action`,
+  `score.campaign_id`, and `score.reallocation_priority_score` are the
+  only four fields read, across exactly two input tuple types
+  (`tuple[CampaignRecommendation, ...]`,
+  `tuple[CampaignReallocationPriorityScore, ...]`). No Stage 1–23
+  production function is ever called — Stage 24 consumes their
+  already-approved outputs directly. `confidence_component`,
+  `business_priority_component`, every campaign-input field, and every
+  performance/trend/pacing/confidence/suitability/availability/tracking/
+  reason/monetary field are never read.
+- **Determinism and immutability.** Neither input tuple nor any contained
+  `CampaignRecommendation`/`CampaignReallocationPriorityScore` is ever
+  mutated or sorted in place; every output object is newly constructed.
+  Supplying the same logical records in a different input order always
+  produces identical serialized output.
+- **Monetary and allocation boundary.** Stage 24 never imports, reads, or
+  infers `CampaignRawIncreaseLimit`, `CampaignRawDecreaseLimit`,
+  `CampaignEffectiveDecreaseLimit`, static budget room, test-floor room,
+  percentage movement cap, binding-constraint identity, a monetary
+  recommendation amount, donor/recipient matching, partial allocation, or
+  conservation. It hands a later allocation stage only ranked campaign
+  IDs, their direction-scoped dense ranks, and their unchanged Stage 23
+  scores.
+- **Result models.** `RankedCampaignPriority` (frozen, immutable,
+  `extra="forbid"`; exactly `campaign_id: str`, `rank: int` (`>= 1`),
+  `reallocation_priority_score: int` (`1..100`)) does not carry
+  `RecommendationAction` — direction is represented structurally by
+  membership in `CampaignReallocationRanking.increase_rankings` or
+  `.reduce_rankings`. `CampaignReallocationRanking` (frozen, immutable,
+  `extra="forbid"`; exactly `increase_rankings:
+  tuple[RankedCampaignPriority, ...]`, `reduce_rankings:
+  tuple[RankedCampaignPriority, ...]`) permits either or both tuples to be
+  empty.
+- **Dedicated module.** `src/ranking.py` is a new production module,
+  distinct from `src/scoring.py`, `src/recommendation.py`,
+  `src/reasons.py`, and `src/allocation.py` — Stage 24 ranks
+  already-scored campaigns across a portfolio, a responsibility separate
+  from single-campaign scoring and from the later monetary allocation
+  decision.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -1697,12 +1806,18 @@ final allocated movement.
   only — no monetary amount is calculated. The six conflicting performance/trend
   cells' precedence remains deliberately left `NEUTRAL` rather than resolved;
   `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` effects, the
-  remaining `ReasonCode` trigger conditions (see below), cross-campaign
-  ranking/prioritisation, allocation, and conservation all remain pending
-  later stages. Stage 23 resolved single-campaign reallocation priority
-  scoring using `Confidence` and `BusinessPriority` (see above) — per-campaign
-  scoring is not itself known to require cross-campaign data; only
-  normalisation, ranking/prioritisation, and allocation are.
+  remaining `ReasonCode` trigger conditions (see below), a distinct
+  monetary recommendation-amount stage (if required separately from
+  allocation), allocation, and conservation all remain pending later
+  stages. Stage 23 resolved single-campaign reallocation priority scoring
+  using `Confidence` and `BusinessPriority`, and Stage 24 resolved
+  cross-campaign, direction-separated dense ranking of those scores (see
+  above) — per-campaign scoring is not itself known to require
+  cross-campaign data; ranking was the first responsibility that
+  genuinely does. Portfolio-wide or percentile normalisation remains
+  unused — Stage 24 confirmed the fixed Stage 23 `0..100` scale is used
+  unchanged, and normalising small or single-candidate groups would
+  distort that fixed meaning.
 - **Remaining `ReasonCode` trigger conditions.** Stage 22 resolved the trigger
   conditions for `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
   `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,

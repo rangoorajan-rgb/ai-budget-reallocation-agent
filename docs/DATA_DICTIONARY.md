@@ -1,8 +1,9 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 23 (adds deterministic per-campaign
-> reallocation priority scoring — `CampaignReallocationPriorityScore` —
-> from `src/scoring.py` — to the Stage 1 enumerations, numerical constants,
+> Sprint 1, Development Stage 24 (adds the first genuinely cross-campaign
+> responsibility — deterministic, direction-separated dense reallocation
+> ranking — `CampaignReallocationRanking`/`RankedCampaignPriority` — from
+> `src/ranking.py` — to the Stage 1 enumerations, numerical constants,
 > core input models, CSV schema, Stage 2 validation reporting, Stage 3
 > metric facts, Stage 4 pacing facts, Stage 5 performance classification,
 > Stage 6 trend classification, Stage 7 conversion-volume confidence
@@ -14,10 +15,12 @@
 > increase limit, Stage 17 raw decrease limit, Stage 18 protection-adjusted
 > effective decrease limit, Stage 19 campaign action availability, Stage 20
 > campaign action suitability, Stage 21 recommendation-action selection,
-> and Stage 22 recommendation reasons). Combined assessment,
+> Stage 22 recommendation reasons, and Stage 23 single-campaign
+> reallocation priority scoring). Combined assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, cross-campaign ranking/prioritisation, allocation, and other
-> derived/decision fields, plus export fields, are pending later stages.
+> conditions, a distinct monetary recommendation-amount stage if required,
+> allocation, and other derived/decision fields, plus export fields, are
+> pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -1114,11 +1117,93 @@ other campaign's data is read, compared, or required.
 ambient `Decimal` context applies. No negative value and no value greater
 than `100` is ever produced. No multiplication or division is performed.
 
+## Campaign Reallocation Ranking Fields (`src/ranking.py`)
+
+Produced by `rank_campaign_reallocation_priorities(recommendations:
+tuple[CampaignRecommendation, ...], scores:
+tuple[CampaignReallocationPriorityScore, ...]) ->
+CampaignReallocationRanking`, the first genuinely cross-campaign
+responsibility in this repository — every field above this section
+describes a single-campaign result; this section describes a
+whole-portfolio result. `RankedCampaignPriority` and
+`CampaignReallocationRanking` are both frozen (immutable) and reject
+unknown fields (`extra="forbid"`).
+
+### `RankedCampaignPriority`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | The ranked campaign's identity. |
+| `rank` | int (`>= 1`) | Dense rank within this campaign's own recommendation direction. Direction itself is never carried on this record — it is represented structurally by membership in `increase_rankings` or `reduce_rankings`. |
+| `reallocation_priority_score` | int (`1..100`) | The unchanged Stage 23 `reallocation_priority_score` — never recalculated, never normalised. |
+
+### `CampaignReallocationRanking`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `increase_rankings` | `tuple[RankedCampaignPriority, ...]` | Dense-ranked `INCREASE` candidates, score descending. May be empty. |
+| `reduce_rankings` | `tuple[RankedCampaignPriority, ...]` | Dense-ranked `REDUCE` candidates, score descending. May be empty. |
+
+**Direction separation.** `increase_rankings` and `reduce_rankings` are
+completely independent — the first-ranked `INCREASE` campaign and the
+first-ranked `REDUCE` campaign may both hold rank `1`, and their ranks
+carry no relationship to one another. No global combined rank exists
+anywhere on this result, and no campaign ever appears in both tuples.
+
+**Eligible population.** Only a directional recommendation
+(`INCREASE`/`REDUCE`) paired with a strictly positive
+`reallocation_priority_score` is ranked. `MAINTAIN` and `HOLD` are always
+excluded, regardless of score. A directional recommendation paired with a
+zero score — reachable through Stage 23's `Confidence.NOT_ASSESSABLE`
+override — is also excluded, because Stage 23 has already determined it
+has no reliable ranking priority. Exclusion produces no output record, no
+reason code, and no error, and never changes the excluded campaign's
+`CampaignRecommendation` or `CampaignReallocationPriorityScore`.
+
+**Dense ranking.** Within each direction, candidates are sorted by
+`reallocation_priority_score` descending; equal scores share the same
+rank with no gap in the next rank (`100, 80, 80, 60` → `1, 2, 2, 3`; all
+equal → `1, 1, 1`). `campaign_id` ascending governs only the
+serialization order of tied-score records — it never influences the
+assigned rank and is never used as a business-priority key. No component
+already reflected in the Stage 23 total (`confidence_component`,
+`business_priority_component`), and no other field (input position,
+platform, budget, performance, trend, pacing, monetary capacity), is ever
+used as a sort key.
+
+**No normalisation.** Stage 23's score is used completely unchanged — no
+percentage, percentile, portfolio-relative transform, min-max
+normalisation, z-score, or direction-relative transformation is ever
+computed. A single candidate scoring `20` remains `20`.
+
+**Matching, not positional pairing.** `recommendations` and `scores` are
+matched exclusively by `campaign_id` value equality — never by tuple
+position, and `zip` is never used. Both input tuples' `campaign_id`
+values must each be unique, and the two tuples' `campaign_id` sets must
+be exactly equal; violations raise `ValueError` before any filtering,
+sorting, or rank assignment. Two empty input tuples are valid and produce
+an empty (not erroneous) result.
+
+**Determinism.** Neither input tuple nor any contained
+`CampaignRecommendation`/`CampaignReallocationPriorityScore` is ever
+mutated or sorted in place. Supplying the same logical records in a
+different input order always produces identical serialized output.
+
+**Monetary and allocation boundary.** No monetary constraint result
+(`CampaignRawIncreaseLimit`, `CampaignRawDecreaseLimit`,
+`CampaignEffectiveDecreaseLimit`, static budget room, test-floor room,
+percentage movement cap), binding-constraint identity, monetary
+recommendation amount, donor/recipient matching, partial allocation, or
+conservation check is ever performed here. Stage 24 hands a later
+allocation stage only ranked campaign IDs, their direction-scoped dense
+ranks, and their unchanged Stage 23 scores.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, cross-campaign ranking/prioritisation, allocation).
+> conditions, a distinct monetary recommendation-amount stage if required,
+> allocation).
 
 ## Export Fields
 

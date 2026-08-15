@@ -1151,21 +1151,117 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 24 — Deterministic Cross-Campaign Reallocation Ranking (complete)
+
+- [x] `src/ranking.py` (new dedicated module, the first genuinely
+      cross-campaign responsibility in this repository — not added to
+      `src/scoring.py`, `src/recommendation.py`, `src/reasons.py`, or
+      `src/allocation.py`, since ranking already-scored campaigns across a
+      portfolio is a responsibility separate from single-campaign scoring
+      and from the later monetary allocation decision) —
+      `RankedCampaignPriority` (frozen, `extra="forbid"`: `campaign_id`,
+      `rank: int` `>= 1`, `reallocation_priority_score: int` `1..100` —
+      does not carry `RecommendationAction`; direction is represented
+      structurally by tuple membership), `CampaignReallocationRanking`
+      (frozen, `extra="forbid"`: `increase_rankings:
+      tuple[RankedCampaignPriority, ...]`, `reduce_rankings:
+      tuple[RankedCampaignPriority, ...]`, either or both legitimately
+      empty), and `rank_campaign_reallocation_priorities(recommendations:
+      tuple[CampaignRecommendation, ...], scores:
+      tuple[CampaignReallocationPriorityScore, ...]) ->
+      CampaignReallocationRanking`. `src/scoring.py`, `src/recommendation.py`,
+      `src/reasons.py`, `src/allocation.py`, `src/conservation.py`,
+      `src/constants.py` (no enum added or changed) unchanged.
+- [x] **Approved direction separation**: `INCREASE` and `REDUCE`
+      candidates are never compared against each other; the first-ranked
+      campaign in each direction may both hold rank `1` with no
+      relationship between them; no global combined rank exists; no
+      campaign ever crosses direction.
+- [x] **Approved eligible population**: only `INCREASE`/`REDUCE` paired
+      with a strictly positive score is ranked; `MAINTAIN`/`HOLD` are
+      always excluded regardless of score; a zero-scored directional
+      recommendation (reachable via Stage 23's `NOT_ASSESSABLE` override)
+      is also excluded — no output record, no reason code, no error, no
+      mutation of the excluded campaign's recommendation or score, and no
+      excluded-campaign collection is created.
+- [x] **Approved matching policy**: `recommendations` and `scores` are
+      matched exclusively by `campaign_id` value equality, never by tuple
+      position (`zip` never used, AST-verified). Validation completes
+      fully before any filtering, sorting, or rank assignment (AST-verified
+      order): a repeated ID within `recommendations` raises exactly
+      `ValueError("Recommendation campaign IDs must be unique when
+      ranking reallocation priorities.")`; a repeated ID within `scores`
+      raises exactly `ValueError("Score campaign IDs must be unique when
+      ranking reallocation priorities.")`; a mismatched ID set raises
+      exactly `ValueError("Recommendation and score campaign IDs must
+      match when ranking reallocation priorities.")`. Both tuples empty
+      returns a valid empty result, not an error.
+- [x] **Approved sorting and dense-ranking policy**: within each
+      direction, sort by `reallocation_priority_score` descending, then
+      `campaign_id` ascending solely for deterministic tied-record
+      serialization — `campaign_id` never affects the assigned rank and
+      is never a business-priority key. Ranks are dense, start at `1`,
+      plain `int`; equal scores share the same rank with no gap
+      (`100, 80, 80, 60` → `1, 2, 2, 3`; all equal → `1, 1, 1`). No
+      component already reflected in the Stage 23 total, and no other
+      field (input position, platform, budget, performance, trend,
+      pacing, monetary capacity), is ever used as a sort key.
+- [x] **Approved no-normalisation rule**: Stage 23's score is used
+      completely unchanged — no percentage, percentile, portfolio-relative
+      transform, min-max normalisation, z-score, or direction-relative
+      transformation is ever computed.
+- [x] Consumes Stage 21's and Stage 23's already-approved result objects
+      directly (never calls `resolve_campaign_recommendation_action`,
+      `calculate_campaign_reallocation_priority_score`, or any other Stage
+      1–23 production function). Reads exactly the four authorised fields.
+      Never reads `confidence_component`, `business_priority_component`,
+      any campaign-input field, or any
+      performance/trend/pacing/confidence/suitability/availability/
+      tracking/reason/monetary field. Never imports, reads, or infers any
+      raw/effective monetary constraint result, binding-constraint
+      identity, monetary recommendation amount, donor/recipient matching,
+      partial allocation, or conservation.
+- [x] Neither input tuple nor any contained model is ever mutated or
+      sorted in place; every output object is newly constructed; identical
+      serialized output regardless of input order (confirmed by test).
+- [x] `tests/test_ranking.py` (new dedicated test file) — 69 new Stage 24
+      tests, all passing. `tests/test_scoring.py` unchanged at 81 tests,
+      `tests/test_reasons.py` unchanged at 69 tests,
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+      (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+      re-run and confirmed passing — no regression, no existing test file
+      required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 24 (and not yet started)
+
+- Any monetary recommendation amount, allocation, or conservation.
+- Donor/recipient matching or partial allocation of available funds.
+- `PacingStatus` effects on scoring or ranking (no approved
+  direction-specific policy exists).
+- The remaining twelve `ReasonCode` members' trigger conditions (see Stage
+  22's Explicitly-Out-of-Scope list above).
+- `Confidence.NOT_ASSESSABLE` ownership/trigger and the combined
+  confidence/tracking/pacing assessment question.
+- Streamlit interface, Gemini integration, approval workflow, audit, exports.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 24 (not started, scope not yet frozen): requires its own dependency
+Stage 25 (not started, scope not yet frozen): requires its own dependency
 and decision-readiness inspection before being frozen, not file-list order.
-Cross-campaign ranking/prioritisation is the leading candidate — the first
-stage confirmed to genuinely require comparing multiple campaigns
-simultaneously (per the Stage 19 cross-campaign-boundary correction),
-consuming `CampaignReallocationPriorityScore` (Stage 23) per campaign,
-grouped and compared only within each `RecommendationAction` direction
-(`INCREASE` against `INCREASE`, `REDUCE` against `REDUCE`) per Stage 23's
-own approved boundary. Tie-breaking among equal scores, still undecided,
-becomes Stage 24's responsibility. Whether a distinct monetary
-recommendation-amount stage is required before allocation, or whether
-amount computation folds into allocation directly, remains unresolved. The
-remaining twelve `ReasonCode` members' trigger conditions (see Stage 23's
+Whether a distinct monetary recommendation-amount stage is required before
+allocation, or whether amount computation folds into `src/allocation.py`
+directly, remains unresolved — this is the next open architectural
+question. Allocation would consume `CampaignReallocationRanking` (Stage
+24) per direction, alongside monetary constraint results (Stage 16–18)
+consumed separately and directly, never through Stage 24's own output.
+Conservation (`src/conservation.py`) remains the stage after that. The
+remaining twelve `ReasonCode` members' trigger conditions (see Stage 24's
 Explicitly-Out-of-Scope list above) remain open, with two of the four
 blocking categories (performance severity, constraint binding-source
 identity) each potentially warranting their own dedicated stage before

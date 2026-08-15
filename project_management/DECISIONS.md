@@ -2041,3 +2041,123 @@ the master plan already reserved this exact module for "campaign
 prioritization scoring." No existing non-placeholder test file required
 modification.
 **Status:** Frozen.
+
+## 2026-08-15 — Stage 24 approved responsibility and direction separation
+
+**Decision:** Sprint 1, Development Stage 24 is the first genuinely
+cross-campaign responsibility in this repository. It matches each
+already-selected `CampaignRecommendation` (Stage 21) with its
+already-calculated `CampaignReallocationPriorityScore` (Stage 23) by
+`campaign_id`, groups directional candidates into two completely
+independent populations (`INCREASE`, `REDUCE`), excludes campaigns that
+do not require directional movement, ranks eligible campaigns by score
+within their own direction, preserves genuine score ties, and returns an
+immutable, deterministic result for later allocation. It never compares
+`INCREASE` against `REDUCE`, changes any recommendation, recalculates any
+score, normalises any score, calculates any monetary amount, consumes any
+monetary constraint, allocates funds, or enforces conservation. The
+first-ranked `INCREASE` campaign and the first-ranked `REDUCE` campaign
+may both hold rank `1`; their ranks carry no relationship to one another;
+no global combined rank is ever constructed; no campaign ever crosses
+direction.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 24: exact models, function, and matching policy
+
+**Decision:** `RankedCampaignPriority` (frozen, immutable;
+`extra="forbid"`; exactly `campaign_id: str`, `rank: int` constrained
+`>= 1`, `reallocation_priority_score: int` constrained `1..100`) does not
+carry `RecommendationAction` — direction is represented structurally by
+membership in `CampaignReallocationRanking.increase_rankings` or
+`.reduce_rankings`. `CampaignReallocationRanking` (frozen, immutable;
+`extra="forbid"`; exactly `increase_rankings:
+tuple[RankedCampaignPriority, ...]`, `reduce_rankings:
+tuple[RankedCampaignPriority, ...]`) permits either or both tuples to be
+empty. The sole public function is
+`rank_campaign_reallocation_priorities(recommendations:
+tuple[CampaignRecommendation, ...], scores:
+tuple[CampaignReallocationPriorityScore, ...]) ->
+CampaignReallocationRanking`; it reads exactly four fields:
+`recommendation.campaign_id`, `recommendation.recommendation_action`,
+`score.campaign_id`, and `score.reallocation_priority_score`.
+**Matching is exclusively by `campaign_id` value equality, never by tuple
+position** — `zip` is never used (AST-verified). Every `campaign_id` must
+be unique within each input tuple, and the two tuples' `campaign_id` sets
+must be exactly equal. Validation completes fully — in this exact order,
+verified via AST line-number comparison against the single
+candidate-building loop — before any filtering, sorting, or rank
+assignment: a repeated `campaign_id` within `recommendations` raises
+exactly `ValueError("Recommendation campaign IDs must be unique when
+ranking reallocation priorities.")`; a repeated `campaign_id` within
+`scores` raises exactly `ValueError("Score campaign IDs must be unique
+when ranking reallocation priorities.")` (checked only after
+recommendation-uniqueness passes, so simultaneous duplicates in both
+collections surface the recommendation error); a mismatched
+`campaign_id` set raises exactly `ValueError("Recommendation and score
+campaign IDs must match when ranking reallocation priorities.")`. Two
+empty input tuples are valid and return
+`CampaignReallocationRanking(increase_rankings=(), reduce_rankings=())`
+without error. `None`/dict-shaped inputs are never silently coerced —
+ordinary Python `TypeError`/`AttributeError` propagates.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 24: exact eligible-population, sorting, and dense-ranking policy
+
+**Decision:**
+```
+INCREASE + score > 0   → included in increase_rankings
+REDUCE   + score > 0   → included in reduce_rankings
+INCREASE + score == 0  → excluded
+REDUCE   + score == 0  → excluded
+MAINTAIN (any score)   → excluded
+HOLD     (any score)   → excluded
+```
+A zero-scored directional recommendation — reachable through Stage 23's
+`Confidence.NOT_ASSESSABLE` override — is excluded because Stage 23 has
+already determined it has no reliable ranking priority. `MAINTAIN`/`HOLD`
+are excluded by action regardless of their paired score value (confirmed
+by test using a synthetic positive score, since Stage 23 itself never
+actually produces one for either). Exclusion produces no output record,
+no reason code, and no error, and never changes the excluded campaign's
+`CampaignRecommendation` or `CampaignReallocationPriorityScore`; no
+excluded-campaign collection exists anywhere in the result. Within each
+direction, candidates are sorted by `reallocation_priority_score`
+descending, then `campaign_id` ascending solely to fix the serialization
+order of tied-score records — `campaign_id` never affects the assigned
+rank and is never used as a business-priority key, and no component
+already reflected in the Stage 23 total (`confidence_component`,
+`business_priority_component`), nor input position, platform, budget,
+performance, trend, pacing, or monetary capacity, is ever used as a sort
+key. Ranking uses **dense** ranks: `1`-based, plain `int`, equal scores
+share the same rank with no gap before the next distinct score
+(`100, 80, 80, 60` → `1, 2, 2, 3`; all equal → `1, 1, 1`). Stage 23's
+score is used completely unchanged — **no normalisation** of any kind
+(percentage, percentile, portfolio-relative, min-max, z-score, or
+direction-relative transform) is ever computed; a single candidate
+scoring `20` remains `20`.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 24: determinism, monetary boundary, and dedicated module
+
+**Decision:** Neither input tuple nor any contained
+`CampaignRecommendation`/`CampaignReallocationPriorityScore` is ever
+mutated or sorted in place (`sorted()` is used, never in-place `.sort()`,
+AST-verified); every output object is newly constructed; supplying the
+same logical records in a different input order always produces
+identical serialized output (confirmed by test with shuffled, reversed,
+and independently-reordered input tuples). Stage 24 never imports, reads,
+or infers `CampaignRawIncreaseLimit`, `CampaignRawDecreaseLimit`,
+`CampaignEffectiveDecreaseLimit`, static budget room, test-floor room,
+percentage movement cap, binding-constraint identity, a monetary
+recommendation amount, donor/recipient matching, partial allocation, or
+conservation (AST- and module-attribute-verified). It hands a later
+allocation stage only ranked campaign IDs, their direction-scoped dense
+ranks, and their unchanged Stage 23 scores. **Dedicated module:**
+`src/ranking.py` is a new production module, distinct from
+`src/scoring.py`, `src/recommendation.py`, `src/reasons.py`, and
+`src/allocation.py` — Stage 24 ranks already-scored campaigns across a
+portfolio, a responsibility separate from single-campaign scoring and
+from the later monetary allocation decision. No `Decimal`/`float` is used
+anywhere. No existing non-placeholder test file required modification —
+a new dedicated test file was created instead.
+**Status:** Frozen.

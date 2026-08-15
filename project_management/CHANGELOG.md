@@ -1806,3 +1806,150 @@ All notable changes to this project are documented in this file.
   single-campaign scoring is now frozen while cross-campaign ranking,
   allocation, and conservation remain pending), and `docs/TEST_SCENARIOS.md`
   (42 concrete Stage 23 scenarios).
+
+- Sprint 1, Development Stage 24: added a new dedicated module,
+  `src/ranking.py` — the first genuinely cross-campaign responsibility in
+  this repository — containing `RankedCampaignPriority` (frozen,
+  immutable, `extra="forbid"`: `campaign_id`, `rank: int` `>= 1`,
+  `reallocation_priority_score: int` `1..100` only — does not carry
+  `RecommendationAction`; direction is represented structurally by tuple
+  membership), `CampaignReallocationRanking` (frozen, immutable,
+  `extra="forbid"`: `increase_rankings: tuple[RankedCampaignPriority,
+  ...]`, `reduce_rankings: tuple[RankedCampaignPriority, ...]`, either or
+  both legitimately empty), and
+  `rank_campaign_reallocation_priorities(recommendations:
+  tuple[CampaignRecommendation, ...], scores:
+  tuple[CampaignReallocationPriorityScore, ...]) ->
+  CampaignReallocationRanking`. Matches each already-selected
+  `CampaignRecommendation` (Stage 21) with its already-calculated
+  `CampaignReallocationPriorityScore` (Stage 23) by `campaign_id`, groups
+  directional candidates into two completely independent populations
+  (`INCREASE`, `REDUCE`), excludes non-directional campaigns, ranks
+  eligible campaigns by score within their own direction, preserves
+  genuine score ties, and returns an immutable, deterministic result for
+  later allocation. **Approved direction separation:** `INCREASE` and
+  `REDUCE` are never compared; the first-ranked campaign in each
+  direction may both hold rank `1` with no relationship between them; no
+  global combined rank exists; no campaign ever crosses direction.
+  **Approved eligible population:**
+  `INCREASE`/`REDUCE`+score>0→included; `INCREASE`/`REDUCE`+score==0→excluded;
+  `MAINTAIN`/`HOLD` (any score)→excluded — a zero-scored directional
+  recommendation (reachable via Stage 23's `NOT_ASSESSABLE` override) is
+  excluded because Stage 23 already determined it has no reliable ranking
+  priority; exclusion produces no output record, no reason code, no
+  error, and no mutation of the excluded campaign's recommendation or
+  score, and no excluded-campaign collection is created. **Approved
+  matching policy:** exclusively by `campaign_id` value equality, never
+  by tuple position (`zip` never used, AST-verified); every `campaign_id`
+  unique within each tuple; the two tuples' `campaign_id` sets must match
+  exactly; validation completes fully, in exact order (AST-verified),
+  before any filtering, sorting, or rank assignment — a repeated ID
+  within `recommendations` raises exactly `ValueError("Recommendation
+  campaign IDs must be unique when ranking reallocation priorities.")`; a
+  repeated ID within `scores` raises exactly `ValueError("Score campaign
+  IDs must be unique when ranking reallocation priorities.")`; a
+  mismatched ID set raises exactly `ValueError("Recommendation and score
+  campaign IDs must match when ranking reallocation priorities.")`; both
+  tuples empty returns a valid empty result, not an error. **Approved
+  sorting and dense-ranking policy:** within each direction, sort by
+  `reallocation_priority_score` descending, then `campaign_id` ascending
+  solely for deterministic tied-record serialization — `campaign_id`
+  never affects the assigned rank and is never a business-priority key;
+  no component already reflected in the Stage 23 total, and no other
+  field (input position, platform, budget, performance, trend, pacing,
+  monetary capacity), is ever used as a sort key; ranks are dense,
+  `1`-based, plain `int`, with equal scores sharing the same rank and no
+  gap before the next distinct score. **Approved no-normalisation rule:**
+  Stage 23's score is used completely unchanged — no percentage,
+  percentile, portfolio-relative, min-max, z-score, or direction-relative
+  transform is ever computed. **Consumes Stage 21's and Stage 23's
+  already-approved result objects directly** (never calls
+  `resolve_campaign_recommendation_action`,
+  `calculate_campaign_reallocation_priority_score`, or any other Stage
+  1–23 production function). Reads exactly four authorised fields across
+  two input tuple types. Never reads `confidence_component`,
+  `business_priority_component`, any campaign-input field, or any
+  performance/trend/pacing/confidence/suitability/availability/tracking/
+  reason/monetary field; never imports, reads, or infers any
+  raw/effective monetary constraint result, binding-constraint identity,
+  monetary recommendation amount, donor/recipient matching, partial
+  allocation, or conservation. Neither input tuple nor any contained
+  model is ever mutated or sorted in place (`sorted()`, never in-place
+  `.sort()`); every output object is newly constructed; identical
+  serialized output regardless of input order. No enum was added or
+  changed. A dedicated module was chosen over `src/scoring.py`/
+  `src/recommendation.py`/`src/reasons.py`/`src/allocation.py` because
+  Stage 24 ranks already-scored campaigns across a portfolio, a
+  responsibility separate from single-campaign scoring and from the later
+  monetary allocation decision. `src/scoring.py`, `src/recommendation.py`,
+  `src/reasons.py`, `src/allocation.py`, `src/conservation.py`, and
+  `src/constants.py` are unchanged.
+- Sprint 1, Development Stage 24: added 69 new tests to
+  `tests/test_ranking.py` (new dedicated test file; all passing),
+  covering result-model shape/immutability/range validation/serialization
+  (no `recommendation_action`, `direction`, `confidence_component`,
+  `business_priority_component`, `reason_codes`, `amount`, `allocation`,
+  `excluded`, or `global_rank` field), independently-empty direction
+  tuples, duplicate-recommendation-ID/duplicate-score-ID/mismatched-ID-set
+  validation with exact error messages and confirmed validation order
+  (recommendation-uniqueness checked first when both collections contain
+  duplicates; all validation confirmed via AST to precede the
+  candidate-building loop), both-empty-returns-valid-empty-result,
+  `None`/dict-input rejection without silent coercion, campaign-ID-value
+  matching regardless of tuple position/order (shuffled, reversed, and
+  independently-reordered inputs all producing identical serialized
+  output; `zip` confirmed absent via AST), the complete eligible-
+  population truth table (positive `INCREASE`/`REDUCE` included; zero
+  `INCREASE`/`REDUCE` excluded; `HOLD`/`MAINTAIN` excluded regardless of a
+  synthetic positive paired score; inputs confirmed unchanged after
+  ranking), direction independence (separate tuples; each starting at
+  rank `1`; no global rank field; identical cross-direction scores
+  confirmed unrelated; no campaign ever appearing in both tuples),
+  dense-ranking patterns (`1,2,3`; `1,1,2`; `1,2,2,3`; all-tied `1,1,1`;
+  multiple independent ties), campaign-ID-ascending tied-record
+  serialization confirmed never to alter the assigned rank, absence of
+  normalisation (an unchanged single score preserved exactly),
+  earlier-stage separation and excluded-type/field absence (AST- and
+  module-attribute-verified against every listed exclusion, `Decimal`,
+  and `float`), confirmation `sorted()` (never in-place `.sort()`) is
+  used and no `Mult`/`Div`/`FloorDiv` binary operation exists, no
+  production batch function beyond the approved one, sample-data
+  integration through `validate_campaign_csv` + the real production chain
+  over `data/sample_campaigns.csv` (`increase_rankings` containing only
+  `G002` at rank `1`/score `100`; `reduce_rankings` empty;
+  `G001`/`M001`/`G003` absent from both), and seven test-only hypothetical
+  portfolios (multiple `INCREASE` scores, multiple `REDUCE` scores, both
+  directions populated simultaneously alongside excluded `MAINTAIN`/`HOLD`
+  campaigns, an empty direction, zero-scored directional records in both
+  directions, and no eligible candidates at all).
+  `tests/test_scoring.py` unchanged at 81 tests,
+  `tests/test_reasons.py` unchanged at 69 tests,
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+  (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+  re-run and confirmed passing — no behavioural regression, and no
+  existing non-placeholder test file required modification this stage.
+  Full suite: 1094 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 +
+  30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33
+  Stage 9 + 322 Stage 10–18 combined in `tests/test_constraints.py` + 61
+  Stage 19 in `tests/test_availability.py` + 67 Stage 20 in
+  `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py` + 69 Stage 22 in `tests/test_reasons.py`
+  + 81 Stage 23 in `tests/test_scoring.py` + 69 Stage 24 in
+  `tests/test_ranking.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`RankedCampaignPriority`/
+  `CampaignReallocationRanking` fields; the direction-separation and
+  eligible-population rules; the dense-ranking and campaign-ID-tiebreak
+  policy; the no-normalisation rule; the matching/determinism policy; the
+  monetary/allocation boundary), `docs/DECISION_RULES.md` (frozen Stage 24
+  deterministic cross-campaign reallocation ranking rule, including the
+  exact eligible-population table, the exact sorting/dense-ranking/
+  no-normalisation policy, the exact two inputs and four authorised
+  fields, the matching/uniqueness/mismatch validation policy and exact
+  error messages, the determinism and monetary-boundary guarantees, and
+  the revised Pending section reflecting that cross-campaign ranking is
+  now frozen while a distinct monetary-amount stage, allocation, and
+  conservation remain pending), and `docs/TEST_SCENARIOS.md` (47 concrete
+  Stage 24 scenarios).

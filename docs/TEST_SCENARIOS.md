@@ -934,6 +934,62 @@ ranks, normalises, allocates, or compares across campaigns.
 | 41 | `CampaignReallocationPriorityScore.model_fields` / result attributes | Contains no `recommendation_action`, `reason_codes`, `performance_band`, `trend_direction`, `pacing_status`, `rank`, or `allocation` field. |
 | 42 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–21 results independently calculated per campaign through the real production path, then only the three approved Stage 23 inputs passed, iterating in the test (no production batch function) | `G001=0`, `M001=0`, `G003=0` (all `MAINTAIN`); `G002` (`INCREASE`, `Confidence.HIGH`, `BusinessPriority.HIGH`) → `confidence_component=60`, `business_priority_component=40`, `reallocation_priority_score=100`. No cross-campaign ranking inferred from these four results. |
 
+## Campaign Reallocation Ranking Scenarios
+
+All scenarios below use `rank_campaign_reallocation_priorities(recommendations:
+tuple[CampaignRecommendation, ...], scores:
+tuple[CampaignReallocationPriorityScore, ...]) ->
+CampaignReallocationRanking` from `src/ranking.py`
+(`tests/test_ranking.py` — a dedicated test file). This is the first
+genuinely cross-campaign responsibility — none of these scenarios
+compares `INCREASE` against `REDUCE`, changes a recommendation,
+recalculates or normalises a score, or performs any monetary calculation
+or allocation.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `RankedCampaignPriority` field set | Exactly `campaign_id`, `rank`, `reallocation_priority_score`. |
+| 2 | `CampaignReallocationRanking` field set | Exactly `increase_rankings`, `reduce_rankings`. |
+| 3 | Construct either model with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate either model | Rejected (`frozen=True`). |
+| 5 | `rank=0` | Rejected (`Field(ge=1)`). |
+| 6 | `reallocation_priority_score=0` or `=101` | Rejected (`Field(ge=1, le=100)`). |
+| 7 | Serialization | Tuple-valued fields, not lists; plain `int` values. |
+| 8 | Either or both direction tuples empty | Valid — independently. |
+| 9 | Duplicate `campaign_id` within `recommendations` | Raises `ValueError("Recommendation campaign IDs must be unique when ranking reallocation priorities.")`. |
+| 10 | Duplicate `campaign_id` within `scores` | Raises `ValueError("Score campaign IDs must be unique when ranking reallocation priorities.")`. |
+| 11 | Duplicates in both collections simultaneously | Raises the recommendation-uniqueness error — checked first. |
+| 12 | Recommendation with no matching score | Raises `ValueError("Recommendation and score campaign IDs must match when ranking reallocation priorities.")`. |
+| 13 | Score with no matching recommendation | Raises the same exact `ValueError`. |
+| 14 | Partially mismatched ID sets | Raises the same exact `ValueError`. |
+| 15 | Empty `recommendations`, non-empty `scores` (and the reverse) | Raises the same exact `ValueError`. |
+| 16 | Both `recommendations` and `scores` empty | Returns `CampaignReallocationRanking(increase_rankings=(), reduce_rankings=())` — valid, no error. |
+| 17 | Validation-before-ranking order | Verified via AST: all three `raise` statements precede the single candidate-building `for` loop. |
+| 18 | `None` inputs | Raises `TypeError` (iteration failure), not silently converted. |
+| 19 | Dict-shaped records | Raises `AttributeError`, not silently converted. |
+| 20 | Records supplied in mismatched tuple order (e.g. recommendations reversed relative to scores) | Matched correctly by `campaign_id`, not position — confirmed via AST that `zip` is never called. |
+| 21 | Same logical records in shuffled/reversed input order | Identical serialized output. |
+| 22 | `INCREASE`/`REDUCE` with a positive score | Included in the corresponding direction. |
+| 23 | `INCREASE`/`REDUCE` with a zero score | Excluded — no record, no error, no reason code. |
+| 24 | `HOLD`/`MAINTAIN`, any score (including a synthetic positive score) | Always excluded by action, regardless of score value. |
+| 25 | Inputs after a ranking call | `CampaignRecommendation`/`CampaignReallocationPriorityScore` objects remain unchanged. |
+| 26 | `INCREASE` and `REDUCE` candidates present simultaneously | Two independent tuples; each starts at rank `1`; no shared/global rank field exists anywhere on `CampaignReallocationRanking`. |
+| 27 | Identical scores in opposite directions | No relationship between the two directions' ranks — confirmed independently rank `1` in each. |
+| 28 | Any ranked campaign | Never appears in both `increase_rankings` and `reduce_rankings`. |
+| 29 | Distinct scores `100, 80, 60` | Ranks `1, 2, 3`, sorted descending. |
+| 30 | Tie pattern `100, 100, 80` | Ranks `1, 1, 2`. |
+| 31 | Tie pattern `100, 80, 80, 60` | Ranks `1, 2, 2, 3` — no gap after the tie. |
+| 32 | All candidates tied | Ranks `1, 1, 1` for every candidate. |
+| 33 | Multiple independent ties (`100, 100, 80, 80, 60`) | Ranks `1, 1, 2, 2, 3`. |
+| 34 | Tied-score records supplied in scrambled campaign-ID order | Serialized in `campaign_id` ascending order; rank unaffected. |
+| 35 | Two tied campaigns with very different IDs (e.g. `"Z999"` vs `"A001"`) | Both still rank `1` — `campaign_id` never alters the assigned rank. |
+| 36 | A single candidate scoring `20` | Remains score `20` in the result — no normalisation. |
+| 37 | `rank_campaign_reallocation_priorities` source | Reads only the four authorised fields (`recommendation.campaign_id`/`recommendation_action`, `score.campaign_id`/`reallocation_priority_score`) (AST-verified); calls none of `resolve_campaign_recommendation_action`/`calculate_campaign_reallocation_priority_score`/`resolve_campaign_action_suitability`/`resolve_campaign_action_availability`/`resolve_campaign_recommendation_reason`/`assess_campaign_tracking`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/`calculate_campaign_metrics` (AST-verified). |
+| 38 | `confidence_component`/`business_priority_component`/`ReasonCode`/`CampaignRecommendationReason`/`CampaignPerformanceClass`/`PerformanceBand`/`CampaignTrendClass`/`TrendDirection`/`CampaignPacingClass`/`PacingStatus`/`CampaignConfidenceClass`/`Confidence`/`CampaignTrackingAssessment`/`CampaignActionAvailability`/`CampaignActionSuitability`/`CampaignInput`/`BusinessPriority`/every raw or effective monetary constraint type/`Decimal`/`float`/`normalize`/`normalise`/`allocate`/`allocation`/`conservation` | Never referenced anywhere in `src/ranking.py`'s source (AST-verified) or imported into the module (`hasattr` confirms absence). |
+| 39 | Module source | Uses `sorted()`, never an in-place `.sort()` call (AST-verified); contains no `Mult`/`Div`/`FloorDiv` binary operation. |
+| 40 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–23 results independently calculated per campaign through the real production path, then only the two approved Stage 24 inputs passed (no production batch function) | `increase_rankings=(RankedCampaignPriority(campaign_id="G002", rank=1, reallocation_priority_score=100),)`, `reduce_rankings=()`. `G001`/`M001`/`G003` (all `MAINTAIN`, score `0`) are absent from both tuples. No allocation inferred. |
+| 41–47 | Hypothetical portfolios (test-only, no sample data modified): multiple `INCREASE` scores; multiple `REDUCE` scores; both directions populated simultaneously (including `MAINTAIN`/`HOLD` present and excluded); an empty direction; zero-scored directional records in both directions; no eligible candidates at all (`HOLD`/`MAINTAIN` only) | Each exercises its named policy in isolation; the "no eligible candidates" case returns `CampaignReallocationRanking(increase_rankings=(), reduce_rankings=())`. |
+
 ## Allocation Scenarios
 
 > Pending a later Sprint 1 stage.
