@@ -2161,3 +2161,148 @@ from the later monetary allocation decision. No `Decimal`/`float` is used
 anywhere. No existing non-placeholder test file required modification —
 a new dedicated test file was created instead.
 **Status:** Frozen.
+
+## 2026-08-15 — Post-Stage-24 monetary boundary: no separate amount stage
+
+**Decision:** No distinct single-campaign recommendation-amount stage is
+created. Allocation consumes Stage 24's `CampaignReallocationRanking`,
+Stage 16's `CampaignRawIncreaseLimit`, and Stage 18's
+`CampaignEffectiveDecreaseLimit` directly — matched by `campaign_id`,
+never by tuple position. A monetary limit is a maximum capacity, never a
+guaranteed movement; no campaign automatically receives or donates its
+full capacity merely because it exists. This confirms the inspection
+finding that no original-plan evidence, and no evidence anywhere in the
+repository, ever supported a full-limit-as-recommendation assumption.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 25 approved responsibility and reserve exclusion
+
+**Decision:** Sprint 1, Development Stage 25 converts Stage 24's
+direction-separated, dense-ranked candidate populations into actual,
+balanced, campaign-level monetary movements. It allocates only available
+reduction supply, prioritises campaigns by dense rank, treats limits
+strictly as maximum capacities, allows partial allocations, preserves
+score ties through capacity-proportional allocation, produces exactly
+balanced increase and decrease movements, and remains deterministic and
+auditable. It never spends account reserve, calculates final campaign
+budgets, emits reason codes, changes recommendations/rankings/scores/
+capacities, performs conservation verification as a separate result, or
+uses campaign ID as an ordinary financial preference.
+**`ReviewSetup.initial_account_reserve` is excluded entirely** — its
+authoritative meaning (`docs/DATA_DICTIONARY.md`: *"Budget held back from
+reallocation"*) treats it as protected and unavailable for funding
+increases; `ReviewSetup` is never accepted as an input at all.
+`ReasonCode.ACCOUNT_RESERVE_REQUIRED` remains unassigned. **The only
+funding source is the sum of `effective_decrease_limit` across Stage 24's
+`reduce_rankings`** — unranked decrease-limit records never contribute,
+and reserve never contributes.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 25: exact models, function, and matching policy
+
+**Decision:** `CampaignAllocatedAmount` (frozen, immutable;
+`extra="forbid"`; exactly `campaign_id: str`, `allocated_amount: Currency`
+constrained `>= 0`) never carries direction, rank, score, capacity, or an
+explanation — direction is represented structurally by membership in
+`CampaignReallocationAllocation.increase_allocations` or
+`.decrease_allocations`, never through a negative sign.
+`CampaignReallocationAllocation` (frozen, immutable; `extra="forbid"`;
+exactly `increase_allocations: tuple[CampaignAllocatedAmount, ...]`,
+`decrease_allocations: tuple[CampaignAllocatedAmount, ...]`) contains
+exactly one record per campaign appearing in the corresponding Stage 24
+ranking tuple, including at `Decimal("0.00")` — no campaign is silently
+dropped for being unfunded. The sole public function is
+`allocate_campaign_reallocation(ranking: CampaignReallocationRanking,
+increase_limits: tuple[CampaignRawIncreaseLimit, ...], decrease_limits:
+tuple[CampaignEffectiveDecreaseLimit, ...]) ->
+CampaignReallocationAllocation`; it reads exactly
+`ranking.increase_rankings`, `ranking.reduce_rankings`,
+`ranked.campaign_id`, `ranked.rank` (never
+`ranked.reallocation_priority_score` — Stage 24's dense rank is
+authoritative), `limit.campaign_id`, `limit.raw_increase_limit`, and
+`limit.effective_decrease_limit`. **Matching is exclusively by
+`campaign_id` value equality, never by tuple position** — `zip` is never
+used (AST-verified). Every `campaign_id` must be unique within each limit
+collection, and every ranked campaign must have a matching
+direction-appropriate limit; extra, unranked limit records are legitimate
+and silently ignored, since Stage 16/18 compute a limit for every campaign
+while Stage 24 ranks only a subset. Validation completes fully before any
+allocation arithmetic: a repeated ID within `increase_limits` raises
+exactly `ValueError("Increase-limit campaign IDs must be unique when
+allocating reallocation.")`; a repeated ID within `decrease_limits` raises
+exactly `ValueError("Decrease-limit campaign IDs must be unique when
+allocating reallocation.")`; a ranked campaign missing its
+direction-appropriate limit raises exactly `ValueError("Every ranked
+increase campaign must have a matching increase limit.")` or
+`ValueError("Every ranked decrease campaign must have a matching decrease
+limit.")`. Stage 24's own already-validated guarantees (uniqueness within
+ranking tuples, direction separation, rank correctness, deterministic
+ordering) are trusted, never recalculated or revalidated. Both ranking
+tuples empty is valid and returns two empty allocation tuples.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 25: exact allocation algorithm and tie policy
+
+**Decision:** Allocation proceeds in two phases, each a strict dense-rank
+waterfall. **Phase 1** funds `ranking.increase_rankings` by ascending
+dense rank against total available supply (the sum of ranked donors'
+`effective_decrease_limit`): a tier is fully funded if remaining supply
+covers its total capacity; the first tier remaining supply cannot fully
+cover is split proportionally to capacity via the largest-remainder
+currency method, after which every lower-ranked recipient receives
+`Decimal("0.00")`. **Phase 2** draws the *exact* total allocated in Phase
+1 from `ranking.reduce_rankings`, by the identical waterfall — because
+Phase 1's total can never exceed total available supply, Phase 2 always
+exhausts its target exactly; unused donor capacity beyond that target is
+left unused and is not returned as a separate field. A partially funded
+tier, on either side, is a valid, non-error outcome, as are both
+insufficient supply (total recipient capacity exceeds available supply)
+and excess supply (available supply exceeds total recipient capacity) —
+neither produces a `ReasonCode`.
+**Largest-remainder currency method:** each campaign's exact proportional
+share (`available × capacity ÷ tier capacity`) is computed at
+operand-derived local precision, then floored to `CURRENCY_QUANTUM` via
+`ROUND_DOWN`; the shortfall between the sum of these floors and the exact
+available amount is a whole number of pennies, distributed one at a time,
+in order of each campaign's fractional remainder descending, to the
+campaigns that lost the most to rounding — never adding a penny that
+would push a campaign above its own capacity. If every capacity in a tier
+is exactly zero, every campaign receives `Decimal("0.00")` without
+performing any division. **`campaign_id` ascending breaks only an exact
+tie between two campaigns' fractional remainders** — a narrow, explicitly
+scoped exception to the "campaign ID is a serialization aid only"
+principle established at Stage 24; it has no other role anywhere in this
+stage, never orders recipients against donors, and never influences which
+rank tier is funded or by how much.
+**Status:** Frozen.
+
+## 2026-08-15 — Stage 25: numeric policy, balance invariant, and boundaries
+
+**Decision:** `Decimal` exclusively, never `float`. Every arithmetic
+operation — including simple sums and penny apportionment, not only the
+initial proportional division — runs inside an explicitly-scoped
+`localcontext`, so the ambient global `Decimal` context can never affect
+the result and is never mutated (confirmed by test: mutating ambient
+precision/rounding before calling produces an identical result, and the
+ambient context is restored to its original values afterward). All
+returned amounts are quantized to `CURRENCY_QUANTUM`; zero is always
+exactly `Decimal("0.00")`. No allocation is ever negative (model-enforced
+via `Field(ge=0)`) or above its direction-appropriate capacity.
+`sum(increase_allocations) == sum(decrease_allocations)` always holds — a
+constructed invariant, not a post-hoc check. Output order exactly
+preserves Stage 24's own ranking order; allocated amount, capacity, and
+campaign ID never determine output order. **Not this stage's
+responsibility:** no `ReasonCode` is ever emitted (`NO_ELIGIBLE_RECIPIENT`
+and `ACCOUNT_RESERVE_REQUIRED` remain unassigned), no final campaign
+budget is calculated (`CampaignInput.current_budget` is never read, and
+`CampaignInput` is never accepted as an input), and no conservation
+verification is performed or returned as part of this result — Stage 26
+conservation independently re-verifies the same balance invariant this
+stage already constructs, as a separate, later responsibility;
+conservation must never repair or mutate allocation's result.
+**Dedicated module, existing placeholder filled in:** `src/allocation.py`
+and `tests/test_allocation.py` — placeholder since Sprint 1, reserved by
+the master plan for exactly this responsibility — are filled in for the
+first time, rather than a new module being created. No existing
+non-placeholder test file required modification.
+**Status:** Frozen.

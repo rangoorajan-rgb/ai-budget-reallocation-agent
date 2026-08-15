@@ -990,9 +990,75 @@ or allocation.
 | 40 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–23 results independently calculated per campaign through the real production path, then only the two approved Stage 24 inputs passed (no production batch function) | `increase_rankings=(RankedCampaignPriority(campaign_id="G002", rank=1, reallocation_priority_score=100),)`, `reduce_rankings=()`. `G001`/`M001`/`G003` (all `MAINTAIN`, score `0`) are absent from both tuples. No allocation inferred. |
 | 41–47 | Hypothetical portfolios (test-only, no sample data modified): multiple `INCREASE` scores; multiple `REDUCE` scores; both directions populated simultaneously (including `MAINTAIN`/`HOLD` present and excluded); an empty direction; zero-scored directional records in both directions; no eligible candidates at all (`HOLD`/`MAINTAIN` only) | Each exercises its named policy in isolation; the "no eligible candidates" case returns `CampaignReallocationRanking(increase_rankings=(), reduce_rankings=())`. |
 
-## Allocation Scenarios
+## Campaign Reallocation Allocation Scenarios
 
-> Pending a later Sprint 1 stage.
+All scenarios below use `allocate_campaign_reallocation(ranking:
+CampaignReallocationRanking, increase_limits:
+tuple[CampaignRawIncreaseLimit, ...], decrease_limits:
+tuple[CampaignEffectiveDecreaseLimit, ...]) ->
+CampaignReallocationAllocation` from `src/allocation.py` (`tests/test_allocation.py`
+— fills in the Sprint 1 placeholder pair for the first time). No scenario
+compares `INCREASE` against `REDUCE`, spends reserve, calculates a final
+budget, emits a reason code, or performs conservation verification.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignAllocatedAmount` field set | Exactly `campaign_id`, `allocated_amount`. |
+| 2 | `CampaignReallocationAllocation` field set | Exactly `increase_allocations`, `decrease_allocations`. |
+| 3 | Construct either model with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate either model | Rejected (`frozen=True`). |
+| 5 | `allocated_amount = -0.01` | Rejected (`Field(ge=0)`). |
+| 6 | `allocated_amount = 10.005` | Quantised to `10.01` via `Currency`'s `ROUND_HALF_UP`. |
+| 7 | Serialization | Tuple-valued fields, not lists. |
+| 8 | Either or both direction tuples empty | Valid, independently. |
+| 9 | Duplicate `campaign_id` within `increase_limits` | Raises `ValueError("Increase-limit campaign IDs must be unique when allocating reallocation.")`. |
+| 10 | Duplicate `campaign_id` within `decrease_limits` | Raises `ValueError("Decrease-limit campaign IDs must be unique when allocating reallocation.")`. |
+| 11 | Duplicates in both collections simultaneously | Raises the increase-limit-uniqueness error — checked first. |
+| 12 | A ranked increase campaign with no matching increase limit | Raises `ValueError("Every ranked increase campaign must have a matching increase limit.")`. |
+| 13 | A ranked decrease campaign with no matching decrease limit | Raises `ValueError("Every ranked decrease campaign must have a matching decrease limit.")`. |
+| 14 | Extra, unranked increase/decrease limit records | Accepted and ignored — Stage 16/18 compute limits for every campaign, Stage 24 ranks only a subset. |
+| 15 | Independently shuffled limit collections | Matched correctly by `campaign_id`, not position — `zip` confirmed absent via AST. |
+| 16 | Both ranking directions empty | Returns two empty allocation tuples — valid, no error. |
+| 17 | One recipient, one donor, equal capacities | Both fully allocated their shared capacity. |
+| 18 | Recipient capacity greater than donor capacity | Recipient capped at donor capacity; both totals equal. |
+| 19 | Donor capacity greater than recipient capacity | Donor contributes only the recipient's capacity; remainder left unused. |
+| 20 | Donor contribution | Never exceeds the exact amount recipients actually received. |
+| 21 | Recipient/donor allocation | Never exceeds that campaign's own capacity, in either direction. |
+| 22 | Higher recipient rank vs. lower | Higher rank fully funded before any lower-rank campaign receives anything. |
+| 23 | Partial higher recipient rank | Every lower rank receives exactly `Decimal("0.00")`. |
+| 24 | Higher donor rank vs. lower | Higher rank fully drawn before any lower-rank donor contributes. |
+| 25 | Partially used donor rank | Every lower-ranked donor contributes exactly `Decimal("0.00")`. |
+| 26 | A zero-capacity rank tier | Safely skipped — no division, no error. |
+| 27 | Tied recipients, equal capacities | Split evenly. |
+| 28 | Tied recipients, unequal capacities | Split exactly proportional to capacity. |
+| 29 | Tied recipients, fractional-cent shares (e.g. `100.00` ÷ 3) | Largest-remainder method: `33.33, 33.33, 33.34`. |
+| 30 | Tied recipients, exact fractional-remainder tie | Resolved by `campaign_id` ascending — a narrow exception with no other role anywhere in this stage. |
+| 31 | Tied recipients | Never allocated above their own capacity, even during penny distribution. |
+| 32 | Tied-tier residual | Exhausted exactly — the tier's total allocation equals the available amount to the penny. |
+| 33 | Lower ranks after a partially funded tied tier | Receive exactly `Decimal("0.00")`. |
+| 34–39 | The same six tied-donor scenarios (27–32), independently on the decrease side | Identical policy, verified separately — no rule is assumed to transfer from recipients to donors without its own test. |
+| 40 | Module source | No `float` referenced anywhere (AST-verified). |
+| 41 | Any allocated amount | Exponent is always `-2` (exactly two decimal places). |
+| 42 | A campaign with zero available supply | Allocated exactly `Decimal("0.00")`, with the same two-decimal exponent as `Decimal("0.00")`. |
+| 43 | Extreme `Decimal` magnitudes (28 significant digits) | Exact reconciliation, no precision loss. |
+| 44 | A large ranked collection (200 campaigns) | Handled without error; every campaign receives exactly one record. |
+| 45 | Ambient global `Decimal` precision/rounding mutated before calling | Result unaffected; the mutated context is restored to its original values after the call — every arithmetic step, not only the initial division, runs inside an explicitly-scoped `localcontext`. |
+| 46 | A three- or five-way tied split with a genuine repeating decimal | Reconciles exactly to the available amount, no residual smaller than one penny left over. |
+| 47 | One-penny and multi-penny residuals | Distributed exactly, in fractional-remainder-descending order. |
+| 48 | Increase and decrease totals | Always exactly equal (`sum(increase_allocations) == sum(decrease_allocations)`). |
+| 49 | No ranked recipients and no ranked donors | Two empty tuples. |
+| 50 | Ranked recipients, no ranked donors | Every recipient allocated `Decimal("0.00")`; `decrease_allocations` empty. Includes the real sample portfolio. |
+| 51 | Ranked donors, no ranked recipients | `increase_allocations` empty; every donor allocated `Decimal("0.00")`. |
+| 52 | A zero-capacity ranked recipient | Allocated `Decimal("0.00")` without error. |
+| 53 | A zero-capacity ranked donor | Allocated `Decimal("0.00")` without error. |
+| 54 | All capacities zero | Every ranked campaign allocated `Decimal("0.00")` without error. |
+| 55 | `allocate_campaign_reallocation` source | Reads only the authorised fields (`ranking.increase_rankings`/`.reduce_rankings`, `ranked.campaign_id`, `ranked.rank`, `limit.campaign_id`, `limit.raw_increase_limit`/`.effective_decrease_limit`) (AST-verified); never reads `reallocation_priority_score`; calls none of `rank_campaign_reallocation_priorities`/`calculate_campaign_reallocation_priority_score`/`resolve_campaign_recommendation_action`/any other Stage 1–24 production function (AST-verified). |
+| 56 | `ReviewSetup`/`CampaignInput`/`CampaignRecommendation`/`CampaignRecommendationReason`/`ReasonCode`/every classification or availability/suitability type/`current_budget`/`initial_account_reserve`/`approved_monthly_budget`/`confidence_component`/`business_priority_component` | Never referenced anywhere in `src/allocation.py`'s source (AST-verified) or imported into the module (`hasattr` confirms absence). |
+| 57 | Inputs after an allocation call | `CampaignReallocationRanking`, `CampaignRawIncreaseLimit`, and `CampaignEffectiveDecreaseLimit` objects remain unchanged. |
+| 58 | Module attributes | No `verify_conservation`/`check_conservation`/`calculate_final_campaign_budget` function exists. |
+| 59 | Output order | Exactly preserves Stage 24's own ranking order — never reordered by allocated amount, capacity, or campaign ID. |
+| 60 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–24 results independently calculated per campaign through the real production path, then only the three approved Stage 25 inputs passed (no production batch function) | `increase_allocations=(CampaignAllocatedAmount(campaign_id="G002", allocated_amount=Decimal("0.00")),)`, `decrease_allocations=()`. G002's zero allocation is neither a changed recommendation, an error, nor whole-campaign ineligibility — it reflects the complete absence of ranked `REDUCE` supply in this exact portfolio. |
+
 
 ## Approval / Audit Scenarios
 

@@ -1250,19 +1250,124 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 25 — Deterministic Cross-Campaign Budget Allocation (complete)
+
+- [x] `src/allocation.py` (Sprint 1 placeholder pair filled in for the
+      first time — not a newly created module, mirroring Stage 23's
+      pattern; no separate monetary recommendation-amount stage was
+      created, per the accepted post-Stage-24 boundary decision) —
+      `CampaignAllocatedAmount` (frozen, `extra="forbid"`: `campaign_id`,
+      `allocated_amount: Currency` constrained `>= 0` — never carries
+      direction, rank, score, or capacity; direction is structural tuple
+      membership, never a sign), `CampaignReallocationAllocation` (frozen,
+      `extra="forbid"`: `increase_allocations:
+      tuple[CampaignAllocatedAmount, ...]`, `decrease_allocations:
+      tuple[CampaignAllocatedAmount, ...]`, either legitimately empty),
+      and `allocate_campaign_reallocation(ranking:
+      CampaignReallocationRanking, increase_limits:
+      tuple[CampaignRawIncreaseLimit, ...], decrease_limits:
+      tuple[CampaignEffectiveDecreaseLimit, ...]) ->
+      CampaignReallocationAllocation`. `src/ranking.py`, `src/scoring.py`,
+      `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
+      `src/conservation.py`, `src/constants.py` (no enum added or
+      changed), `src/models.py` unchanged.
+- [x] **Approved reserve exclusion**: `ReviewSetup.initial_account_reserve`
+      is never accepted, read, consumed, reduced, or returned —
+      authoritative meaning *"Budget held back from reallocation"* treats
+      it as protected. `ReasonCode.ACCOUNT_RESERVE_REQUIRED` remains
+      unassigned. The only funding source is the sum of
+      `effective_decrease_limit` across Stage 24's `reduce_rankings`.
+- [x] **Approved two-phase strict dense-rank waterfall**: Phase 1 funds
+      `increase_rankings` by ascending dense rank against total available
+      supply (full-tier funding while supply covers it, largest-remainder
+      proportional split on the first tier it cannot fully cover, then
+      zero for every lower rank); Phase 2 draws the exact Phase 1 total
+      from `reduce_rankings` by the identical waterfall, always exhausting
+      exactly since Phase 1's total can never exceed total supply. A
+      partially funded tier, on either side, is a valid, non-error
+      outcome, as are both insufficient and excess supply.
+- [x] **Approved largest-remainder currency method**: exact proportional
+      shares at operand-derived local precision, floored to
+      `CURRENCY_QUANTUM` via `ROUND_DOWN`; the whole-penny shortfall
+      distributed by fractional-remainder descending, `campaign_id`
+      ascending breaking only an *exact* remainder tie — a narrow,
+      explicitly scoped exception to "campaign ID is a serialization aid
+      only," never used to order recipients against donors or to
+      influence which tier is funded. Never adds a penny above a
+      campaign's own capacity. An all-zero-capacity tier allocates zero to
+      every campaign without division.
+- [x] Consumes Stage 24's, Stage 16's, and Stage 18's already-approved
+      result objects directly (never calls
+      `rank_campaign_reallocation_priorities`,
+      `calculate_campaign_reallocation_priority_score`,
+      `resolve_campaign_recommendation_action`, or any other Stage 1–24
+      production function). Matches `increase_limits`/`decrease_limits`
+      to the rankings exclusively by `campaign_id` value — never `zip`.
+      Requires uniqueness within each limit collection and a matching
+      direction-appropriate limit for every ranked campaign, raising
+      exactly `ValueError("Increase-limit campaign IDs must be unique
+      when allocating reallocation.")`, `ValueError("Decrease-limit
+      campaign IDs must be unique when allocating reallocation.")`,
+      `ValueError("Every ranked increase campaign must have a matching
+      increase limit.")`, or `ValueError("Every ranked decrease campaign
+      must have a matching decrease limit.")` otherwise, checked before
+      any allocation arithmetic. Extra, unranked limit records are
+      accepted and ignored. Stage 24's own guarantees (uniqueness,
+      direction separation, rank correctness, ordering) are trusted, never
+      recalculated. Reads exactly the authorised fields; never reads
+      `reallocation_priority_score`, `ReviewSetup`, `CampaignInput`,
+      `CampaignRecommendation`, `CampaignRecommendationReason`, or
+      `ReasonCode`.
+- [x] Plain `Decimal` throughout — never `float`; every arithmetic
+      operation, including simple sums and penny apportionment, runs
+      inside an explicitly-scoped `localcontext`, immune to ambient global
+      context mutation. `sum(increase_allocations) ==
+      sum(decrease_allocations)` always holds by construction. No
+      `ReasonCode` is ever emitted; no final campaign budget is
+      calculated; conservation verification remains entirely separate.
+      Output order exactly preserves Stage 24's own ranking order.
+- [x] `tests/test_allocation.py` (Sprint 1 placeholder filled in for the
+      first time) — 79 new Stage 25 tests, all passing.
+      `tests/test_ranking.py` unchanged at 69 tests,
+      `tests/test_scoring.py` unchanged at 81 tests,
+      `tests/test_reasons.py` unchanged at 69 tests,
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+      (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+      re-run and confirmed passing — no regression, no existing
+      non-placeholder test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 25 (and not yet started)
+
+- Conservation verification of the balance invariant Stage 25's
+  allocation already constructs (`src/conservation.py`).
+- Final campaign budgets (`current_budget ± allocated amount`) — deferred
+  to a later deterministic integration/reporting stage if required.
+- `ACCOUNT_RESERVE_REQUIRED`, `NO_ELIGIBLE_RECIPIENT`, and the remaining
+  ten `ReasonCode` members' trigger conditions (see Stage 22's
+  Explicitly-Out-of-Scope list above).
+- `Confidence.NOT_ASSESSABLE` ownership/trigger and the combined
+  confidence/tracking/pacing assessment question.
+- Streamlit interface, Gemini integration, approval workflow, audit, exports.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 25 (not started, scope not yet frozen): requires its own dependency
+Stage 26 (not started, scope not yet frozen): requires its own dependency
 and decision-readiness inspection before being frozen, not file-list order.
-Whether a distinct monetary recommendation-amount stage is required before
-allocation, or whether amount computation folds into `src/allocation.py`
-directly, remains unresolved — this is the next open architectural
-question. Allocation would consume `CampaignReallocationRanking` (Stage
-24) per direction, alongside monetary constraint results (Stage 16–18)
-consumed separately and directly, never through Stage 24's own output.
-Conservation (`src/conservation.py`) remains the stage after that. The
-remaining twelve `ReasonCode` members' trigger conditions (see Stage 24's
-Explicitly-Out-of-Scope list above) remain open, with two of the four
-blocking categories (performance severity, constraint binding-source
-identity) each potentially warranting their own dedicated stage before
-further `ReasonCode` coverage is possible.
+Conservation (`src/conservation.py`) is the leading candidate — an
+independent, later verification that Stage 25's already-constructed
+`sum(increase_allocations) == sum(decrease_allocations)` invariant
+actually holds, consistent with `src/conservation.py`'s own "checks"
+(verification, not enforcement) framing. After conservation, final
+deterministic integration/reporting, Streamlit/UI, and Gemini explanation
+remain the rest of the planned sequence. The remaining `ReasonCode`
+members' trigger conditions (see Stage 25's Explicitly-Out-of-Scope list
+above) remain open, with two of the four blocking categories (performance
+severity, constraint binding-source identity) each potentially warranting
+their own dedicated stage before further `ReasonCode` coverage is
+possible.

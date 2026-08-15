@@ -1,26 +1,24 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 24 (adds the first genuinely cross-campaign
-> responsibility — deterministic, direction-separated dense reallocation
-> ranking — `CampaignReallocationRanking`/`RankedCampaignPriority` — from
-> `src/ranking.py` — to the Stage 1 enumerations, numerical constants,
-> core input models, CSV schema, Stage 2 validation reporting, Stage 3
-> metric facts, Stage 4 pacing facts, Stage 5 performance classification,
-> Stage 6 trend classification, Stage 7 conversion-volume confidence
-> classification, Stage 8 tracking-based assessability, Stage 9 pacing
-> interpretation, Stage 10 static budget-bound facts, Stage 11
+> Sprint 1, Development Stage 25 (adds deterministic cross-campaign budget
+> allocation — `CampaignReallocationAllocation`/`CampaignAllocatedAmount`
+> — from `src/allocation.py` — to the Stage 1 enumerations, numerical
+> constants, core input models, CSV schema, Stage 2 validation reporting,
+> Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance
+> classification, Stage 6 trend classification, Stage 7 conversion-volume
+> confidence classification, Stage 8 tracking-based assessability, Stage 9
+> pacing interpretation, Stage 10 static budget-bound facts, Stage 11
 > applicable-change-percentage resolution, Stage 12 raw percentage-based
 > monetary movement cap, Stage 13 test-floor distance, Stage 14 protection
 > constraint, Stage 15 test-aware static decrease room, Stage 16 raw
 > increase limit, Stage 17 raw decrease limit, Stage 18 protection-adjusted
 > effective decrease limit, Stage 19 campaign action availability, Stage 20
 > campaign action suitability, Stage 21 recommendation-action selection,
-> Stage 22 recommendation reasons, and Stage 23 single-campaign
-> reallocation priority scoring). Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, a distinct monetary recommendation-amount stage if required,
-> allocation, and other derived/decision fields, plus export fields, are
-> pending later stages.
+> Stage 22 recommendation reasons, Stage 23 single-campaign reallocation
+> priority scoring, and Stage 24 cross-campaign reallocation ranking).
+> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, the
+> remaining `ReasonCode` trigger conditions, conservation, and other
+> derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -1198,12 +1196,93 @@ conservation check is ever performed here. Stage 24 hands a later
 allocation stage only ranked campaign IDs, their direction-scoped dense
 ranks, and their unchanged Stage 23 scores.
 
+## Campaign Reallocation Allocation Fields (`src/allocation.py`)
+
+Produced by `allocate_campaign_reallocation(ranking:
+CampaignReallocationRanking, increase_limits:
+tuple[CampaignRawIncreaseLimit, ...], decrease_limits:
+tuple[CampaignEffectiveDecreaseLimit, ...]) ->
+CampaignReallocationAllocation`. No separate recommendation-amount stage
+exists — allocation consumes Stage 24's rankings and Stage 16/18's
+capacities directly. `CampaignAllocatedAmount` and
+`CampaignReallocationAllocation` are both frozen (immutable) and reject
+unknown fields (`extra="forbid"`).
+
+### `CampaignAllocatedAmount`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id` | string | The campaign's identity. |
+| `allocated_amount` | `Currency`, `>= 0` | The campaign's actual allocated movement — always unsigned. Direction is never carried here; it is represented structurally by tuple membership. |
+
+### `CampaignReallocationAllocation`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `increase_allocations` | `tuple[CampaignAllocatedAmount, ...]` | One record per campaign in Stage 24's `increase_rankings`, including `Decimal("0.00")`. May be empty. |
+| `decrease_allocations` | `tuple[CampaignAllocatedAmount, ...]` | One record per campaign in Stage 24's `reduce_rankings`, including `Decimal("0.00")`. May be empty. |
+
+**Capacity is a ceiling, not a guarantee.** No campaign automatically
+receives or donates its full `raw_increase_limit`/`effective_decrease_limit`
+merely because it exists or is ranked first.
+
+**Reserve is excluded entirely.** `ReviewSetup.initial_account_reserve` is
+never accepted as an input, read, consumed, reduced, or returned — its
+authoritative meaning (*"Budget held back from reallocation"*) treats it
+as protected and unavailable for funding increases.
+`ReasonCode.ACCOUNT_RESERVE_REQUIRED` remains unassigned. The only funding
+source is the sum of `effective_decrease_limit` across Stage 24's
+`reduce_rankings` — unranked decrease-limit records never contribute.
+
+**Two-phase strict dense-rank waterfall.** Phase 1 funds
+`increase_rankings` by ascending dense rank against total available
+supply — a tier is fully funded if remaining supply covers it, or the
+first tier supply cannot fully cover is split proportionally to capacity
+(largest-remainder method, below), after which every lower rank receives
+`Decimal("0.00")`. Phase 2 draws the exact Phase 1 total from
+`reduce_rankings` by the identical waterfall — always exhausting exactly,
+since Phase 1's total can never exceed total available supply. A
+partially funded tier, on either side, is a valid, non-error outcome, as
+are both insufficient and excess supply.
+
+**Largest-remainder currency method.** Within a partially funded tied
+tier, each campaign's exact proportional share is floored to
+`CURRENCY_QUANTUM` via `ROUND_DOWN`; the shortfall (a whole number of
+pennies) is distributed one at a time, in order of fractional remainder
+descending, never pushing any campaign above its own capacity. If every
+capacity in a tier is zero, every campaign receives `Decimal("0.00")`
+without division.
+
+**Narrow campaign-ID exception.** `campaign_id` ascending breaks only an
+*exact* tie between two campaigns' fractional remainders during
+indivisible-penny apportionment — nothing else. It never orders
+recipients against donors, never influences which tier is funded, and is
+never an ordinary financial preference, consistent with Stage 24's
+"campaign ID is a serialization aid only" principle.
+
+**Matching, not positional pairing.** `increase_limits`/`decrease_limits`
+are matched by `campaign_id` value only — never `zip`. Every ID must be
+unique within each limit collection; a ranked campaign missing its
+direction-appropriate limit is an error. Extra, unranked limit records are
+legitimate and ignored. Stage 24's own guarantees are trusted, never
+recalculated.
+
+**Numeric policy.** `Decimal` exclusively, never `float`. Every arithmetic
+operation runs inside an explicitly-scoped `localcontext`, immune to
+ambient global context mutation. `sum(increase_allocations) ==
+sum(decrease_allocations)` always holds — constructed, not merely
+checked.
+
+**Not this stage's responsibility.** No `ReasonCode` is ever emitted, no
+final campaign budget is calculated (`CampaignInput.current_budget` is
+never read), and conservation verification is a separate, later,
+independent stage that must never repair or mutate allocation's result.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, a distinct monetary recommendation-amount stage if required,
-> allocation).
+> conditions, conservation).
 
 ## Export Fields
 

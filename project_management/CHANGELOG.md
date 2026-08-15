@@ -1953,3 +1953,160 @@ All notable changes to this project are documented in this file.
   now frozen while a distinct monetary-amount stage, allocation, and
   conservation remain pending), and `docs/TEST_SCENARIOS.md` (47 concrete
   Stage 24 scenarios).
+
+- Sprint 1, Development Stage 25: filled in the Sprint 1 placeholder pair
+  `src/allocation.py`/`tests/test_allocation.py` for the first time — no
+  new module was created and no separate monetary recommendation-amount
+  stage exists, per the accepted post-Stage-24 boundary decision.
+  Added `CampaignAllocatedAmount` (frozen, immutable, `extra="forbid"`:
+  `campaign_id`, `allocated_amount: Currency` constrained `>= 0` only —
+  never carries direction, rank, score, or capacity; direction is
+  represented structurally by tuple membership, never a sign) and
+  `CampaignReallocationAllocation` (frozen, immutable, `extra="forbid"`:
+  `increase_allocations: tuple[CampaignAllocatedAmount, ...]`,
+  `decrease_allocations: tuple[CampaignAllocatedAmount, ...]`, either
+  legitimately empty, containing exactly one record per campaign in the
+  corresponding Stage 24 ranking tuple including at `Decimal("0.00")`)
+  and `allocate_campaign_reallocation(ranking: CampaignReallocationRanking,
+  increase_limits: tuple[CampaignRawIncreaseLimit, ...], decrease_limits:
+  tuple[CampaignEffectiveDecreaseLimit, ...]) ->
+  CampaignReallocationAllocation`. Converts Stage 24's direction-separated,
+  dense-ranked candidate populations into actual, balanced, campaign-level
+  monetary movements, consuming Stage 16's `CampaignRawIncreaseLimit` and
+  Stage 18's `CampaignEffectiveDecreaseLimit` as maximum capacities —
+  never guaranteed movements; no campaign automatically receives or
+  donates its full capacity merely because it exists or is ranked first.
+  **Approved reserve exclusion:** `ReviewSetup.initial_account_reserve` is
+  never accepted, read, consumed, reduced, or returned — authoritative
+  meaning *"Budget held back from reallocation"* treats it as protected;
+  `ReviewSetup` is never accepted as an input at all;
+  `ReasonCode.ACCOUNT_RESERVE_REQUIRED` remains unassigned. **The only
+  funding source is the sum of `effective_decrease_limit` across Stage
+  24's `reduce_rankings`** — unranked decrease-limit records and reserve
+  never contribute. **Approved two-phase strict dense-rank waterfall:**
+  Phase 1 funds `increase_rankings` by ascending dense rank against total
+  available supply (full-tier funding while supply covers it,
+  largest-remainder proportional split on the first tier it cannot fully
+  cover, then `Decimal("0.00")` for every lower rank); Phase 2 draws the
+  exact Phase 1 total from `reduce_rankings` by the identical waterfall,
+  always exhausting exactly since Phase 1's total can never exceed total
+  supply; unused donor capacity beyond that target is left unused, not
+  returned separately. Insufficient and excess supply are both valid,
+  non-error outcomes; neither produces a `ReasonCode`. **Approved
+  largest-remainder currency method:** exact proportional shares at
+  operand-derived local precision, floored to `CURRENCY_QUANTUM` via
+  `ROUND_DOWN`; the whole-penny shortfall distributed by
+  fractional-remainder descending, `campaign_id` ascending breaking only
+  an *exact* remainder tie — a narrow, explicitly scoped exception to
+  "campaign ID is a serialization aid only," never used to order
+  recipients against donors or influence which tier is funded; never adds
+  a penny above a campaign's own capacity; an all-zero-capacity tier
+  allocates zero to every campaign without division. **Consumes Stage
+  24's, Stage 16's, and Stage 18's already-approved result objects
+  directly** (never calls `rank_campaign_reallocation_priorities`,
+  `calculate_campaign_reallocation_priority_score`,
+  `resolve_campaign_recommendation_action`, or any other Stage 1–24
+  production function). Matches `increase_limits`/`decrease_limits` to
+  the rankings exclusively by `campaign_id` value — never `zip`. Requires
+  uniqueness within each limit collection and a matching
+  direction-appropriate limit for every ranked campaign, raising exactly
+  `ValueError("Increase-limit campaign IDs must be unique when allocating
+  reallocation.")`, `ValueError("Decrease-limit campaign IDs must be
+  unique when allocating reallocation.")`, `ValueError("Every ranked
+  increase campaign must have a matching increase limit.")`, or
+  `ValueError("Every ranked decrease campaign must have a matching
+  decrease limit.")` otherwise, checked before any allocation arithmetic.
+  Extra, unranked limit records are accepted and ignored. Stage 24's own
+  guarantees (uniqueness, direction separation, rank correctness,
+  ordering) are trusted, never recalculated. Reads exactly the authorised
+  fields — `ranking.increase_rankings`/`.reduce_rankings`,
+  `ranked.campaign_id`/`.rank` (never `.reallocation_priority_score`),
+  `limit.campaign_id`/`.raw_increase_limit`/`.effective_decrease_limit` —
+  and never reads `ReviewSetup`, `CampaignInput`, `CampaignRecommendation`,
+  or `CampaignRecommendationReason`. Plain `Decimal` throughout — never
+  `float`; every arithmetic operation, including simple sums and penny
+  apportionment, runs inside an explicitly-scoped `localcontext`, immune
+  to ambient global context mutation. `sum(increase_allocations) ==
+  sum(decrease_allocations)` always holds by construction, not as a
+  post-hoc check. Output order exactly preserves Stage 24's own ranking
+  order. No `ReasonCode` is ever emitted; no final campaign budget is
+  calculated (`CampaignInput.current_budget` never read); conservation
+  verification remains entirely separate — Stage 26 will independently
+  re-verify the same invariant, never repairing or mutating allocation's
+  result. No enum was added or changed. `src/ranking.py`, `src/scoring.py`,
+  `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
+  `src/conservation.py`, `src/constants.py`, and `src/models.py` are
+  unchanged.
+- Sprint 1, Development Stage 25: added 79 new tests to
+  `tests/test_allocation.py` (Sprint 1 placeholder filled in for the first
+  time; all passing), covering result-model shape/immutability/
+  non-negative-currency validation/quantisation/serialization (no
+  `recommendation_action`, `rank`, `reallocation_priority_score`,
+  `capacity`, `remaining_capacity`, `final_budget`, `reserve_used`,
+  `final_reserve`, `reason_codes`, or `unallocated_supply` field),
+  independently-empty direction tuples, duplicate-increase-limit-ID/
+  duplicate-decrease-limit-ID/missing-ranked-limit validation with exact
+  error messages and confirmed validation order (increase-limit-uniqueness
+  checked first when both collections contain duplicates), extra unranked
+  limit records accepted and ignored, campaign-ID-value matching
+  regardless of shuffled collection order (`zip` confirmed absent via
+  AST), both-directions-empty returning a valid empty result, basic
+  equal/greater/lesser recipient-vs-donor-capacity allocation with exact
+  balance confirmation, the strict dense-rank waterfall on both the
+  recipient and donor sides independently (higher rank fully funded
+  before lower, partial higher rank zeroing every lower rank,
+  zero-capacity tiers safely skipped), tied-tier proportional allocation
+  for both recipients and donors independently (equal and unequal
+  capacities, fractional-cent largest-remainder splits, an exact
+  fractional-remainder tie resolved by `campaign_id` ascending, no
+  allocation ever exceeding capacity, exact residual exhaustion, zeroed
+  lower ranks after a partial tied-tier funding), Decimal policy (no
+  `float`, exact two-decimal exponents, extreme 28-significant-digit
+  magnitudes, a 200-campaign collection, mutated ambient
+  precision/rounding confirmed not to affect the result and confirmed
+  restored afterward, repeating-decimal splits, one-penny and multi-penny
+  residuals, exact increase/decrease total equality), every empty/
+  no-counterparty/zero-capacity combination, earlier-stage separation and
+  excluded-type/field absence (AST- and module-attribute-verified,
+  including confirmation `reallocation_priority_score` is never read), no
+  input mutation, no reason-code reference, no conservation or
+  final-budget implementation, output order exactly preserving Stage 24's
+  ranking order, and sample-data integration through
+  `validate_campaign_csv` + the real production chain over
+  `data/sample_campaigns.csv` (`increase_allocations` containing only
+  `G002` at `Decimal("0.00")`; `decrease_allocations` empty — reflecting
+  the complete absence of ranked `REDUCE` supply in this exact portfolio,
+  not a changed recommendation, an error, or whole-campaign
+  ineligibility). `tests/test_ranking.py` unchanged at 69 tests,
+  `tests/test_scoring.py` unchanged at 81 tests,
+  `tests/test_reasons.py` unchanged at 69 tests,
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+  (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+  re-run and confirmed passing — no behavioural regression, and no
+  existing non-placeholder test file required modification this stage.
+  Full suite: 1173 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 +
+  30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33
+  Stage 9 + 322 Stage 10–18 combined in `tests/test_constraints.py` + 61
+  Stage 19 in `tests/test_availability.py` + 67 Stage 20 in
+  `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py` + 69 Stage 22 in `tests/test_reasons.py`
+  + 81 Stage 23 in `tests/test_scoring.py` + 69 Stage 24 in
+  `tests/test_ranking.py` + 79 Stage 25 in `tests/test_allocation.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignAllocatedAmount`/
+  `CampaignReallocationAllocation` fields; the reserve-exclusion rule; the
+  two-phase waterfall and largest-remainder policy; the narrow
+  campaign-ID exception; the matching/determinism policy; the boundaries
+  excluding reason codes, final budgets, and conservation),
+  `docs/DECISION_RULES.md` (frozen Stage 25 deterministic cross-campaign
+  budget allocation rule, including the exact reserve exclusion, the
+  exact two-phase waterfall and largest-remainder currency method, the
+  exact three inputs and authorised fields, the matching/uniqueness/
+  missing-limit validation policy and exact error messages, the numeric
+  policy and balance invariant, and the revised Pending section reflecting
+  that allocation is now frozen while conservation remains the sole
+  outstanding downstream stage), and `docs/TEST_SCENARIOS.md` (60 concrete
+  Stage 25 scenarios, superseding the earlier placeholder "Allocation
+  Scenarios" heading).
