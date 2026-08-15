@@ -1674,3 +1674,135 @@ All notable changes to this project are documented in this file.
   reasons, and the revised Pending section reflecting the eight now-frozen
   `ReasonCode` trigger conditions and the twelve still-pending), and
   `docs/TEST_SCENARIOS.md` (53 concrete Stage 22 scenarios).
+
+- Sprint 1, Development Stage 23: filled in the Sprint 1 placeholder pair
+  `src/scoring.py`/`tests/test_scoring.py` for the first time — no new
+  module was created, unlike Stages 19–22, since the master plan already
+  reserved this exact module for "campaign prioritization scoring."
+  Added `CampaignReallocationPriorityScore` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `confidence_component: int`,
+  `business_priority_component: int`, `reallocation_priority_score: int`
+  only — does not duplicate `recommendation_action`; each numeric field
+  constrained to `0..100`, and a model validator rejects any instance
+  where the total does not equal the sum of the two components) and
+  `calculate_campaign_reallocation_priority_score(recommendation:
+  CampaignRecommendation, campaign: CampaignInput, confidence:
+  CampaignConfidenceClass) -> CampaignReallocationPriorityScore`. Computes
+  one deterministic, campaign-level, dimensionless `int` reallocation
+  priority score for one already-selected `CampaignRecommendation` (Stage
+  21), consumed later by a cross-campaign ranking stage. **Approved
+  business meaning:** the relative priority with which an already-selected
+  *directional* recommendation should be considered during later
+  cross-campaign ranking — a higher score means a stronger candidate only
+  within the same direction; `INCREASE` scores are compared only with
+  other `INCREASE` scores, `REDUCE` scores only with other `REDUCE`
+  scores, and the score must never compare an `INCREASE` directly against
+  a `REDUCE`. Direction remains solely and authoritatively carried by
+  `CampaignRecommendation.recommendation_action`, never re-encoded through
+  sign or magnitude. **Approved non-directional rule:** `HOLD`/`MAINTAIN`
+  unconditionally produce `(0, 0, 0)`, without inspecting or applying
+  either mapping (confirmed by test via mapping stand-ins that raise if
+  evaluated) — this does not mean either action is invalid, only that
+  neither proposes a directional budget movement to prioritise.
+  **Approved `Confidence.NOT_ASSESSABLE` override:** an `INCREASE`/`REDUCE`
+  recommendation paired with `NOT_ASSESSABLE` also produces `(0, 0, 0)` — a
+  scoring-only override, no exception, no change to the existing
+  recommendation. **Approved exact mappings**, two fixed, immutable
+  `MappingProxyType` lookups independent of enum declaration order:
+  confidence `HIGH`→60/`MEDIUM`→40/`LOW`→20; business priority for
+  `INCREASE` `HIGH`→40/`MEDIUM`→20/`STANDARD`→0; business priority for
+  `REDUCE` `STANDARD`→40/`MEDIUM`→20/`HIGH`→0 — the same `BusinessPriority`
+  value therefore contributes opposite components depending on direction,
+  by design. `reallocation_priority_score = confidence_component +
+  business_priority_component`, always a member of `{20, 40, 60, 80, 100}`
+  for assessable directional recommendations, always `0` otherwise. Plain
+  Python `int` throughout — never `float`/`Decimal`; no rounding,
+  quantisation, or ambient `Decimal` context; no multiplication or
+  division; no negative value or value above `100`; tie-breaking among
+  equal scores explicitly deferred to the later ranking stage. **Consumes
+  Stage 21's and Stage 7's already-approved result objects directly**
+  (never calls `resolve_campaign_recommendation_action`,
+  `classify_campaign_confidence`, or any other Stage 1–22 production
+  function). Requires all three `campaign_id` values to match via one
+  combined equality check anchored to `recommendation.campaign_id`,
+  checked before any action, confidence, or priority value is read,
+  raising exactly `ValueError("Campaign IDs must match when calculating
+  reallocation priority score.")` otherwise with the same exact message
+  regardless of which input(s) mismatch. Reads exactly six authorised
+  fields across three input objects. **Excludes**
+  `PerformanceBand`/`CampaignPerformanceClass` and
+  `TrendDirection`/`CampaignTrendClass` (already caused Stage 20/21, would
+  double-count the same action evidence), `CampaignActionAvailability`,
+  `CampaignActionSuitability`, `CampaignTrackingAssessment` (already fully
+  consumed downstream by Stage 21), `CampaignRecommendationReason`/
+  `ReasonCode` (explanatory, must never become hidden numeric weights),
+  `PacingStatus`/`CampaignPacingClass` (no approved direction-specific
+  policy), and raw campaign metrics, monetary constraint results,
+  protection, test-campaign status, and tracking status (answer capacity
+  or availability, not priority). No enum was added or changed —
+  `Confidence` and `BusinessPriority` are reused exactly as already frozen
+  in `src/constants.py`. Completely single-campaign, consistent with the
+  Stage 19 cross-campaign-boundary correction. `src/recommendation.py`,
+  `src/reasons.py`, `src/suitability.py`, `src/availability.py`,
+  `src/constraints.py`, `src/classification.py`, `src/constants.py`, and
+  `src/models.py` are unchanged.
+- Sprint 1, Development Stage 23: added 81 new tests to
+  `tests/test_scoring.py` (Sprint 1 placeholder filled in for the first
+  time; all passing), covering result-model shape/immutability/range-and-
+  total-consistency validation/serialization (no `recommendation_action`,
+  `reason_codes`, `performance_band`, `trend_direction`, `pacing_status`,
+  `rank`, or `allocation` field), incompatible-input rejection
+  (`AttributeError`, no silent coercion, no broad exception handling),
+  campaign-ID matching (all three IDs equal resolves normally; each
+  non-anchor mismatch and a simultaneous two-way mismatch each raise the
+  exact approved `ValueError` message with no result resolved and no ID
+  silently preferred; the ID-equality guard verified via AST to precede
+  any action/confidence/priority read), `HOLD`/`MAINTAIN` always
+  all-zero across every `Confidence`×`BusinessPriority` combination with
+  the mappings confirmed never evaluated (exploding mapping stand-ins),
+  `Confidence.NOT_ASSESSABLE` always all-zero for both directional actions
+  across every `BusinessPriority` with no exception and the existing
+  recommendation left untouched, the complete `INCREASE` and `REDUCE`
+  nine-cell confidence×business-priority matrices, earlier-stage
+  separation and excluded-type/field absence (AST- and
+  module-attribute-verified against every listed exclusion, `Decimal`,
+  and `float`), immutability of all three mappings (`MappingProxyType`,
+  mutation raises `TypeError`), an exhaustive
+  `RecommendationAction`×`Confidence`×`BusinessPriority` sweep confirming
+  the total always equals the component sum and always belongs to `{0,
+  20, 40, 60, 80, 100}`, absence of multiplication/division and of any
+  collection-typed parameter, no production batch function, and
+  sample-data integration through `validate_campaign_csv` + the real
+  production chain over `data/sample_campaigns.csv` (`G001`/`M001`/`G003`
+  all `0`; `G002` `INCREASE`/`Confidence.HIGH`/`BusinessPriority.HIGH` →
+  `confidence_component=60`, `business_priority_component=40`,
+  `reallocation_priority_score=100`).
+  `tests/test_reasons.py` unchanged at 69 tests,
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+  (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+  re-run and confirmed passing — no behavioural regression, and no
+  existing non-placeholder test file required modification this stage.
+  Full suite: 1025 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 +
+  30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33
+  Stage 9 + 322 Stage 10–18 combined in `tests/test_constraints.py` + 61
+  Stage 19 in `tests/test_availability.py` + 67 Stage 20 in
+  `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py` + 69 Stage 22 in `tests/test_reasons.py`
+  + 81 Stage 23 in `tests/test_scoring.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignReallocationPriorityScore`
+  fields; the approved business meaning and same-direction-only
+  comparability; the non-directional and `NOT_ASSESSABLE`-override rules;
+  the exact confidence and direction-aware business-priority mapping
+  tables; the double-counting/exclusion rationale; the numeric policy),
+  `docs/DECISION_RULES.md` (frozen Stage 23 deterministic campaign
+  reallocation priority scoring rule, including the exact non-directional
+  rule, the exact `NOT_ASSESSABLE` override, the exact confidence and
+  business-priority mappings, the exact three inputs and six authorised
+  fields, the campaign-ID policy and error, the numeric policy, the
+  exclusion rationale, and the revised Pending section reflecting that
+  single-campaign scoring is now frozen while cross-campaign ranking,
+  allocation, and conservation remain pending), and `docs/TEST_SCENARIOS.md`
+  (42 concrete Stage 23 scenarios).

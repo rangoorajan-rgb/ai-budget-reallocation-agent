@@ -1555,6 +1555,108 @@ final allocated movement.
   and `src/scoring.py` — Stage 22 explains an already-selected action, a
   responsibility separate from selecting it.
 
+### Stage 23 — Deterministic Campaign Reallocation Priority Scoring
+
+- **Rule and business meaning.** For one already-selected
+  `CampaignRecommendation` (Stage 21), `calculate_campaign_reallocation_priority_score`
+  computes one campaign-level, dimensionless `int` score expressing *"the
+  relative priority with which an already-selected directional
+  recommendation should be considered during later cross-campaign
+  ranking."* A higher score means a stronger candidate **only within the
+  same recommendation direction** — `INCREASE` scores must later be
+  compared only with other `INCREASE` scores, and `REDUCE` scores only with
+  other `REDUCE` scores. The score must never be used to compare an
+  `INCREASE` directly against a `REDUCE`; direction remains solely and
+  authoritatively carried by `CampaignRecommendation.recommendation_action`,
+  never re-encoded through sign or magnitude here.
+- **Non-directional actions.** `HOLD` and `MAINTAIN` unconditionally
+  produce `confidence_component=0`, `business_priority_component=0`,
+  `reallocation_priority_score=0` — not because either action is invalid,
+  but because neither proposes a directional budget movement for the later
+  ranking stage to prioritise. The confidence and business-priority
+  mappings are never inspected or applied once a non-directional action is
+  identified.
+- **`Confidence.NOT_ASSESSABLE` override.** An `INCREASE` or `REDUCE`
+  recommendation paired with `Confidence.NOT_ASSESSABLE` also produces an
+  all-zero result — a scoring-only override that neither changes the
+  existing `recommendation_action` nor raises an error.
+- **Confidence component** (evidence reliability), fixed and immutable:
+  ```
+  HIGH   → 60
+  MEDIUM → 40
+  LOW    → 20
+  ```
+  (`NOT_ASSESSABLE` is handled by the override above, never through this
+  mapping.)
+- **Business-priority component** (direction-aware), fixed and immutable:
+  ```
+  INCREASE:  HIGH → 40,     MEDIUM → 20,     STANDARD → 0
+  REDUCE:    STANDARD → 40, MEDIUM → 20,     HIGH → 0
+  ```
+  `INCREASE` favours higher-priority campaigns as recipients of additional
+  budget; `REDUCE` favours lower-priority campaigns as possible budget
+  donors — the same `BusinessPriority` value therefore contributes
+  opposite components depending on direction, by design.
+- **Total.** For an assessable directional recommendation,
+  `reallocation_priority_score = confidence_component +
+  business_priority_component`, always one of `{20, 40, 60, 80, 100}`;
+  non-directional or `NOT_ASSESSABLE`-overridden results are always `0`.
+- **Exact calculation input and authorised fields.**
+  `recommendation.campaign_id`, `recommendation.recommendation_action`,
+  `campaign.campaign_id`, `campaign.business_priority`,
+  `confidence.campaign_id`, and `confidence.confidence` are the only six
+  fields read, across exactly three input objects (`CampaignRecommendation`,
+  `CampaignInput`, `CampaignConfidenceClass`). No Stage 1–22 production
+  function is ever called — Stage 23 consumes their already-approved
+  outputs directly.
+- **Campaign-ID policy.** All three `campaign_id` values must match,
+  checked as the first statement before any action, confidence, or
+  priority value is read — one combined equality check anchored to
+  `recommendation.campaign_id`. A mismatch raises exactly
+  `ValueError("Campaign IDs must match when calculating reallocation
+  priority score.")`, with no result returned, no ID silently preferred,
+  and the same exact message regardless of which input(s) mismatch.
+- **Numeric policy.** Plain Python `int` throughout — never `float` or
+  `Decimal`; the score is dimensionless, requires no rounding or
+  quantisation, and no ambient `Decimal` context affects it. No negative
+  value and no value greater than `100` is ever produced (model-enforced
+  via `Field(ge=0, le=100)`); no multiplication or division is performed
+  anywhere. Direction is never encoded through sign. Tie-breaking among
+  equal scores is explicitly deferred to the later cross-campaign ranking
+  stage, not decided here.
+- **Not double-counted.** `PerformanceBand`/`CampaignPerformanceClass` and
+  `TrendDirection`/`CampaignTrendClass` already caused Stage 20's
+  suitability judgement and Stage 21's recommendation selection — scoring
+  them again would double-count the same action evidence, so neither is
+  read. `CampaignActionAvailability`, `CampaignActionSuitability`, and
+  `CampaignTrackingAssessment` are already fully consumed downstream by
+  Stage 21 and are not re-read. `CampaignRecommendationReason`/`ReasonCode`
+  explain the decision and must never become hidden numeric weights, so
+  neither is read. `PacingStatus`/`CampaignPacingClass` has no approved
+  direction-specific prioritisation policy and is excluded. Raw campaign
+  metrics, `weighted_performance_ratio`, `trend_delta`, monetary constraint
+  results (raw/effective increase/decrease limits), protection,
+  test-campaign status, and tracking status are all excluded — they answer
+  how much money can move or whether an action is mechanically available,
+  not how strongly a campaign should be prioritised for a direction it
+  already qualifies for.
+- **Result model.** `CampaignReallocationPriorityScore` (frozen, immutable,
+  `extra="forbid"`; exactly `campaign_id: str`, `confidence_component: int`,
+  `business_priority_component: int`, `reallocation_priority_score: int`,
+  each of the three numeric fields constrained to `0..100` and the total
+  model-validated to equal the sum of the two components) does not
+  duplicate `recommendation_action` — callers retain the
+  separately-resolved `CampaignRecommendation` for that.
+- **Not this stage's responsibility.** Stage 23 performs no sorting,
+  normalisation, ranking, allocation, conservation, monetary calculation,
+  or AI explanation, and it never modifies the recommendation it scores.
+  It is completely single-campaign — no other campaign's data is read,
+  compared, or required.
+- **Fills an existing placeholder.** `src/scoring.py` and
+  `tests/test_scoring.py` — placeholder since Sprint 1 — are filled in for
+  the first time at Stage 23, rather than a new dedicated module being
+  created as at Stages 19–22.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -1594,12 +1696,13 @@ final allocated movement.
   increase-side constraint. `RecommendationAction` is a provisional direction
   only — no monetary amount is calculated. The six conflicting performance/trend
   cells' precedence remains deliberately left `NEUTRAL` rather than resolved;
-  `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` and `BusinessPriority`
-  effects, the remaining `ReasonCode` trigger conditions (see below), numeric
-  prioritisation scoring, ranking, allocation, and conservation all remain
-  pending later stages. Per-campaign scoring is not itself known to require
-  cross-campaign data; only normalisation, ranking/prioritisation, and
-  allocation are.
+  `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` effects, the
+  remaining `ReasonCode` trigger conditions (see below), cross-campaign
+  ranking/prioritisation, allocation, and conservation all remain pending
+  later stages. Stage 23 resolved single-campaign reallocation priority
+  scoring using `Confidence` and `BusinessPriority` (see above) — per-campaign
+  scoring is not itself known to require cross-campaign data; only
+  normalisation, ranking/prioritisation, and allocation are.
 - **Remaining `ReasonCode` trigger conditions.** Stage 22 resolved the trigger
   conditions for `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`,
   `HELD_FOR_MANUAL_REVIEW`, `ABOVE_TARGET_STRONG`, `NEAR_TARGET`,

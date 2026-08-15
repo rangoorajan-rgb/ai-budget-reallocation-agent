@@ -1063,23 +1063,109 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 23 — Deterministic Campaign Reallocation Priority Scoring (complete)
+
+- [x] `src/scoring.py` (Sprint 1 placeholder pair filled in for the first
+      time — not a newly created module, unlike Stages 19–22) —
+      `CampaignReallocationPriorityScore` (frozen, `extra="forbid"`:
+      `campaign_id`, `confidence_component: int`,
+      `business_priority_component: int`,
+      `reallocation_priority_score: int`, each numeric field constrained to
+      `0..100`, total model-validated to equal the sum of the two
+      components) and
+      `calculate_campaign_reallocation_priority_score(recommendation:
+      CampaignRecommendation, campaign: CampaignInput, confidence:
+      CampaignConfidenceClass) -> CampaignReallocationPriorityScore`. Does
+      not duplicate `recommendation_action` on the result.
+      `src/recommendation.py`, `src/reasons.py`, `src/suitability.py`,
+      `src/availability.py`, `src/constraints.py`, `src/classification.py`,
+      `src/constants.py` (no enum added or changed), `src/models.py`
+      unchanged.
+- [x] **Approved business meaning**: the score represents the relative
+      priority with which an already-selected *directional* recommendation
+      should be considered during later cross-campaign ranking. A higher
+      score means a stronger candidate only within the same direction —
+      `INCREASE` scores compared only with other `INCREASE` scores,
+      `REDUCE` scores only with other `REDUCE` scores; direction remains
+      solely and authoritatively carried by
+      `CampaignRecommendation.recommendation_action`, never re-encoded
+      through sign or magnitude.
+- [x] **Approved non-directional rule**: `HOLD`/`MAINTAIN` unconditionally
+      produce `(0, 0, 0)`, without inspecting or applying the confidence or
+      business-priority mappings.
+- [x] **Approved `Confidence.NOT_ASSESSABLE` override**: an `INCREASE`/
+      `REDUCE` recommendation paired with `NOT_ASSESSABLE` also produces
+      `(0, 0, 0)` — a scoring-only override, no exception, no change to the
+      existing recommendation.
+- [x] **Approved exact mappings** (fixed, immutable `MappingProxyType`,
+      independent of enum declaration order): confidence — `HIGH`→60,
+      `MEDIUM`→40, `LOW`→20; business priority for `INCREASE` — `HIGH`→40,
+      `MEDIUM`→20, `STANDARD`→0; business priority for `REDUCE` —
+      `STANDARD`→40, `MEDIUM`→20, `HIGH`→0.
+      `reallocation_priority_score = confidence_component +
+      business_priority_component`, always a member of `{0, 20, 40, 60, 80,
+      100}`.
+- [x] Consumes Stage 21's already-approved `CampaignRecommendation` and
+      Stage 7's already-approved `CampaignConfidenceClass` directly (never
+      calls `resolve_campaign_recommendation_action`,
+      `classify_campaign_confidence`, or any other Stage 1–22 production
+      function). Requires all three `campaign_id` values to match, raising
+      exactly `ValueError("Campaign IDs must match when calculating
+      reallocation priority score.")` otherwise, checked before any action,
+      confidence, or priority value is read. Reads exactly the six
+      authorised fields. Never reads `PerformanceBand`, `TrendDirection`,
+      `PacingStatus`, `ReasonCode`, raw metrics, monetary constraint
+      results, protection, test-campaign status, or tracking status.
+- [x] Plain Python `int` throughout — never `float`/`Decimal`; no rounding,
+      quantisation, or ambient `Decimal` context; no multiplication or
+      division; no negative value or value above `100`; tie-breaking
+      deferred entirely to the later ranking stage. Completely
+      single-campaign — no other campaign's data is read, compared, or
+      required.
+- [x] `tests/test_scoring.py` (Sprint 1 placeholder filled in for the first
+      time) — 81 new Stage 23 tests, all passing.
+      `tests/test_reasons.py` unchanged at 69 tests,
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+      (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+      re-run and confirmed passing — no regression, no existing test file
+      required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 23 (and not yet started)
+
+- Cross-campaign ranking/prioritisation — sorting, normalising, or
+  comparing `CampaignReallocationPriorityScore` results across campaigns
+  (the first genuinely cross-campaign stage).
+- Tie-breaking among equal scores.
+- Any monetary recommendation amount, allocation, or conservation.
+- `PacingStatus` effects on scoring or ranking (no approved
+  direction-specific policy exists).
+- The remaining twelve `ReasonCode` members' trigger conditions (see Stage
+  22's Explicitly-Out-of-Scope list above).
+- `Confidence.NOT_ASSESSABLE` ownership/trigger and the combined
+  confidence/tracking/pacing assessment question.
+- Streamlit interface, Gemini integration, approval workflow, audit, exports.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 23 (not started, scope not yet frozen): requires its own dependency and
-decision-readiness inspection before being frozen, not file-list order.
-Numeric prioritisation scoring is the leading candidate, potentially
-consuming `CampaignRecommendation` (Stage 21) and/or
-`CampaignRecommendationReason` (Stage 22) alongside the underlying
-Stage 5/6/8/19/20 facts. Whether `Confidence`, `PacingStatus`, or
-`BusinessPriority` first need a dedicated readiness/scoring stage before
-per-campaign scoring or ranking can be finalised is not yet resolved.
-Per-campaign scoring may remain single-campaign; only normalisation,
-ranking/prioritisation, and allocation genuinely require comparing multiple
-campaigns simultaneously (corrected at Stage 19 completion). The
-still-deferred combined campaign-assessment question (performance + trend +
-confidence + tracking + pacing) remains a live but not clearly necessary
-candidate on its own, as noted since the Stage 11 inspection. The remaining
-twelve `ReasonCode` members' trigger conditions (see Stage 22's
+Stage 24 (not started, scope not yet frozen): requires its own dependency
+and decision-readiness inspection before being frozen, not file-list order.
+Cross-campaign ranking/prioritisation is the leading candidate — the first
+stage confirmed to genuinely require comparing multiple campaigns
+simultaneously (per the Stage 19 cross-campaign-boundary correction),
+consuming `CampaignReallocationPriorityScore` (Stage 23) per campaign,
+grouped and compared only within each `RecommendationAction` direction
+(`INCREASE` against `INCREASE`, `REDUCE` against `REDUCE`) per Stage 23's
+own approved boundary. Tie-breaking among equal scores, still undecided,
+becomes Stage 24's responsibility. Whether a distinct monetary
+recommendation-amount stage is required before allocation, or whether
+amount computation folds into allocation directly, remains unresolved. The
+remaining twelve `ReasonCode` members' trigger conditions (see Stage 23's
 Explicitly-Out-of-Scope list above) remain open, with two of the four
 blocking categories (performance severity, constraint binding-source
 identity) each potentially warranting their own dedicated stage before

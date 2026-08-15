@@ -895,6 +895,45 @@ calculates a monetary amount, scores, ranks, or allocates.
 | 52 | `None`/dict inputs | Raise `AttributeError`, not silently converted; no broad `except` anywhere in the function source; no production batch function exists. |
 | 53 | `data/sample_campaigns.csv` validated; Stage 5/6/8/10–21 results independently calculated per campaign through the real production path, then only the six approved Stage 22 inputs passed, iterating in the test (no production batch function) | `G001=(NEAR_TARGET, RECENT_TREND_STABLE)`, `M001=(NEAR_TARGET, RECENT_TREND_STABLE)`, `G002=(ABOVE_TARGET_STRONG, RECENT_TREND_IMPROVING)`, `G003=(NEAR_TARGET, RECENT_TREND_STABLE)`. |
 
+## Campaign Reallocation Priority Score Scenarios
+
+All scenarios below use `calculate_campaign_reallocation_priority_score(recommendation:
+CampaignRecommendation, campaign: CampaignInput, confidence:
+CampaignConfidenceClass) -> CampaignReallocationPriorityScore` from
+`src/scoring.py` (`tests/test_scoring.py` — fills in the Sprint 1
+placeholder pair for the first time). Every result is comparable only
+within the same recommendation direction — none of these scenarios sorts,
+ranks, normalises, allocates, or compares across campaigns.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignReallocationPriorityScore` field set | Exactly `campaign_id`, `confidence_component`, `business_priority_component`, `reallocation_priority_score`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate a `CampaignReallocationPriorityScore` instance | Rejected (`frozen=True`). |
+| 4 | Component/total field types | Plain Python `int`, never `float`/`Decimal`/`bool`-only. |
+| 5 | Construct with a component below `0` or above `100` | Rejected (`Field(ge=0, le=100)`). |
+| 6 | Construct with `reallocation_priority_score != confidence_component + business_priority_component` | Rejected (model validator). |
+| 7 | `model_dump()` | Plain `int`-valued dict, no `Decimal`/`float`/enum wrapper. |
+| 8 | `campaign_id` on the result | Copied from `recommendation.campaign_id`, after confirming it matches `campaign.campaign_id` and `confidence.campaign_id`. |
+| 9 | All three IDs equal | Resolves normally. |
+| 10 | `campaign.campaign_id` mismatched | Raises `ValueError("Campaign IDs must match when calculating reallocation priority score.")`. |
+| 11 | `confidence.campaign_id` mismatched | Raises the same exact `ValueError`. |
+| 12 | Both mismatched simultaneously | Raises the same exact `ValueError` — no per-object mismatch reporting, no result returned, no ID silently preferred. |
+| 13 | ID-equality guard | Verified via AST to be the first statement, preceding any action, confidence, or priority read. |
+| 14 | `HOLD`, every `Confidence` × every `BusinessPriority` combination | `(0, 0, 0)` in every case. |
+| 15 | `MAINTAIN`, every `Confidence` × every `BusinessPriority` combination | `(0, 0, 0)` in every case. |
+| 16 | Non-directional action with the confidence/business-priority mappings replaced by exploding stand-ins | No exception — the mappings are never evaluated. |
+| 17 | `INCREASE`/`REDUCE` with `Confidence.NOT_ASSESSABLE`, every `BusinessPriority` | `(0, 0, 0)` in every case; no exception; `recommendation.recommendation_action` unchanged. |
+| 18–26 | `INCREASE` × every `Confidence`/`BusinessPriority` combination (9 cells) | `HIGH`/`HIGH`→`(60,40,100)`; `HIGH`/`MEDIUM`→`(60,20,80)`; `HIGH`/`STANDARD`→`(60,0,60)`; `MEDIUM`/`HIGH`→`(40,40,80)`; `MEDIUM`/`MEDIUM`→`(40,20,60)`; `MEDIUM`/`STANDARD`→`(40,0,40)`; `LOW`/`HIGH`→`(20,40,60)`; `LOW`/`MEDIUM`→`(20,20,40)`; `LOW`/`STANDARD`→`(20,0,20)`. |
+| 27–35 | `REDUCE` × every `Confidence`/`BusinessPriority` combination (9 cells) | `HIGH`/`STANDARD`→`(60,40,100)`; `HIGH`/`MEDIUM`→`(60,20,80)`; `HIGH`/`HIGH`→`(60,0,60)`; `MEDIUM`/`STANDARD`→`(40,40,80)`; `MEDIUM`/`MEDIUM`→`(40,20,60)`; `MEDIUM`/`HIGH`→`(40,0,40)`; `LOW`/`STANDARD`→`(20,40,60)`; `LOW`/`MEDIUM`→`(20,20,40)`; `LOW`/`HIGH`→`(20,0,20)`. |
+| 36 | `calculate_campaign_reallocation_priority_score` source | Reads only the six authorised fields across `recommendation`, `campaign`, `confidence` (AST-verified); calls none of `resolve_campaign_recommendation_action`/`resolve_campaign_action_suitability`/`resolve_campaign_action_availability`/`resolve_campaign_recommendation_reason`/`assess_campaign_tracking`/`classify_campaign_performance`/`classify_campaign_trend`/`classify_campaign_confidence`/any other Stage 1–22 production function (AST-verified). |
+| 37 | `ReasonCode`/`CampaignRecommendationReason`/`CampaignPerformanceClass`/`PerformanceBand`/`CampaignTrendClass`/`TrendDirection`/`CampaignPacingClass`/`PacingStatus`/`CampaignTrackingAssessment`/`CampaignActionAvailability`/`CampaignActionSuitability`/`Decimal`/`float`/raw metric or constraint field names/`sorted`/`rank`/`normalize`/`normalise`/`allocate` | Never referenced anywhere in `src/scoring.py`'s source (AST-verified) or imported into the module (`hasattr` on the module confirms absence). |
+| 38 | `_CONFIDENCE_COMPONENT`/`_INCREASE_BUSINESS_PRIORITY_COMPONENT`/`_REDUCE_BUSINESS_PRIORITY_COMPONENT` | Each is a `MappingProxyType`; direct-index mutation raises `TypeError`. |
+| 39 | Every `RecommendationAction` × `Confidence` × `BusinessPriority` combination (exhaustive sweep) | `reallocation_priority_score` always equals `confidence_component + business_priority_component`; always a member of `{0, 20, 40, 60, 80, 100}`; neither component ever negative. |
+| 40 | `None`/dict inputs | Raise `AttributeError`, not silently converted; no broad `except` anywhere in the function source; no production batch function exists; no `list`/`tuple`/`dict`-typed parameter accepts a collection of campaigns. |
+| 41 | `CampaignReallocationPriorityScore.model_fields` / result attributes | Contains no `recommendation_action`, `reason_codes`, `performance_band`, `trend_direction`, `pacing_status`, `rank`, or `allocation` field. |
+| 42 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–21 results independently calculated per campaign through the real production path, then only the three approved Stage 23 inputs passed, iterating in the test (no production batch function) | `G001=0`, `M001=0`, `G003=0` (all `MAINTAIN`); `G002` (`INCREASE`, `Confidence.HIGH`, `BusinessPriority.HIGH`) → `confidence_component=60`, `business_priority_component=40`, `reallocation_priority_score=100`. No cross-campaign ranking inferred from these four results. |
+
 ## Allocation Scenarios
 
 > Pending a later Sprint 1 stage.
