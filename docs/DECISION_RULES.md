@@ -1893,6 +1893,99 @@ final allocated movement.
   by the master plan for exactly this responsibility — are filled in for
   the first time at Stage 25, rather than a new module being created.
 
+### Stage 26 — Deterministic, Independent Budget Conservation Verification
+
+- **Rule.** For one already-produced Stage 25 `CampaignReallocationAllocation`,
+  `verify_campaign_reallocation_conservation` independently recomputes its
+  total allocated increases and total allocated decreases, and reports
+  whether they are exactly conserved. Conservation is a pure, read-only
+  checker, never an enforcer: it never reruns allocation, never repairs
+  an imbalance, and never mutates the allocation it inspects.
+- **Exact conservation equation.**
+  ```
+  total_increase_allocated = sum(record.allocated_amount for record in allocation.increase_allocations)
+  total_decrease_allocated = sum(record.allocated_amount for record in allocation.decrease_allocations)
+  net_change = total_increase_allocated - total_decrease_allocated
+  is_conserved = (net_change == Decimal("0.00"))
+  ```
+  Both totals are independently recomputed from the individual records —
+  Stage 25 deliberately returns no portfolio-total field to trust.
+- **Sign convention**, never left ambiguous: `net_change =
+  total_increase_allocated - total_decrease_allocated`. Positive means
+  increases exceed decreases; negative means decreases exceed increases;
+  exactly `Decimal("0.00")` means conserved. No absolute difference is
+  ever returned, and imbalance direction is never encoded anywhere except
+  in `net_change`'s own sign.
+- **Exact equality, no tolerance.** Every value is an exact,
+  currency-quantised `Decimal` — there is no numeric noise a tolerance
+  would legitimately need to absorb, and any tolerance would only ever
+  conceal a genuine one-penny implementation defect. An imbalance of
+  exactly `Decimal("0.01")` is reported as not conserved. No `float`,
+  epsilon, absolute-difference threshold, or rounded comparison is ever
+  used.
+- **Always returns a result — never raises merely because the allocation
+  is imbalanced.** An imbalanced allocation is reported as
+  `is_conserved=False` with its exact signed `net_change`. If a caller
+  directly constructs an internally inconsistent
+  `CampaignReallocationConservation` (`net_change` not equal to
+  `total_increase_allocated - total_decrease_allocated`, or
+  `is_conserved` not equal to `net_change == Decimal("0.00")`), ordinary
+  Pydantic validation failure applies — a model-level validator enforces
+  both relationships. The production verification function itself always
+  constructs an internally consistent result and therefore never
+  triggers that validator's failure path.
+- **Pure monetary sum check — campaign identity is never inspected.**
+  `campaign_id` is never read from any allocation record; every
+  `allocated_amount` present is summed, indifferent to duplicate IDs
+  within one direction, the same ID appearing in both directions, or
+  repeated zero-valued records. Stage 24 and Stage 25 already own
+  campaign-identity structural guarantees; re-validating them here would
+  duplicate upstream responsibility this stage does not own. This stage
+  also never duplicates Stage 25's own donor/recipient matching, rank
+  waterfall, tied-tier proportional allocation, or residual-penny
+  apportionment.
+- **Exact calculation input and authorised fields.**
+  `allocation.increase_allocations`, `allocation.decrease_allocations`,
+  and each record's `allocated_amount` are the only fields read, across
+  exactly one input type (`CampaignReallocationAllocation`). `ReviewSetup`,
+  `CampaignInput`, Stage 16/18 capacity results, Stage 24's ranking,
+  `CampaignRecommendation`, and `CampaignRecommendationReason` are never
+  accepted. No Stage 1–25 production function is ever called.
+- **Decimal and context policy.** `Decimal` exclusively, never `float`.
+  Every sum and the final subtraction run inside an explicitly-scoped
+  `localcontext`, with local precision derived from the actual operands'
+  digit counts and the number of records being summed — never a blindly
+  assumed fixed value — so the ambient global `Decimal` context can never
+  affect the result, is never mutated, and local-context rounding can
+  never make two genuinely unequal totals compare as equal. This
+  precision-derivation discipline directly responds to the real
+  ambient-context arithmetic defect discovered and corrected during
+  Stage 25's own implementation. Zero is always exactly `Decimal("0.00")`.
+- **Result model.** `CampaignReallocationConservation` (frozen, immutable,
+  `extra="forbid"`; exactly `total_increase_allocated: Currency` (`>= 0`),
+  `total_decrease_allocated: Currency` (`>= 0`), `net_change: Decimal`
+  (plain, since it may be negative), `is_conserved: bool`) carries no
+  campaign count, campaign IDs, individual allocation records, reserve
+  field, capacity field, final budget, message, issue, reason code, or
+  tolerance field.
+- **A conserved zero allocation does not mean any campaign received
+  funding** — an all-zero allocation is trivially conserved
+  (`Decimal("0.00") == Decimal("0.00")`), reporting a true fact about
+  balance, not a claim that money moved.
+- **Not this stage's responsibility.** No `ReasonCode` is ever emitted or
+  referenced (`ACCOUNT_RESERVE_REQUIRED` and `NO_ELIGIBLE_RECIPIENT`
+  remain unassigned); reserve, final campaign budgets, ranking order, and
+  recommendation/reason context are all outside this stage, exactly as
+  they were outside Stage 25's. This stage exposes only the two totals,
+  `net_change`, and `is_conserved` to a later deterministic
+  integration/reporting stage — it does not decide what that later stage
+  should do with an unconserved result (publication gating, final
+  budgets, and reporting are not implemented here).
+- **Dedicated module, existing placeholder filled in.** `src/conservation.py`
+  and `tests/test_conservation.py` — placeholder since Sprint 1, reserved
+  by the master plan for exactly this responsibility — are filled in for
+  the first time at Stage 26, rather than a new module being created.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -1932,17 +2025,19 @@ final allocated movement.
   increase-side constraint. `RecommendationAction` is a provisional direction
   only — no monetary amount is calculated. The six conflicting performance/trend
   cells' precedence remains deliberately left `NEUTRAL` rather than resolved;
-  `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` effects, the
-  remaining `ReasonCode` trigger conditions (see below), and conservation
-  all remain pending later stages. Stage 23 resolved single-campaign
-  reallocation priority scoring using `Confidence` and `BusinessPriority`,
-  Stage 24 resolved cross-campaign, direction-separated dense ranking of
-  those scores, and Stage 25 resolved cross-campaign budget allocation
-  using Stage 16/18's existing capacities directly (see above) —
+  `Confidence.NOT_ASSESSABLE` ownership, `PacingStatus` effects, and the
+  remaining `ReasonCode` trigger conditions (see below) all remain pending
+  later stages. Stage 23 resolved single-campaign reallocation priority
+  scoring using `Confidence` and `BusinessPriority`, Stage 24 resolved
+  cross-campaign, direction-separated dense ranking of those scores,
+  Stage 25 resolved cross-campaign budget allocation using Stage 16/18's
+  existing capacities directly, and Stage 26 resolved independent
+  monetary conservation verification of that allocation (see above) —
   confirming no separate monetary recommendation-amount stage was ever
-  required. Per-campaign scoring is not itself known to require
-  cross-campaign data; ranking and allocation are the two responsibilities
-  that genuinely do. Portfolio-wide or percentile normalisation remains
+  required, and completing the deterministic ranking → allocation →
+  conservation sequence. Per-campaign scoring is not itself known to
+  require cross-campaign data; ranking and allocation are the two
+  responsibilities that genuinely do. Portfolio-wide or percentile normalisation remains
   unused — Stage 24 confirmed the fixed Stage 23 `0..100` scale is used
   unchanged, and normalising small or single-candidate groups would
   distort that fixed meaning. `ReviewSetup.initial_account_reserve`
@@ -1966,5 +2061,7 @@ final allocated movement.
   permanently excluded from Stage 22's action-reason scope — each is
   diagnostically true in some cases but never causally participates in
   Stage 21's decision.
-- Conservation rules (independent verification of the balance invariant
-  Stage 25's allocation already constructs).
+- Final deterministic integration/reporting — including any publication
+  gating on `CampaignReallocationConservation.is_conserved` and final
+  campaign-budget computation — remains pending a later stage. Stage 26
+  resolved conservation verification itself (see above).

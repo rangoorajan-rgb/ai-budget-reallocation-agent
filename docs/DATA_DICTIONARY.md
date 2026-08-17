@@ -1,23 +1,25 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 25 (adds deterministic cross-campaign budget
-> allocation — `CampaignReallocationAllocation`/`CampaignAllocatedAmount`
-> — from `src/allocation.py` — to the Stage 1 enumerations, numerical
-> constants, core input models, CSV schema, Stage 2 validation reporting,
-> Stage 3 metric facts, Stage 4 pacing facts, Stage 5 performance
-> classification, Stage 6 trend classification, Stage 7 conversion-volume
-> confidence classification, Stage 8 tracking-based assessability, Stage 9
-> pacing interpretation, Stage 10 static budget-bound facts, Stage 11
-> applicable-change-percentage resolution, Stage 12 raw percentage-based
-> monetary movement cap, Stage 13 test-floor distance, Stage 14 protection
-> constraint, Stage 15 test-aware static decrease room, Stage 16 raw
-> increase limit, Stage 17 raw decrease limit, Stage 18 protection-adjusted
-> effective decrease limit, Stage 19 campaign action availability, Stage 20
-> campaign action suitability, Stage 21 recommendation-action selection,
-> Stage 22 recommendation reasons, Stage 23 single-campaign reallocation
-> priority scoring, and Stage 24 cross-campaign reallocation ranking).
-> Combined assessment, `Confidence.NOT_ASSESSABLE` ownership, the
-> remaining `ReasonCode` trigger conditions, conservation, and other
+> Sprint 1, Development Stage 26 (adds deterministic, independent budget
+> conservation verification —
+> `CampaignReallocationConservation` — from `src/conservation.py` — to the
+> Stage 1 enumerations, numerical constants, core input models, CSV
+> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4
+> pacing facts, Stage 5 performance classification, Stage 6 trend
+> classification, Stage 7 conversion-volume confidence classification,
+> Stage 8 tracking-based assessability, Stage 9 pacing interpretation,
+> Stage 10 static budget-bound facts, Stage 11 applicable-change-percentage
+> resolution, Stage 12 raw percentage-based monetary movement cap, Stage
+> 13 test-floor distance, Stage 14 protection constraint, Stage 15
+> test-aware static decrease room, Stage 16 raw increase limit, Stage 17
+> raw decrease limit, Stage 18 protection-adjusted effective decrease
+> limit, Stage 19 campaign action availability, Stage 20 campaign action
+> suitability, Stage 21 recommendation-action selection, Stage 22
+> recommendation reasons, Stage 23 single-campaign reallocation priority
+> scoring, Stage 24 cross-campaign reallocation ranking, and Stage 25
+> cross-campaign budget allocation). Combined assessment,
+> `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode`
+> trigger conditions, final deterministic integration/reporting, and other
 > derived/decision fields, plus export fields, are pending later stages.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
@@ -1278,11 +1280,73 @@ final campaign budget is calculated (`CampaignInput.current_budget` is
 never read), and conservation verification is a separate, later,
 independent stage that must never repair or mutate allocation's result.
 
+## Campaign Reallocation Conservation Fields (`src/conservation.py`)
+
+Produced by `verify_campaign_reallocation_conservation(allocation:
+CampaignReallocationAllocation) -> CampaignReallocationConservation`.
+Independently re-verifies the monetary invariant Stage 25's allocation is
+already constructed to satisfy — it never reruns allocation and never
+repairs an imbalance. `CampaignReallocationConservation` is frozen
+(immutable) and rejects unknown fields (`extra="forbid"`).
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `total_increase_allocated` | `Currency`, `>= 0` | Independently recomputed sum of `allocated_amount` across `allocation.increase_allocations`. |
+| `total_decrease_allocated` | `Currency`, `>= 0` | Independently recomputed sum of `allocated_amount` across `allocation.decrease_allocations`. |
+| `net_change` | `Decimal` (may be negative) | `total_increase_allocated - total_decrease_allocated`. Positive means increases exceed decreases; negative means decreases exceed increases; exactly `Decimal("0.00")` means conserved. |
+| `is_conserved` | `bool` | `True` only when `net_change` is exactly `Decimal("0.00")`. |
+
+**Model-level consistency.** A validator rejects any directly-constructed
+instance where `net_change != total_increase_allocated -
+total_decrease_allocated`, or where `is_conserved` does not equal
+`net_change == Decimal("0.00")` — the model cannot represent an
+internally contradictory conservation fact. The production function
+itself always constructs a consistent result and never triggers this
+validator's failure path merely because an allocation is imbalanced.
+
+**Exact equality, no tolerance.** Every value is an exact,
+currency-quantised `Decimal`. An imbalance of exactly `Decimal("0.01")`
+is reported as `is_conserved=False` — no tolerance, epsilon, or rounded
+comparison is ever used, since any tolerance would only conceal a genuine
+implementation defect.
+
+**Always returns a result.** An imbalanced allocation is reported as
+`is_conserved=False` with its exact signed `net_change` — the function
+never raises merely because totals differ, and never repairs, rebalances,
+or mutates the allocation.
+
+**Pure monetary sum check.** `campaign_id` is never read from any
+allocation record. Every `allocated_amount` present is summed,
+indifferent to duplicate IDs within one direction, the same ID appearing
+in both directions, or repeated zero-valued records — Stage 24 and
+Stage 25 already own campaign-identity structural guarantees. This stage
+never duplicates Stage 25's donor/recipient matching, rank waterfall,
+tied-tier allocation, or residual-penny apportionment.
+
+**A conserved zero allocation does not mean any campaign received
+funding** — an all-zero allocation is trivially conserved, reporting a
+true fact about balance, not a claim that money moved.
+
+**Not this stage's responsibility.** No `ReasonCode` is ever emitted
+(`ACCOUNT_RESERVE_REQUIRED`/`NO_ELIGIBLE_RECIPIENT` remain unassigned);
+reserve, final campaign budgets, ranking order, and recommendation/reason
+context are all excluded, exactly as they were excluded from Stage 25.
+This stage exposes only its four fields to a later deterministic
+integration/reporting stage — it does not decide what that later stage
+does with an unconserved result.
+
+**Decimal and context policy.** `Decimal` exclusively, never `float`.
+Every sum and the final subtraction run inside an explicitly-scoped
+`localcontext`, with precision derived from the actual operands' digit
+counts and record count — never a blindly assumed fixed value — so the
+ambient global context can never affect the result and local-context
+rounding can never make two unequal totals compare as equal.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, conservation).
+> conditions, final deterministic integration/reporting).
 
 ## Export Fields
 

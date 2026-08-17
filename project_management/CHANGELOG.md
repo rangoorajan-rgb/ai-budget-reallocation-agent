@@ -2110,3 +2110,130 @@ All notable changes to this project are documented in this file.
   outstanding downstream stage), and `docs/TEST_SCENARIOS.md` (60 concrete
   Stage 25 scenarios, superseding the earlier placeholder "Allocation
   Scenarios" heading).
+
+- Sprint 1, Development Stage 26: filled in the Sprint 1 placeholder pair
+  `src/conservation.py`/`tests/test_conservation.py` for the first time —
+  no new module was created. Added `CampaignReallocationConservation`
+  (frozen, immutable, `extra="forbid"`: `total_increase_allocated:
+  Currency` constrained `>= 0`, `total_decrease_allocated: Currency`
+  constrained `>= 0`, `net_change: Decimal` — plain, since it may be
+  negative — `is_conserved: bool` only, with a model-level validator
+  rejecting any instance where `net_change != total_increase_allocated -
+  total_decrease_allocated` or `is_conserved` is inconsistent with
+  `net_change == Decimal("0.00")`) and
+  `verify_campaign_reallocation_conservation(allocation:
+  CampaignReallocationAllocation) -> CampaignReallocationConservation`.
+  Independently verifies the monetary invariant of one already-produced
+  Stage 25 allocation — a pure, read-only checker that never reruns
+  allocation, never repairs an imbalance, and never mutates the
+  allocation it inspects. **Approved conservation equation:**
+  `total_increase_allocated`/`total_decrease_allocated` are independently
+  recomputed by summing `allocated_amount` across
+  `allocation.increase_allocations`/`.decrease_allocations` — never
+  trusting a portfolio total from Stage 25, which returns none;
+  `net_change = total_increase_allocated - total_decrease_allocated`;
+  `is_conserved = (net_change == Decimal("0.00"))`. **Approved sign
+  convention:** positive `net_change` means increases exceed decreases,
+  negative means decreases exceed increases — never left ambiguous, never
+  returned as an absolute difference. **Approved exact-equality policy:**
+  no tolerance, epsilon, absolute-difference threshold, or rounded
+  comparison — an imbalance of exactly `Decimal("0.01")` is reported as
+  not conserved. **Approved always-return-a-result policy:** the
+  production function never raises merely because an allocation is
+  imbalanced; `is_conserved=False` with the exact signed `net_change` is
+  a valid, auditable result; only a directly-constructed, internally
+  *inconsistent* result model is rejected, via ordinary Pydantic
+  validation. **Approved duplicate/overlap indifference:** `campaign_id`
+  is never read from any allocation record; every `allocated_amount`
+  present is summed regardless of duplicate IDs within one direction, the
+  same ID in both directions, or repeated zero records — trusting Stage
+  24/25's own structural identity guarantees rather than re-validating
+  them; Stage 26 never duplicates Stage 25's own donor/recipient
+  matching, rank waterfall, tied-tier proportional allocation, or
+  residual-penny apportionment. **Consumes only Stage 25's
+  `CampaignReallocationAllocation`** — never `ReviewSetup`,
+  `CampaignInput`, Stage 16/18 capacity results, Stage 24's ranking,
+  `CampaignRecommendation`, or `CampaignRecommendationReason`; never
+  calls `allocate_campaign_reallocation` or any other Stage 1–25
+  production function. Reads exactly `allocation.increase_allocations`,
+  `allocation.decrease_allocations`, and each record's `allocated_amount`.
+  Plain `Decimal` throughout — never `float`; every sum and the final
+  subtraction run inside an explicitly-scoped `localcontext`, with local
+  precision derived from the actual operands' digit counts and record
+  count — never a blindly assumed fixed value — directly responding to
+  the real ambient-context arithmetic defect discovered and corrected
+  during Stage 25's own implementation. No `ReasonCode` is ever emitted
+  (`ACCOUNT_RESERVE_REQUIRED`/`NO_ELIGIBLE_RECIPIENT` remain unassigned);
+  no final campaign budget is calculated. A conserved zero allocation does
+  not mean any campaign received funding. No enum was added or changed.
+  `src/allocation.py`, `src/ranking.py`, `src/scoring.py`,
+  `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
+  `src/constants.py`, and `src/models.py` are unchanged.
+- Sprint 1, Development Stage 26: added 50 new tests to
+  `tests/test_conservation.py` (Sprint 1 placeholder filled in for the
+  first time; all passing), covering result-model shape/immutability/
+  non-negative-total validation/serialization (no `campaign_count`,
+  `campaign_id`, individual allocation records, reserve, capacity, final
+  budget, message, issue, reason-code, or tolerance field), model-level
+  rejection of an inconsistent `net_change` or `is_conserved`, direct
+  construction of both balanced and imbalanced internally-consistent
+  results, every balanced case (empty allocation, all-zero allocation,
+  one side empty with zero-valued records on the other, equal
+  single/multiple records, different record counts with equal totals,
+  extreme equal totals, duplicated and overlapping IDs with balanced
+  totals), every imbalanced case (one-penny imbalances in both
+  directions, larger positive/negative imbalances, one positive side vs.
+  an empty side, exact signed `net_change`, confirmed no exception raised
+  and no repair/mutation performed), Decimal-context correctness (no
+  `float`; mutated ambient precision/rounding confirmed not to affect the
+  result and confirmed restored afterward; many large operands whose sum
+  requires more digits than any individual operand — 100 × 18-digit
+  values summing to a 20-digit total; a large collection where
+  fixed-per-operand precision alone would be insufficient — 500 ×
+  24-digit values summing to a 26-digit total; a one-penny discrepancy
+  between large-magnitude totals preserved exactly under a hostile
+  mutated ambient context; exact `Decimal("0.00")`), complete indifference
+  to duplicate/overlapping campaign IDs and repeated zero records with no
+  identity validation added, earlier-stage separation and excluded-type/
+  field absence (AST- and module-attribute-verified, including
+  confirmation `campaign_id` is never read anywhere in the module), no
+  input mutation, no broad exception handling, no production batch
+  function, and sample-data integration reproducing the real Stage 25
+  result for `data/sample_campaigns.csv` (`total_increase_allocated=0.00`,
+  `total_decrease_allocated=0.00`, `net_change=0.00`, `is_conserved=True`
+  — explicitly confirmed not to mean G002 received funding).
+  `tests/test_allocation.py` unchanged at 79 tests,
+  `tests/test_ranking.py` unchanged at 69 tests,
+  `tests/test_scoring.py` unchanged at 81 tests,
+  `tests/test_reasons.py` unchanged at 69 tests,
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+  (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+  re-run and confirmed passing — no behavioural regression, and no
+  existing non-placeholder test file required modification this stage.
+  Full suite: 1223 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 +
+  30 Stage 4 + 23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33
+  Stage 9 + 322 Stage 10–18 combined in `tests/test_constraints.py` + 61
+  Stage 19 in `tests/test_availability.py` + 67 Stage 20 in
+  `tests/test_suitability.py` + 84 Stage 21 in
+  `tests/test_recommendation.py` + 69 Stage 22 in `tests/test_reasons.py`
+  + 81 Stage 23 in `tests/test_scoring.py` + 69 Stage 24 in
+  `tests/test_ranking.py` + 79 Stage 25 in `tests/test_allocation.py` +
+  50 Stage 26 in `tests/test_conservation.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignReallocationConservation`
+  fields; the conservation equation and sign convention; the
+  exact-equality and always-return-a-result policies; the duplicate/
+  overlap indifference; the Decimal/context policy; the boundaries
+  excluding reason codes, reserve, final budgets, and identity
+  validation), `docs/DECISION_RULES.md` (frozen Stage 26 deterministic,
+  independent budget conservation verification rule, including the exact
+  conservation equation, the exact sign convention, the exact-equality
+  and always-return-a-result policies, the exact single input and
+  authorised fields, the Decimal/context precision-derivation policy, and
+  the revised Pending section reflecting that the deterministic ranking →
+  allocation → conservation sequence is now complete while final
+  deterministic integration/reporting remains the sole outstanding
+  downstream stage), and `docs/TEST_SCENARIOS.md` (37 concrete Stage 26
+  scenarios).

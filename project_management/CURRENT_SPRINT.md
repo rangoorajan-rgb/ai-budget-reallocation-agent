@@ -1355,19 +1355,106 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 26 — Deterministic, Independent Budget Conservation Verification (complete)
+
+- [x] `src/conservation.py` (Sprint 1 placeholder pair filled in for the
+      first time — not a newly created module, mirroring Stages 23 and 25's
+      pattern) — `CampaignReallocationConservation` (frozen,
+      `extra="forbid"`: `total_increase_allocated: Currency` `>= 0`,
+      `total_decrease_allocated: Currency` `>= 0`, `net_change: Decimal`
+      (plain, may be negative), `is_conserved: bool` — a model validator
+      rejects any instance where `net_change != total_increase_allocated
+      - total_decrease_allocated` or `is_conserved` is inconsistent with
+      `net_change == Decimal("0.00")`) and
+      `verify_campaign_reallocation_conservation(allocation:
+      CampaignReallocationAllocation) -> CampaignReallocationConservation`.
+      `src/allocation.py`, `src/ranking.py`, `src/scoring.py`,
+      `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
+      `src/constants.py` (no enum added or changed), `src/models.py`
+      unchanged.
+- [x] **Approved conservation equation**: independently recomputes
+      `total_increase_allocated`/`total_decrease_allocated` by summing
+      `allocated_amount` across `allocation.increase_allocations`/
+      `.decrease_allocations` — never trusting a portfolio total from
+      Stage 25, which returns none. `net_change =
+      total_increase_allocated - total_decrease_allocated`;
+      `is_conserved = (net_change == Decimal("0.00"))`.
+- [x] **Approved sign convention**: positive `net_change` means increases
+      exceed decreases, negative means decreases exceed increases — never
+      left ambiguous, never returned as an absolute difference.
+- [x] **Approved exact-equality policy**: no tolerance, epsilon,
+      absolute-difference threshold, or rounded comparison — an imbalance
+      of exactly `Decimal("0.01")` is reported as not conserved.
+- [x] **Approved always-return-a-result policy**: the production function
+      never raises merely because an allocation is imbalanced;
+      `is_conserved=False` with the exact signed `net_change` is a valid,
+      auditable result. Only a directly-constructed, internally
+      inconsistent result model is rejected, via ordinary Pydantic
+      validation.
+- [x] **Approved duplicate/overlap indifference**: `campaign_id` is never
+      read from any allocation record; Stage 26 sums every
+      `allocated_amount` present regardless of duplicate IDs within one
+      direction, the same ID in both directions, or repeated zero
+      records — trusting Stage 24/25's own structural identity
+      guarantees rather than re-validating them.
+- [x] Consumes only Stage 25's `CampaignReallocationAllocation` — never
+      `ReviewSetup`, `CampaignInput`, Stage 16/18 capacity results, Stage
+      24's ranking, `CampaignRecommendation`, or
+      `CampaignRecommendationReason`. Never calls
+      `allocate_campaign_reallocation` or any other Stage 1–25 production
+      function. Reads exactly the authorised fields.
+- [x] Plain `Decimal` throughout — never `float`. Every sum and the final
+      subtraction run inside an explicitly-scoped `localcontext`, with
+      precision derived from the actual operands' digit counts and record
+      count (never a blindly assumed fixed value), directly responding to
+      the ambient-context arithmetic defect discovered and corrected
+      during Stage 25. No `ReasonCode` is ever emitted; no final campaign
+      budget is calculated; no repair, rebalancing, or mutation of the
+      allocation ever occurs.
+- [x] `tests/test_conservation.py` (Sprint 1 placeholder filled in for the
+      first time) — 50 new Stage 26 tests, all passing.
+      `tests/test_allocation.py` unchanged at 79 tests,
+      `tests/test_ranking.py` unchanged at 69 tests,
+      `tests/test_scoring.py` unchanged at 81 tests,
+      `tests/test_reasons.py` unchanged at 69 tests,
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+      (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+      re-run and confirmed passing — no regression, no existing
+      non-placeholder test file required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 26 (and not yet started)
+
+- Final deterministic integration/reporting — including any publication
+  gating on `CampaignReallocationConservation.is_conserved` and final
+  campaign-budget computation (`current_budget ± allocated amount`).
+- `ACCOUNT_RESERVE_REQUIRED`, `NO_ELIGIBLE_RECIPIENT`, and the remaining
+  ten `ReasonCode` members' trigger conditions (see Stage 22's
+  Explicitly-Out-of-Scope list above).
+- `Confidence.NOT_ASSESSABLE` ownership/trigger and the combined
+  confidence/tracking/pacing assessment question.
+- Streamlit interface, Gemini integration, approval workflow, audit, exports.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 26 (not started, scope not yet frozen): requires its own dependency
+Stage 27 (not started, scope not yet frozen): requires its own dependency
 and decision-readiness inspection before being frozen, not file-list order.
-Conservation (`src/conservation.py`) is the leading candidate — an
-independent, later verification that Stage 25's already-constructed
-`sum(increase_allocations) == sum(decrease_allocations)` invariant
-actually holds, consistent with `src/conservation.py`'s own "checks"
-(verification, not enforcement) framing. After conservation, final
-deterministic integration/reporting, Streamlit/UI, and Gemini explanation
-remain the rest of the planned sequence. The remaining `ReasonCode`
-members' trigger conditions (see Stage 25's Explicitly-Out-of-Scope list
-above) remain open, with two of the four blocking categories (performance
-severity, constraint binding-source identity) each potentially warranting
-their own dedicated stage before further `ReasonCode` coverage is
-possible.
+Final deterministic integration/reporting is the leading candidate — the
+deterministic ranking → allocation → conservation sequence is now
+complete, and this next stage would consume `CampaignReallocationAllocation`
+(Stage 25) and `CampaignReallocationConservation` (Stage 26) together to
+decide, among other open questions, whether to gate publication on
+`is_conserved` and whether/where final campaign budgets
+(`current_budget ± allocated amount`) are computed. After that, Streamlit/UI
+and Gemini explanation remain the rest of the planned sequence, per the
+master plan's own Sprint 2/Sprint 3 boundary (deterministic core first,
+AI explanation only after). The remaining `ReasonCode` members' trigger
+conditions (see Stage 26's Explicitly-Out-of-Scope list above) remain
+open, with two of the four blocking categories (performance severity,
+constraint binding-source identity) each potentially warranting their own
+dedicated stage before further `ReasonCode` coverage is possible.

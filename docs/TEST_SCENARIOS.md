@@ -1060,6 +1060,55 @@ budget, emits a reason code, or performs conservation verification.
 | 60 | `data/sample_campaigns.csv` validated; Stage 3/5/6/7/8/10–24 results independently calculated per campaign through the real production path, then only the three approved Stage 25 inputs passed (no production batch function) | `increase_allocations=(CampaignAllocatedAmount(campaign_id="G002", allocated_amount=Decimal("0.00")),)`, `decrease_allocations=()`. G002's zero allocation is neither a changed recommendation, an error, nor whole-campaign ineligibility — it reflects the complete absence of ranked `REDUCE` supply in this exact portfolio. |
 
 
+## Campaign Reallocation Conservation Scenarios
+
+All scenarios below use `verify_campaign_reallocation_conservation(allocation:
+CampaignReallocationAllocation) -> CampaignReallocationConservation` from
+`src/conservation.py` (`tests/test_conservation.py` — fills in the Sprint
+1 placeholder pair for the first time). No scenario reruns allocation,
+repairs an imbalance, inspects campaign identity, or reads reserve,
+capacity, ranking, recommendation, or reason data.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignReallocationConservation` field set | Exactly `total_increase_allocated`, `total_decrease_allocated`, `net_change`, `is_conserved`. |
+| 2 | Construct with an unknown field | Rejected (`extra="forbid"`). |
+| 3 | Attempt to mutate the result | Rejected (`frozen=True`). |
+| 4 | `total_increase_allocated` or `total_decrease_allocated` negative | Rejected (`Field(ge=0)`). |
+| 5 | `net_change` negative | Accepted — plain `Decimal`, not `Currency`. |
+| 6 | `is_conserved` type | Plain `bool`. |
+| 7 | Serialization | Plain `Decimal`/`bool` values. |
+| 8 | Direct construction with `net_change != total_increase_allocated - total_decrease_allocated` | Rejected by the model-level validator. |
+| 9 | Direct construction with `is_conserved` inconsistent with `net_change == Decimal("0.00")` | Rejected by the model-level validator. |
+| 10 | Direct construction of a balanced, internally consistent result | Accepted. |
+| 11 | Direct construction of an imbalanced, internally consistent result | Accepted — imbalance itself is never rejected, only inconsistency is. |
+| 12 | Both tuples empty | `total_increase_allocated=0.00`, `total_decrease_allocated=0.00`, `net_change=0.00`, `is_conserved=True`. |
+| 13 | Only zero-valued records on both sides | Conserved. |
+| 14 | One side empty, other side only zero-valued records | Conserved. |
+| 15 | One equal record per direction | Conserved. |
+| 16 | Multiple records per direction | Conserved when totals match. |
+| 17 | Different record counts, equal totals | Conserved — the equation is count-agnostic. |
+| 18 | Extreme equal totals (28 significant digits) | Conserved, exact precision preserved. |
+| 19 | Duplicated `campaign_id` within one direction, balanced totals | Conserved — no identity validation performed. |
+| 20 | The same `campaign_id` appearing in both directions, balanced totals | Conserved — no identity validation performed. |
+| 21 | Repeated zero-valued records | Conserved, indifferent to repetition. |
+| 22 | Increases exceed decreases by `Decimal("0.01")` | `is_conserved=False`, `net_change=0.01`. |
+| 23 | Decreases exceed increases by `Decimal("0.01")` | `is_conserved=False`, `net_change=-0.01`. |
+| 24 | Larger positive/negative imbalances | `is_conserved=False`, exact signed `net_change` in both directions. |
+| 25 | One positive side, one empty side | `is_conserved=False`, `net_change` equal to the positive side's total (positive or negative depending on direction). |
+| 26 | Any imbalanced case | No exception raised — a result is always returned. |
+| 27 | Any call | Input allocation and its records remain unchanged afterward — no repair, no mutation. |
+| 28 | Module source | No `float` referenced anywhere (AST-verified). |
+| 29 | Ambient global `Decimal` precision/rounding mutated before calling | Result unaffected; ambient context restored to its original values after the call. |
+| 30 | Many operands whose sum requires more digits than any individual operand (e.g. 100 × 18-digit values summing to a 20-digit total) | Exact result — precision is derived from operand digits and record count, never a blindly assumed fixed value. |
+| 31 | A large collection where fixed per-operand precision alone would be insufficient (e.g. 500 × 24-digit values summing to a 26-digit total) | Exact result, correctly reported as imbalanced against an empty counterpart. |
+| 32 | A one-penny discrepancy between two large-magnitude totals, under a hostile mutated ambient context | Still correctly reported as `is_conserved=False`, `net_change=0.01` — local-context rounding never hides a real imbalance. |
+| 33 | `Decimal("0.00")` exactly | Preserved in every zero-valued field's `Decimal` tuple representation. |
+| 34 | `verify_campaign_reallocation_conservation` source | Reads only `allocation.increase_allocations`, `allocation.decrease_allocations`, and each record's `allocated_amount` (AST-verified); `campaign_id` is never read; calls none of `allocate_campaign_reallocation`/`rank_campaign_reallocation_priorities`/`calculate_campaign_reallocation_priority_score`/`resolve_campaign_recommendation_action`/any other Stage 1–25 production function (AST-verified). |
+| 35 | `ReviewSetup`/`CampaignInput`/`CampaignRecommendation`/`CampaignRecommendationReason`/`ReasonCode`/`RankedCampaignPriority`/`CampaignReallocationRanking`/`CampaignRawIncreaseLimit`/`CampaignEffectiveDecreaseLimit`/rank/score/reserve/final-budget fields | Never referenced anywhere in `src/conservation.py`'s source (AST-verified) or imported into the module (`hasattr` confirms absence). |
+| 36 | Module attributes | No `repair_allocation`/`rebalance_allocation`/batch function exists. |
+| 37 | `data/sample_campaigns.csv`'s real Stage 25 result (`G002` at `Decimal("0.00")`, no `REDUCE` allocations) | `total_increase_allocated=0.00`, `total_decrease_allocated=0.00`, `net_change=0.00`, `is_conserved=True` — explicitly not evidence that G002 received funding. |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 1 stage.

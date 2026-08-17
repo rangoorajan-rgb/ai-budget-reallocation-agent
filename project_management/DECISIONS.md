@@ -2306,3 +2306,108 @@ the master plan for exactly this responsibility — are filled in for the
 first time, rather than a new module being created. No existing
 non-placeholder test file required modification.
 **Status:** Frozen.
+
+## 2026-08-17 — Stage 26 approved responsibility and conservation equation
+
+**Decision:** Sprint 1, Development Stage 26 independently verifies the
+monetary invariant of one already-produced Stage 25
+`CampaignReallocationAllocation`. It independently recomputes total
+allocated increases and total allocated decreases, calculates their exact
+signed difference, and reports whether the allocation is conserved,
+returning an auditable result for later deterministic integration. It
+never reruns allocation, repairs an imbalance, mutates allocation
+records, inspects campaign identity, validates ranking/capacity/
+recommendation/allocation policy, uses reserve, calculates final budgets,
+emits reason codes, or uses a tolerance. **Exact conservation equation:**
+```
+total_increase_allocated = sum(record.allocated_amount for record in allocation.increase_allocations)
+total_decrease_allocated = sum(record.allocated_amount for record in allocation.decrease_allocations)
+net_change = total_increase_allocated - total_decrease_allocated
+is_conserved = (net_change == Decimal("0.00"))
+```
+Both totals are independently recomputed from the individual records —
+Stage 25 deliberately returns no portfolio-total field to trust.
+**Sign convention**, never left ambiguous: `net_change =
+total_increase_allocated - total_decrease_allocated` — positive means
+increases exceed decreases, negative means decreases exceed increases,
+exactly `Decimal("0.00")` means conserved. No absolute difference is ever
+returned; imbalance direction is never encoded anywhere except in
+`net_change`'s own sign.
+**Status:** Frozen.
+
+## 2026-08-17 — Stage 26: exact equality, always-return-a-result, and duplicate indifference
+
+**Decision:** Conservation uses **exact `Decimal` equality — no
+tolerance, epsilon, absolute-difference threshold, or rounded
+comparison**. Every value is an exact, currency-quantised `Decimal`, and
+any tolerance would only ever conceal a genuine one-penny implementation
+defect — precisely the class of bug this stage exists to catch. An
+imbalance of exactly `Decimal("0.01")` is reported as not conserved.
+**The production function always returns
+`CampaignReallocationConservation` for a structurally valid allocation —
+it never raises merely because totals differ.** An imbalanced allocation
+is reported as `is_conserved=False` with its exact signed `net_change`;
+no repair, rebalancing, addition, or removal of records is ever
+performed. A model-level validator separately rejects only an internally
+*inconsistent* directly-constructed result (`net_change` not equal to
+`total_increase_allocated - total_decrease_allocated`, or `is_conserved`
+inconsistent with `net_change == Decimal("0.00")`) — ordinary Pydantic
+validation failure is appropriate there since it reflects a contradictory
+model state, not a business outcome. **Stage 26 is a pure monetary sum
+check — campaign identity is never inspected.** `campaign_id` is never read from any allocation
+record; every `allocated_amount` present is summed, indifferent to
+duplicate IDs within one direction, the same ID appearing in both
+directions, or repeated zero-valued records. Stage 24 and Stage 25
+already own campaign-identity structural guarantees; re-validating them
+here would duplicate upstream responsibility this stage does not own.
+Stage 26 never duplicates Stage 25's own donor/recipient matching, rank
+waterfall, tied-tier proportional allocation, or residual-penny
+apportionment.
+**Status:** Frozen.
+
+## 2026-08-17 — Stage 26: exact model, function, input, and Decimal/context policy
+
+**Decision:** `CampaignReallocationConservation` (frozen, immutable;
+`extra="forbid"`; exactly `total_increase_allocated: Currency`
+constrained `>= 0`, `total_decrease_allocated: Currency` constrained
+`>= 0`, `net_change: Decimal` — plain, since it may be negative —
+`is_conserved: bool`) carries no campaign count, campaign IDs, individual
+allocation records, reserve field, capacity field, final budget, message,
+issue, reason code, or tolerance field. The sole public function is
+`verify_campaign_reallocation_conservation(allocation:
+CampaignReallocationAllocation) -> CampaignReallocationConservation`; it
+reads exactly `allocation.increase_allocations`,
+`allocation.decrease_allocations`, and each record's `allocated_amount`
+— across exactly one input type. `ReviewSetup`, `CampaignInput`, Stage
+16/18 capacity results, Stage 24's ranking, `CampaignRecommendation`, and
+`CampaignRecommendationReason` are never accepted. No Stage 1–25
+production function is ever called. **Decimal and context policy:**
+`Decimal` exclusively, never `float`. Every sum and the final subtraction
+run inside an explicitly-scoped `localcontext`, with local precision
+**derived from the actual operands' digit counts and the number of
+records being summed — never a blindly assumed fixed value** — so the
+ambient global `Decimal` context can never affect the result, is never
+mutated, and local-context rounding can never make two genuinely unequal
+totals compare as equal (confirmed by test: summing many large operands
+whose total requires more digits than any individual operand, and a
+one-penny discrepancy between large-magnitude totals preserved exactly
+under a hostile mutated ambient context). This precision-derivation
+discipline directly responds to the real ambient-context arithmetic
+defect discovered and corrected during Stage 25's own implementation.
+Zero is always exactly `Decimal("0.00")`. **A conserved zero allocation
+does not mean any campaign received funding** — an all-zero allocation is
+trivially conserved, reporting a true fact about balance, not a claim
+that money moved. **No `ReasonCode` is ever emitted or referenced**
+(`ACCOUNT_RESERVE_REQUIRED` and `NO_ELIGIBLE_RECIPIENT` remain
+unassigned); reserve, final campaign budgets, ranking order, and
+recommendation/reason context are all outside this stage, exactly as they
+were outside Stage 25's. This stage exposes only its four fields to a
+later deterministic integration/reporting stage — it does not decide what
+that later stage does with an unconserved result (publication gating,
+final budgets, and reporting are not implemented here). **Dedicated
+module, existing placeholder filled in:** `src/conservation.py` and
+`tests/test_conservation.py` — placeholder since Sprint 1, reserved by the
+master plan for exactly this responsibility — are filled in for the first
+time, rather than a new module being created. No existing non-placeholder
+test file required modification.
+**Status:** Frozen.
