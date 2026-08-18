@@ -2447,6 +2447,93 @@ explanation UI. Every other forbidden entry in all three tests (`src.approval`,
 `src.audit`, `src.exports`, any Gemini SDK module, `api_key`, `get_secret_value`,
 `SecretStr`) is unchanged and still enforced.
 
+## Stage 33 — Human Approval Workflow
+
+**Rule.** `src/approval.py` (Sprint 3, Development Stage 33) implements one accountable
+human decision — approve or reject — applied to the complete locked
+`BudgetReallocationReviewResult`, never a per-campaign or partial-portfolio decision.
+Conservation is a whole-portfolio invariant, so only a whole-review decision preserves its
+meaning. **Reuses the existing Stage 1 `ReviewStatus` enum** rather than inventing a new
+one — `CampaignReallocationApproval.decision` is typed `ReviewStatus`, restricted via a
+`@field_validator` to `ReviewStatus.APPROVED` or `ReviewStatus.REJECTED` only; direct
+construction with `DRAFT` or `PENDING_APPROVAL` fails Pydantic validation. This was an
+explicit correction to the Stage 33 inspection report's recommendation of a new,
+narrower `ApprovalDecision` enum.
+
+**Exact model.** `CampaignReallocationApproval` (frozen, `extra="forbid"`): `review_id: str`
+(min length 1, always derived from `result.review_id` — never a separate caller-supplied
+parameter), `decision: ReviewStatus`, `reviewer_name: str` (min length 1), `note: str |
+None = None` (a blank note normalizes to `None`).
+
+**Exact functions.** `approve_campaign_reallocation_review(result, reviewer_name, *,
+note=None)` and `reject_campaign_reallocation_review(result, reviewer_name, *, note=None)`.
+Both raise exactly `ValueError("Reviewer name must not be blank.")` for a blank/
+whitespace-only name, checked first. Approval additionally raises exactly
+`ValueError("An unconserved allocation cannot be approved.")` when
+`result.conservation.is_conserved` is `False` — fail-fast domain validation, not a soft
+warning. Rejection places no such restriction: a conserved or unconserved result may both
+be rejected. Neither function repairs, rebalances, or reruns anything.
+
+**No timestamp; no cross-stage coupling.** Stage 33 records no wall-clock value — that
+responsibility belongs to the later audit stage. `src/approval.py` never imports `config`,
+`src.explanations`, `src.gemini_analyzer`, `src.audit`, `src.exports`, `datetime`, `time`,
+`random`, `uuid`, or any filesystem/network module — structurally guaranteed via AST-based
+isolation tests, not just behavioral convention.
+
+**Required section, heading, and caption.** `app.py` renders `st.subheader("Human
+approval")` immediately after the optional explanation section, followed by the fixed
+caption "Approval applies to the complete locked deterministic review. AI-generated
+explanations are supplementary and are not part of the approval decision."
+
+**Exact widgets.** `st.text_input("Approver name", key="approval_reviewer_name")` — starts
+blank; deliberately **not** pre-filled from `ReviewSetup.reviewer_name`, an explicit
+correction to the Stage 33 inspection report's recommendation, since the locked result does
+not carry that field and a hidden linkage was judged unnecessary. `st.text_area("Decision
+note (optional)", key="approval_note")`. `st.button("Approve deterministic review",
+key="approve_review")`. `st.button("Reject deterministic review", key="reject_review")`. No
+confirmation checkbox, radio selector, separate confirmation button, reconsider button, or
+change-decision control exists anywhere in the section.
+
+**Session-state keys and lifecycle.** `APPROVAL_DECISION_STATE_KEY =
+"approval_decision_result"`, plus the `approval_reviewer_name`/`approval_note` widget
+values, are cleared at the very start of every new deterministic-review submission
+(successful or failed), immediately after the existing explanation-state clears and before
+validation begins — safe because it runs before the approval section's widgets are
+instantiated later in the same script run. Ordinary reruns and explanation-generation
+clicks never create, alter, or clear a decision. A successful decision triggers one
+immediate `st.rerun()` so the finalized view fully replaces the editable controls within a
+single clean run, rather than rendering both simultaneously — Streamlit cannot
+retroactively remove elements already emitted earlier in the same run. A failed attempt
+(blank name, unconserved approval, or an unexpected error) stores nothing, triggers no
+rerun, and leaves the visible error beside the still-editable widgets.
+
+**Finalized-decision rendering (exact text).** `st.success("Decision: APPROVED")` or
+`st.warning("Decision: REJECTED")`, then `st.write(f"Approver: {approval.reviewer_name}")`,
+then — only when `approval.note is not None` — `st.write(f"Decision note:
+{approval.note}")`. Once stored, a decision cannot be overwritten or reconsidered; further
+reruns always re-render the same finalized state.
+
+**Defense-in-depth `review_id` check.** If a stored decision's `review_id` does not match
+the current locked result's `review_id`, it is cleared and a generic mismatch error is
+shown, falling through to fresh, editable controls. Explicitly not a result fingerprint —
+normal operation never reaches this path, since the submission-time clearing above already
+prevents it.
+
+**Single unexpected-error boundary.** Exactly one domain-function call per click, wrapped
+in `try/except ValueError as exc: st.error(str(exc))` then `except Exception:
+st.error("The approval decision could not be recorded due to an unexpected error.")` — no
+raw exception, traceback, or provider detail is ever shown; no fabricated decision is ever
+stored.
+
+**One approved test exception.** Three pre-existing AST-based isolation assertions —
+`tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, and `tests/test_app_explanation.py`'s
+`test_no_approval_audit_or_export_imports` (renamed `test_no_audit_or_export_imports`) —
+were narrowed to remove only `src.approval`/`approval` from their forbidden sets, per
+explicit pre-approval, because `app.py` now legitimately imports `src.approval` for the
+approval UI. Every other forbidden entry in all three tests (`src.audit`, `src.exports`,
+any Gemini SDK module or name) is unchanged and still enforced.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/

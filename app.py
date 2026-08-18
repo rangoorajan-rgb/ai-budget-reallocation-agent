@@ -43,7 +43,12 @@ from decimal import Decimal
 import streamlit as st
 
 from config import load_gemini_config
-from src.constants import DEFAULT_MAX_CHANGE_PERCENTAGE
+from src.approval import (
+    CampaignReallocationApproval,
+    approve_campaign_reallocation_review,
+    reject_campaign_reallocation_review,
+)
+from src.constants import DEFAULT_MAX_CHANGE_PERCENTAGE, ReviewStatus
 from src.explanations import (
     build_campaign_explanation_payload,
     build_campaign_explanation_prompt,
@@ -63,6 +68,7 @@ RESULT_STATE_KEY = "locked_review_result"
 PORTFOLIO_EXPLANATION_STATE_KEY = "portfolio_explanation_result"
 CAMPAIGN_EXPLANATION_STATE_KEY = "campaign_explanation_result"
 CAMPAIGN_EXPLANATION_ID_STATE_KEY = "campaign_explanation_campaign_id"
+APPROVAL_DECISION_STATE_KEY = "approval_decision_result"
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -335,17 +341,115 @@ def _render_explanation_section(result: BudgetReallocationReviewResult) -> None:
             )
 
 
+def _render_finalized_approval(approval: CampaignReallocationApproval) -> None:
+    """Render a finalized decision as a read-only final state. No control
+    here can replace or reconsider it.
+    """
+    if approval.decision is ReviewStatus.APPROVED:
+        st.success("Decision: APPROVED")
+    else:
+        st.warning("Decision: REJECTED")
+    st.write(f"Approver: {approval.reviewer_name}")
+    if approval.note is not None:
+        st.write(f"Decision note: {approval.note}")
+
+
+def _handle_approval_decision_click(
+    result: BudgetReallocationReviewResult,
+    reviewer_name: str,
+    note: str,
+    decision_function,
+) -> None:
+    """Call one domain decision function exactly once and store its result.
+
+    A `ValueError` from the domain function (blank reviewer name, or an
+    unconserved result on the approval path) is shown verbatim and stores
+    no decision. Any other unexpected error is contained at this single
+    decision-action boundary with a concise generic message — no raw
+    exception, secret, or provider object is ever exposed, and no
+    fabricated decision is stored.
+    """
+    normalized_note = note if note.strip() else None
+    try:
+        approval = decision_function(result, reviewer_name, note=normalized_note)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    except Exception:  # noqa: BLE001 -- deliberate single decision-action boundary catch
+        st.error("The approval decision could not be recorded due to an unexpected error.")
+        return
+    st.session_state[APPROVAL_DECISION_STATE_KEY] = approval
+
+
+def _render_approval_section(result: BudgetReallocationReviewResult) -> None:
+    """The human-approval section: one decision for the complete locked
+    review. Always rendered after the optional explanation section; never
+    generates a decision automatically.
+    """
+    st.subheader("Human approval")
+    st.caption(
+        "Approval applies to the complete locked deterministic review. "
+        "AI-generated explanations are supplementary and are not part of "
+        "the approval decision."
+    )
+
+    stored_approval = st.session_state.get(APPROVAL_DECISION_STATE_KEY)
+    if stored_approval is not None and stored_approval.review_id != result.review_id:
+        # Defense-in-depth only: the session-state clearing at the top of
+        # every new submission already prevents this in normal operation.
+        st.session_state[APPROVAL_DECISION_STATE_KEY] = None
+        stored_approval = None
+        st.error("The stored approval decision no longer matches the current locked review.")
+
+    if stored_approval is None:
+        reviewer_name = st.text_input("Approver name", key="approval_reviewer_name")
+        note = st.text_area("Decision note (optional)", key="approval_note")
+
+        approve_clicked = st.button("Approve deterministic review", key="approve_review")
+        reject_clicked = st.button("Reject deterministic review", key="reject_review")
+
+        # A successful decision triggers one immediate rerun so the
+        # already-rendered editable widgets/buttons above are never sent to
+        # the browser alongside the finalized view -- Streamlit cannot
+        # retroactively remove elements already emitted within this same
+        # run, so a clean single-state render requires starting a fresh run
+        # once the decision is stored. A failed attempt (ValueError, or an
+        # unexpected error) stores nothing and never reruns, so the visible
+        # error sits beside the still-editable widgets for an immediate fix.
+        if approve_clicked:
+            _handle_approval_decision_click(
+                result, reviewer_name, note, approve_campaign_reallocation_review
+            )
+            if st.session_state.get(APPROVAL_DECISION_STATE_KEY) is not None:
+                st.rerun()
+        elif reject_clicked:
+            _handle_approval_decision_click(
+                result, reviewer_name, note, reject_campaign_reallocation_review
+            )
+            if st.session_state.get(APPROVAL_DECISION_STATE_KEY) is not None:
+                st.rerun()
+    else:
+        _render_finalized_approval(stored_approval)
+
+
 def _handle_submission(raw_review_data: dict, uploaded_file) -> None:
     """Validate a newly submitted form, then run the pipeline only if permitted.
 
     Always clears any previously stored result first, so a failed
-    resubmission never leaves a stale result — or a stale explanation of a
-    previous result — visible as though it belonged to the new submission.
+    resubmission never leaves a stale result — a stale explanation, or a
+    stale approval decision, of a previous result — visible as though it
+    belonged to the new submission. This runs before the approval
+    section's own widgets are ever instantiated in the current script run,
+    so clearing their session-state values here is safe under Streamlit's
+    widget-state rules.
     """
     st.session_state[RESULT_STATE_KEY] = None
     st.session_state[PORTFOLIO_EXPLANATION_STATE_KEY] = None
     st.session_state[CAMPAIGN_EXPLANATION_STATE_KEY] = None
     st.session_state[CAMPAIGN_EXPLANATION_ID_STATE_KEY] = None
+    st.session_state[APPROVAL_DECISION_STATE_KEY] = None
+    st.session_state["approval_reviewer_name"] = ""
+    st.session_state["approval_note"] = ""
 
     review, review_report = validate_review_setup(raw_review_data)
     _render_validation_report("Review setup validation", review_report)
@@ -439,6 +543,7 @@ def main() -> None:
     if result is not None:
         _render_locked_result(result)
         _render_explanation_section(result)
+        _render_approval_section(result)
 
 
 if __name__ == "__main__":

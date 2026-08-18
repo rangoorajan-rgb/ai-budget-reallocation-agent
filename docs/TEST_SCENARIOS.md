@@ -1285,6 +1285,41 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 27 | Module source (AST-verified) | No `get_secret_value`/`SecretStr`/`api_key` reference; no `os`/`dotenv` import or `environ`/`getenv`/`dotenv_values`/`load_dotenv` reference; no `GeminiConfig` ever assigned into `session_state`; every explanation click-handler call sits inside an `if` guarded by a `button(...)` call; no `for`/`while` loop in either click handler; no `src.approval`/`src.audit`/`src.exports` import. |
 | 28 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
 
-## Approval / Audit Scenarios
+## Human Approval Workflow Scenarios (Stage 33, `src/approval.py` and `app.py`)
 
-> Pending a later Sprint 3 stage.
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `CampaignReallocationApproval` model fields | Exactly `review_id`, `decision`, `reviewer_name`, `note`; `extra="forbid"`; frozen. |
+| 2 | `decision=ReviewStatus.APPROVED`/`REJECTED` | Valid, constructs normally. |
+| 3 | `decision=ReviewStatus.DRAFT`/`PENDING_APPROVAL` | Rejected by Pydantic validation — no `ApprovalDecision` or other new enum exists. |
+| 4 | Blank/whitespace-only `review_id` or `reviewer_name` at the model level | Rejected by `Field(min_length=1)`. |
+| 5 | A valid `review_id`/`reviewer_name` with surrounding whitespace | Stored stripped. |
+| 6 | A blank `note` | Normalizes to `None`. |
+| 7 | `approve_campaign_reallocation_review`/`reject_campaign_reallocation_review` signatures | Exactly `(result, reviewer_name, *, note=None)`, verified via `inspect.signature`. |
+| 8 | A conserved result, approve | Succeeds, returns `decision=APPROVED`. |
+| 9 | A conserved result, reject | Succeeds, returns `decision=REJECTED`. |
+| 10 | An unconserved result, approve | Raises exactly `ValueError("An unconserved allocation cannot be approved.")`. |
+| 11 | An unconserved result, reject | Succeeds — rejection has no conservation restriction. |
+| 12 | A blank/whitespace-only `reviewer_name`, either function | Raises exactly `ValueError("Reviewer name must not be blank.")`. |
+| 13 | Blank name *and* unconserved result, approve | The blank-name error is raised — checked before the conservation check. |
+| 14 | The returned `review_id` | Always equals `result.review_id`; no separate `review_id` parameter exists on either function. |
+| 15 | The locked `result` before and after either function call | `model_dump()` unchanged — never mutated. |
+| 16 | Module source (AST-verified) | No `config`/`src.explanations`/`src.gemini_analyzer`/`src.audit`/`src.exports`/`streamlit`/Gemini-SDK/`os`/`pathlib`/`json`/`sqlite3`/network import; no `datetime`/`time`/`random`/`uuid` import or `now`/`utcnow`/`random`/`uuid4` reference; no `timestamp`/`audit_id`/`version`/`fingerprint` model field; no `ast.Try` in either domain function. |
+| 17 | No locked result yet | The "Human approval" section, both buttons, and both text inputs are all absent. |
+| 18 | A successful deterministic review | The "Human approval" section, exact caption, both text inputs, and both buttons all appear. |
+| 19 | The approver-name field on first appearance | Starts blank — not pre-filled from `ReviewSetup.reviewer_name`. |
+| 20 | A successful approve/reject click, with and without a note | The finalized view shows the exact decision text, approver, and (when present) the note. |
+| 21 | A blank-name approve/reject click | The exact error message is shown; no decision is stored. |
+| 22 | An unconserved result, approve click | The exact error message is shown; the reject button remains available. |
+| 23 | An unconserved result, reject click | Succeeds; the finalized `REJECTED` view renders. |
+| 24 | One click | Calls the corresponding domain function exactly once. |
+| 25 | An ordinary rerun (no click) | Creates no decision. |
+| 26 | A finalized decision | All editable controls (both text inputs, both buttons) are absent; further reruns never overwrite or alter the stored decision. |
+| 27 | A new successful *and* a new invalid deterministic submission, after a prior decision | Both clear the stored decision and reset the approver-name/note fields to blank. |
+| 28 | Explanation generation, or changing the campaign selector | Neither affects the stored approval decision or its controls. |
+| 29 | No `GEMINI_API_KEY` set, or a `FAILED`/`UNAVAILABLE` explanation | Approval still succeeds normally — fully independent of Gemini. |
+| 30 | The locked result's `model_dump()` and rendered campaign table, before and after approval, rejection, or an approval error | Unchanged. |
+| 31 | A stored decision whose `review_id` no longer matches the current locked result | Cleared with a generic mismatch error (defense-in-depth, not a fingerprint); falls through to fresh, editable controls. |
+| 32 | An unexpected exception raised by the domain function | Contained at the single decision-action boundary: a concise generic error shown, no raw exception/provider detail exposed, no decision stored, the locked result remains visible. |
+| 33 | Module source (AST-verified) | No `src.audit`/`src.exports` import; no filesystem/network reference in the approval section or click handler. |
+| 34 | `_handle_submission` source | Clears `APPROVAL_DECISION_STATE_KEY`, `approval_reviewer_name`, and `approval_note` at the start of every submission. |

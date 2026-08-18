@@ -2730,3 +2730,81 @@ All notable changes to this project are documented in this file.
   Stage 32's excluded state), `docs/DECISION_RULES.md` (frozen Stage 32 widget, lifecycle,
   rendering, secret-boundary, exception-containment, and approved-test-exception policies),
   and `docs/TEST_SCENARIOS.md` (Stage 32 scenarios).
+
+### Changed
+- Sprint 3, Development Stage 33: one approved, narrow exception to three pre-existing
+  tests. `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+  `test_module_does_not_reference_forbidden_names`, and `tests/test_app_explanation.py`'s
+  `test_no_approval_audit_or_export_imports` (renamed `test_no_audit_or_export_imports`),
+  were written when `app.py` legitimately had no reason to import `src.approval`. Per
+  explicit pre-approval, each test's forbidden set was narrowed to remove only
+  `src.approval`/`approval`; every other forbidden entry in all three tests is unchanged
+  and still enforced — mirroring the identical pattern already used at Stages 7, 8, 11, and
+  32.
+
+### Added
+- Sprint 3, Development Stage 33: implemented `src/approval.py` (placeholder replaced) —
+  the human approval/rejection workflow applied to the complete locked
+  `BudgetReallocationReviewResult` only, never per-campaign or partial. Reuses the existing
+  Stage 1 `ReviewStatus` enum rather than a new `ApprovalDecision` enum, restricted via a
+  `@field_validator` to `APPROVED`/`REJECTED` only. `CampaignReallocationApproval` (frozen,
+  `extra="forbid"`: `review_id`, `decision`, `reviewer_name`, `note: str | None = None`).
+  `approve_campaign_reallocation_review(result, reviewer_name, *, note=None)` refuses an
+  unconserved result with exactly `ValueError("An unconserved allocation cannot be
+  approved.")`; `reject_campaign_reallocation_review(result, reviewer_name, *, note=None)`
+  places no such restriction. Both raise exactly `ValueError("Reviewer name must not be
+  blank.")` for a blank/whitespace-only name, checked first. `review_id` is always derived
+  from the locked result, never a separate parameter. No timestamp, no Gemini/config/audit/
+  export coupling, no repair/rebalance/rerun behavior.
+- Sprint 3, Development Stage 33: extended `app.py` with a new "Human approval" section
+  rendered immediately after the optional explanation section. Exact caption: "Approval
+  applies to the complete locked deterministic review. AI-generated explanations are
+  supplementary and are not part of the approval decision." Exact widgets:
+  `st.text_input("Approver name", key="approval_reviewer_name")` (starts blank — not
+  pre-filled from `ReviewSetup.reviewer_name`, per explicit approval), `st.text_area("Decision
+  note (optional)", key="approval_note")`, `st.button("Approve deterministic review",
+  key="approve_review")`, `st.button("Reject deterministic review", key="reject_review")`.
+  No confirmation checkbox, radio selector, reconsider button, or change-decision control.
+  New session-state key `APPROVAL_DECISION_STATE_KEY = "approval_decision_result"`, cleared
+  (alongside the approval widget values) at the very start of every new deterministic
+  submission, immediately after the existing explanation-state clears. A successful decision
+  triggers one immediate `st.rerun()` so the finalized view (`st.success("Decision:
+  APPROVED")`/`st.warning("Decision: REJECTED")`, approver, and optional note) fully replaces
+  the editable controls within a single clean run — Streamlit cannot retroactively remove
+  elements already emitted earlier in the same run. A finalized decision cannot be
+  overwritten or reconsidered; a defense-in-depth check clears a stored decision whose
+  `review_id` no longer matches the current locked result, with a generic mismatch error
+  (explicitly not a result fingerprint). Exactly one domain-function call per click, with a
+  `ValueError` shown verbatim and any other exception contained behind a generic message —
+  no raw exception, traceback, or provider detail exposed, no fabricated decision stored.
+- Sprint 3, Development Stage 33: added `tests/test_approval.py` (placeholder replaced) —
+  31 new tests, all passing. Covers exact model fields, `extra="forbid"`, frozen,
+  `APPROVED`/`REJECTED` valid and `DRAFT`/`PENDING_APPROVAL` rejected, blank-field rejection
+  and whitespace-stripping, note normalization, exact function signatures, conserved/
+  unconserved approve/reject behavior, exact error messages, check-ordering, `review_id`
+  derivation from the locked result only, non-mutation of the locked result, and AST-based
+  isolation (no Gemini/config/audit/export/filesystem/network/wall-clock/random/uuid
+  reference anywhere in the module).
+- Sprint 3, Development Stage 33: added a new dedicated test file,
+  `tests/test_app_approval.py` — 34 new tests, all passing, using `AppTest` with explicit
+  fixtures/monkeypatches and zero live network calls/real API key. Covers control
+  presence/absence, the exact heading/caption, the approver field starting blank,
+  successful approve/reject with and without a note, blank-name and unconserved-approval
+  validation, unconserved-rejection success, one-click/one-call and
+  zero-call-on-ordinary-rerun discipline, finalized-decision rendering that replaces all
+  editable controls and cannot be overwritten, approval-state clearing on new successful and
+  new invalid submissions, explanation-generation and campaign-selector independence,
+  Gemini/API-key independence, deterministic-result visibility and non-mutation across every
+  outcome, the stale-review-ID defense-in-depth path, the single unexpected-exception
+  boundary with no raw exception/provider detail exposed, no audit/export/
+  platform-execution behavior, and the session-state clearing lifecycle at the source level.
+  A file-scoped autouse fixture restores `app.approve_campaign_reallocation_review`,
+  `app.reject_campaign_reallocation_review`, `app.generate_explanation`, and
+  `app.run_budget_reallocation_review` to their real implementations before every test,
+  mirroring the established Stage 32 defensive pattern against `AppTest`'s shared
+  `sys.modules["app"]` singleton. Stage 1–32 regression re-confirmed unchanged at 1523
+  tests. Full suite: 1588 tests passing (1523 + 31 + 34).
+- Updated `docs/DATA_DICTIONARY.md` (the approval session-state keys and `CampaignReallocationApproval`
+  model fields), `docs/DECISION_RULES.md` (frozen Stage 33 model, function, conservation,
+  UI, lifecycle, and approved-test-exception policies), and `docs/TEST_SCENARIOS.md` (Stage
+  33 scenarios).

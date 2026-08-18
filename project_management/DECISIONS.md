@@ -2904,3 +2904,71 @@ any Gemini SDK module, and, in the renamed `test_config.py` test, `api_key`/
 stage legitimately superseded an earlier test's now-outdated isolation assumption. No
 other test file, and no test's coverage of Stage 1–31 behavior, was altered.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 33: reuse `ReviewStatus`, no `ApprovalDecision` enum
+
+**Decision:** The human approval/rejection decision reuses the existing, frozen Stage 1
+`ReviewStatus` enum (`DRAFT`, `PENDING_APPROVAL`, `APPROVED`, `REJECTED`) rather than
+introducing a new `ApprovalDecision` (or any other) enum. `CampaignReallocationApproval.decision`
+is typed `ReviewStatus`, restricted via a `@field_validator` to `ReviewStatus.APPROVED` or
+`ReviewStatus.REJECTED` only — direct construction with `DRAFT` or `PENDING_APPROVAL` fails
+Pydantic validation. This was an explicit correction to the Stage 33 inspection report's
+recommendation, favoring reuse of an existing, already-frozen vocabulary over a new
+narrower one.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 33: one decision per complete locked portfolio
+
+**Decision:** Approval and rejection apply only to the complete locked
+`BudgetReallocationReviewResult` as a whole — there is no per-campaign or partial-portfolio
+decision, since conservation (the balance of total increases and decreases) is a
+whole-portfolio invariant that only a whole-review decision preserves the meaning of.
+`approve_campaign_reallocation_review` refuses an unconserved result outright, raising
+exactly `ValueError("An unconserved allocation cannot be approved.")` —
+`reject_campaign_reallocation_review` places no such restriction, so a conserved or
+unconserved result may both be rejected. Neither function repairs, rebalances, or reruns
+anything; this is fail-fast domain validation, not a soft warning.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 33: reviewer name required, no prefill; note optional; no timestamp
+
+**Decision:** Both domain functions require a non-blank `reviewer_name`, raising exactly
+`ValueError("Reviewer name must not be blank.")` otherwise, checked before the conservation
+check. The UI's `st.text_input("Approver name", key="approval_reviewer_name")` starts
+blank and is deliberately **not** pre-filled from `ReviewSetup.reviewer_name` — an explicit
+correction to the Stage 33 inspection report's recommendation, since the locked result does
+not carry that field and adding another hidden linkage between the setup form and the
+approval action was judged unnecessary. `note` is optional and free-form; a blank note
+normalizes to `None`. No timestamp is recorded at this stage — that responsibility belongs
+to the later audit stage, keeping `src/approval.py` free of any wall-clock dependency.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 33: finalized decisions cannot be overwritten or reconsidered
+
+**Decision:** Once a decision is stored in `st.session_state["approval_decision_result"]`,
+the UI renders only the finalized read-only view (`st.success`/`st.warning`, approver, and
+optional note) — no confirmation checkbox, radio selector, separate confirmation button,
+reconsider button, or change-decision control exists anywhere in the section, and no
+mechanism allows overwriting a stored decision in place. The only way to obtain a new
+decision is a new deterministic-review submission, which clears the prior decision and
+approval widget values at the very start of the new submission, before validation. A
+successful decision triggers one immediate `st.rerun()` so the finalized view fully
+replaces the editable controls within a single clean run. A defense-in-depth check clears a
+stored decision (with a generic error) if its `review_id` no longer matches the current
+locked result's `review_id` — explicitly not a result fingerprint, since normal operation
+never reaches this path.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 33: one approved exception to three pre-existing tests
+
+**Decision:** `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, and `tests/test_app_explanation.py`'s
+`test_no_approval_audit_or_export_imports` (renamed `test_no_audit_or_export_imports`),
+were written at Stages 28–32 when `app.py` legitimately had no reason to import
+`src.approval`. Stage 33 requires that import for the approval UI. Per explicit
+pre-approval (given directly in the Stage 33 approval message, without a separate
+confirmation question this time), each test's forbidden set was narrowed to remove only
+`src.approval`/`approval` — every other forbidden entry (`src.audit`, `src.exports`, any
+Gemini SDK module or name) is unchanged and still enforced. This mirrors the identical "one
+approved exception" pattern already used at Stages 7, 8, 11, and 32.
+**Status:** Frozen.

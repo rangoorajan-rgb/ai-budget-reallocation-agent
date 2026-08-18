@@ -1563,6 +1563,46 @@ The selectbox's own widget-owned value lives only under its own Streamlit key,
 (only the already-redacted `ExplanationResult` is ever stored); a batch/whole-portfolio
 campaign result; any approval, audit, or export state.
 
+## Human Approval Fields (Stage 33, `src/approval.py`)
+
+**`CampaignReallocationApproval`** (frozen, `extra="forbid"`) — one accountable human
+decision applied to the complete locked `BudgetReallocationReviewResult`, never a
+per-campaign or partial-portfolio decision. Reuses the existing Stage 1 `ReviewStatus`
+enum rather than a new `ApprovalDecision` enum:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `review_id` | `str` (min length 1) | Always derived from `result.review_id` — never a separate caller-supplied parameter. |
+| `decision` | `ReviewStatus` | Restricted by a `@field_validator` to `ReviewStatus.APPROVED` or `ReviewStatus.REJECTED` only; direct construction with `DRAFT` or `PENDING_APPROVAL` fails Pydantic validation. |
+| `reviewer_name` | `str` (min length 1) | The human approver's name; stripped, never blank. |
+| `note` | `str \| None` | Optional free-form decision note; a blank value normalizes to `None`. |
+
+**Functions**: `approve_campaign_reallocation_review(result, reviewer_name, *, note=None)`
+and `reject_campaign_reallocation_review(result, reviewer_name, *, note=None)`. Both raise
+exactly `ValueError("Reviewer name must not be blank.")` for a blank/whitespace-only name,
+checked first. Approval additionally raises exactly `ValueError("An unconserved allocation
+cannot be approved.")` when `result.conservation.is_conserved` is `False`; rejection places
+no such restriction. Neither function repairs, rebalances, or reruns anything.
+
+**Excluded from Stage 33 entirely**: any timestamp (deferred to the later audit stage); any
+`config`, `src.explanations`, `src.gemini_analyzer`, `src.audit`, or `src.exports` import or
+reference — structurally guaranteed via AST-based isolation tests.
+
+## Human Approval UI Session State (Stage 33, `app.py`)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `approval_decision_result` (`APPROVAL_DECISION_STATE_KEY`) | `CampaignReallocationApproval \| None` | The finalized decision, or `None` before any click / after a new deterministic submission. Once non-`None`, it cannot be overwritten or reconsidered except by a new deterministic submission. |
+| `approval_reviewer_name` | widget-owned `str` | The `st.text_input` value; starts blank on every new submission — deliberately not pre-filled from `ReviewSetup.reviewer_name`. |
+| `approval_note` | widget-owned `str` | The `st.text_area` value; starts blank on every new submission. |
+
+A stored decision whose `review_id` no longer matches the current locked result's
+`review_id` is cleared with a generic mismatch error — defense-in-depth only, not a result
+fingerprint; normal operation (the submission-time clearing above) never reaches this path.
+
+**Excluded from Stage 33 entirely**: any confirmation checkbox, radio selector, or
+change-decision control; any audit, export, or platform-execution state.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

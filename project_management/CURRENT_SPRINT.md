@@ -4,11 +4,11 @@
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 Sprint 3, Development Stages 28 (deterministic Streamlit review shell), 29 (Gemini
 configuration foundation), 30 (explanation payload and prompt construction), 31 (Gemini
-explanation transport), and 32 (explanation UI wiring) are complete. Verified baseline:
-`1523 passed` (1258 Stage 1–27 regression + 31 Stage 28 + 45 Stage 29 + 93 Stage 30 + 61
-Stage 31 + 35 Stage 32). Sprint 3 is not yet complete — human approval, audit recording,
-and exports remain
-unimplemented.
+explanation transport), 32 (explanation UI wiring), and 33 (human approval workflow) are
+complete. Verified baseline: `1588 passed` (1523 Stage 1–32 regression + 31 Stage 33
+domain tests in `tests/test_approval.py` + 34 Stage 33 UI tests in
+`tests/test_app_approval.py`). Sprint 3 is not yet complete — audit recording and exports
+remain unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -1982,27 +1982,167 @@ and initial project-management documentation) is complete and is not re-tracked 
 - [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
       `docs/TEST_SCENARIOS.md` updated.
 
-## Explicitly Out of Scope for Stage 32 (and not yet started)
+## Development Stage 33 — Human Approval Workflow (complete)
 
-- Human approval/rejection workflow (`src/approval.py`).
-- Immutable JSON audit recording (`src/audit.py`).
+- [x] `src/approval.py` (populated for the first time — placeholder
+      replaced) — one accountable human decision, approve or reject,
+      applied to the complete locked `BudgetReallocationReviewResult` only
+      — never a per-campaign or partial-portfolio decision, since
+      conservation is a whole-portfolio invariant. **Reuses the existing
+      Stage 1 `ReviewStatus` enum** rather than inventing a new one, per
+      explicit approval — no `ApprovalDecision` or other new enum was
+      created.
+- [x] **Exact model**: `CampaignReallocationApproval` (frozen,
+      `extra="forbid"`: `review_id: str`, `decision: ReviewStatus`,
+      `reviewer_name: str`, `note: str | None = None`). A `@field_validator`
+      restricts `decision` to `ReviewStatus.APPROVED`/`REJECTED` only —
+      direct construction with `DRAFT` or `PENDING_APPROVAL` fails Pydantic
+      validation. Blank `review_id`/`reviewer_name` are rejected by
+      `Field(min_length=1)`; a blank `note` normalizes to `None`.
+- [x] **Exact functions**:
+      `approve_campaign_reallocation_review(result, reviewer_name, *,
+      note=None)` and `reject_campaign_reallocation_review(result,
+      reviewer_name, *, note=None)`. `review_id` is always derived from
+      `result.review_id` — never a separate caller-supplied parameter.
+- [x] **Conservation policy**: `approve_campaign_reallocation_review`
+      raises exactly `ValueError("An unconserved allocation cannot be
+      approved.")` when `result.conservation.is_conserved` is `False` —
+      fail-fast domain validation, checked after the blank-reviewer-name
+      check. `reject_campaign_reallocation_review` places no such
+      restriction — a conserved or unconserved result may both be
+      rejected. Neither function repairs, rebalances, or reruns anything.
+- [x] Both functions raise exactly `ValueError("Reviewer name must not be
+      blank.")` for a blank/whitespace-only `reviewer_name`, checked before
+      the conservation check. Neither the locked `result` nor any of its
+      nested fields is ever mutated (frozen throughout the deterministic
+      pipeline).
+- [x] **No timestamp**: Stage 33 records no wall-clock value; that
+      responsibility belongs to the later audit stage. **No Gemini,
+      configuration, audit, or export coupling**: `src/approval.py` never
+      imports `config`, `src.explanations`, `src.gemini_analyzer`,
+      `src.audit`, `src.exports`, `datetime`, `time`, `random`, `uuid`, or
+      any filesystem/network module — structurally guaranteed via
+      AST-based isolation tests, not just behavioral convention.
+- [x] `app.py` (extended, not replaced) — a new "Human approval" section
+      rendered immediately after the optional explanation section, inside
+      the same `if result is not None:` block. Exact caption: "Approval
+      applies to the complete locked deterministic review. AI-generated
+      explanations are supplementary and are not part of the approval
+      decision."
+- [x] **Exact widgets and keys**: `st.text_input("Approver name",
+      key="approval_reviewer_name")` (starts blank — deliberately **not**
+      pre-filled from `ReviewSetup.reviewer_name`, per explicit approval,
+      since the locked result does not carry that field and a hidden
+      linkage was judged unnecessary); `st.text_area("Decision note
+      (optional)", key="approval_note")`; `st.button("Approve
+      deterministic review", key="approve_review")`; `st.button("Reject
+      deterministic review", key="reject_review")`. No confirmation
+      checkbox, radio selector, separate confirmation button, reconsider
+      button, or change-decision control exists anywhere in the section.
+- [x] **Session-state lifecycle**: `APPROVAL_DECISION_STATE_KEY =
+      "approval_decision_result"`, plus `approval_reviewer_name` and
+      `approval_note`, are all cleared at the very start of every new
+      deterministic submission (successful or failed), immediately after
+      the existing explanation-state clears and before validation begins —
+      safe because it runs before the approval section's widgets are ever
+      instantiated later in the same script run. Ordinary reruns and
+      explanation-generation clicks never create, alter, or clear a
+      decision. A successful decision triggers one immediate `st.rerun()`
+      so the finalized view fully replaces the editable controls within a
+      single clean run, rather than rendering both simultaneously — an
+      empirically necessary fix, since Streamlit cannot retroactively
+      remove elements already emitted earlier in the same run. A failed
+      attempt (blank name, unconserved approval, or an unexpected error)
+      stores nothing, triggers no rerun, and leaves the visible error
+      beside the still-editable widgets.
+- [x] **Finalized-decision rendering** (exact text): `st.success("Decision:
+      APPROVED")` or `st.warning("Decision: REJECTED")`, then `st.write(f"Approver:
+      {approval.reviewer_name}")`, then — only when `approval.note is not
+      None` — `st.write(f"Decision note: {approval.note}")`. Once stored,
+      a decision cannot be overwritten or reconsidered; further reruns
+      always re-render the same finalized state.
+- [x] **Defense-in-depth `review_id` check** (explicitly not a result
+      fingerprint, per explicit approval): if a stored decision's
+      `review_id` does not match the current locked result's `review_id`,
+      it is cleared and a generic mismatch error is shown, falling through
+      to fresh, editable controls. Normal operation never reaches this
+      path — the submission-time clearing above already prevents it.
+- [x] **Single unexpected-error boundary**: exactly one domain-function
+      call per click, wrapped in `try/except ValueError as exc: st.error(str(exc))`
+      then `except Exception: st.error("The approval decision could not be
+      recorded due to an unexpected error.")` — no raw exception,
+      traceback, or provider detail is ever shown; no fabricated decision
+      is ever stored.
+- [x] **One approved test exception** (pre-approved, narrower than Stage
+      32 — no confirmation question needed this stage): `tests/test_app.py`'s
+      `test_module_does_not_import_forbidden_modules` and
+      `test_module_does_not_reference_forbidden_names`, and
+      `tests/test_app_explanation.py`'s renamed
+      `test_no_audit_or_export_imports` (formerly
+      `test_no_approval_audit_or_export_imports`), were narrowed to remove
+      only `src.approval`/`approval` from their forbidden sets, because
+      `app.py` now legitimately imports `src.approval`. Every other
+      forbidden entry in all three tests is unchanged and still enforced.
+- [x] `tests/test_approval.py` (populated for the first time — placeholder
+      replaced) — 31 new Stage 33 domain tests, all passing. Covers exact
+      model fields, `extra="forbid"`, frozen, `APPROVED`/`REJECTED` valid
+      and `DRAFT`/`PENDING_APPROVAL` rejected, blank-field rejection and
+      whitespace-stripping, note normalization, exact function signatures,
+      conserved/unconserved approve/reject behavior, exact error messages,
+      check-ordering (blank name before conservation), `review_id`
+      derivation from the locked result only, non-mutation of the locked
+      result, and AST-based isolation (no Gemini/config/audit/export/
+      filesystem/network/wall-clock/random/uuid reference anywhere in the
+      module).
+- [x] `tests/test_app_approval.py` (new dedicated test file) — 34 new
+      Stage 33 UI tests, all passing, using `AppTest` with explicit
+      fixtures/monkeypatches and zero live network calls/real API key.
+      Covers control presence/absence, the exact heading/caption, the
+      approver field starting blank, successful approve/reject with and
+      without a note, blank-name and unconserved-approval validation,
+      unconserved-rejection success, one-click/one-call discipline,
+      zero-call-on-ordinary-rerun, finalized-decision rendering that
+      replaces all editable controls and cannot be overwritten,
+      approval-state clearing on new successful and new invalid
+      submissions, explanation-generation and campaign-selector
+      independence, Gemini/API-key independence, deterministic-result
+      visibility and non-mutation across every outcome, the stale-
+      review-ID defense-in-depth path, the single unexpected-exception
+      boundary with no raw exception/provider detail exposed, no
+      audit/export/platform-execution behavior, and the session-state
+      clearing lifecycle at the source level. A file-scoped autouse
+      fixture restores `app.approve_campaign_reallocation_review`,
+      `app.reject_campaign_reallocation_review`, `app.generate_explanation`,
+      and `app.run_budget_reallocation_review` to their real
+      implementations before every test, mirroring the established
+      Stage 32 defensive pattern against `AppTest`'s shared
+      `sys.modules["app"]` singleton.
+- [x] Stage 1–32 regression re-run and confirmed passing unchanged at
+      `1523 passed`. Full suite: `1588 passed` (1523 + 31 + 34).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 33 (and not yet started)
+
+- Immutable JSON audit recording (`src/audit.py`), including any
+  timestamp for the approval decision.
 - CSV export generation (`src/exports.py`).
 - The full AI/UI-inclusive end-to-end integration test
   (`tests/test_integration.py`, reserved, untouched).
-- Any automatic or batched explanation generation.
+- Persisting, overwriting, or reconsidering a finalized decision.
 
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28 through 32 are complete — Sprint 3 as a
-whole is not.** Stage 32 delivered the optional, click-only Gemini
-explanation UI with the locked deterministic result remaining fully
-visible and authoritative in every state.
+**Sprint 3 is underway; Stages 28 through 33 are complete — Sprint 3 as a
+whole is not.** Stage 33 delivered the one-decision-per-portfolio human
+approval workflow, reusing the existing `ReviewStatus` enum, with the
+locked deterministic result remaining fully visible and authoritative in
+every state and no audit/export/persistence behavior anywhere in scope.
 
 The smallest dependency-ordered remaining Sprint 3 work, in provisional
 order (each still requires its own dependency/decision-readiness
-inspection before being frozen): human approval (`src/approval.py`);
-audit persistence (`src/audit.py`); exports (`src/exports.py`); and
-finally the full end-to-end integration test
-(`tests/test_integration.py`). The remaining `ReasonCode` members'
+inspection before being frozen): audit persistence (`src/audit.py`);
+exports (`src/exports.py`); and finally the full end-to-end integration
+test (`tests/test_integration.py`). The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
 remain open and independent of this sequence. Sprint 4 remains deferred.

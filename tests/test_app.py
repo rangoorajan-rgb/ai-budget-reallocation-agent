@@ -83,13 +83,16 @@ def test_app_imports_and_runs_without_exception():
 
 
 def test_module_does_not_import_forbidden_modules():
-    # One approved exception (Sprint 3, Development Stage 32): `config`,
-    # `src.gemini_analyzer`, and `src.explanations` were removed from this
-    # forbidden set because app.py now legitimately imports all three for
-    # the optional Gemini explanation UI (`load_gemini_config`, the Stage
-    # 30 payload/prompt builders, and `generate_explanation`), per explicit
-    # approval. Every other forbidden import below — Streamlit's own
-    # human-approval/audit/export modules and any Gemini SDK module — is
+    # Approved exceptions: `config`, `src.gemini_analyzer`, and
+    # `src.explanations` were removed at Sprint 3, Development Stage 32
+    # because app.py now legitimately imports all three for the optional
+    # Gemini explanation UI (`load_gemini_config`, the Stage 30
+    # payload/prompt builders, and `generate_explanation`). `src.approval`
+    # was removed at Sprint 3, Development Stage 33 because app.py now
+    # legitimately imports it for the human approval workflow
+    # (`approve_campaign_reallocation_review`/
+    # `reject_campaign_reallocation_review`). Every other forbidden import
+    # below — audit/export modules and any Gemini SDK module — is
     # unchanged and still enforced.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
@@ -101,7 +104,6 @@ def test_module_does_not_import_forbidden_modules():
                 imported_modules.add(alias.name)
 
     forbidden_modules = {
-        "src.approval",
         "src.audit",
         "src.exports",
         "google.generativeai",
@@ -111,14 +113,15 @@ def test_module_does_not_import_forbidden_modules():
 
 
 def test_module_does_not_reference_forbidden_names():
-    # One approved exception (Sprint 3, Development Stage 32): `config` was
-    # removed from this forbidden set because app.py now legitimately binds
-    # a local `config = load_gemini_config()` variable for the optional
-    # Gemini explanation UI, per explicit approval — see
-    # tests/test_app_explanation.py for the current guarantee that app.py
-    # never references `config.api_key`, `SecretStr`, or
-    # `get_secret_value()`. Every other forbidden name below is unchanged
-    # and still enforced.
+    # Approved exceptions: `config` was removed at Sprint 3, Development
+    # Stage 32 because app.py now legitimately binds a local
+    # `config = load_gemini_config()` variable for the optional Gemini
+    # explanation UI — see tests/test_app_explanation.py for the current
+    # guarantee that app.py never references `config.api_key`,
+    # `SecretStr`, or `get_secret_value()`. `approval` was removed at
+    # Sprint 3, Development Stage 33 because app.py now legitimately calls
+    # the human-approval domain functions directly by name. Every other
+    # forbidden name below is unchanged and still enforced.
     tree = ast.parse(inspect.getsource(app))
     referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     referenced |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
@@ -127,7 +130,6 @@ def test_module_does_not_reference_forbidden_names():
         "genai",
         "generativeai",
         "gemini",
-        "approval",
         "audit",
         "exports",
         "explanations",
