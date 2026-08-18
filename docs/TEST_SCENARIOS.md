@@ -1257,6 +1257,34 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 24 | Fresh import of the module with no `GEMINI_API_KEY` set | No exception; no environment variable created; no module-level client/config attribute exists. |
 | 25 | Module source | Exactly one `get_secret_value()` call site; no `logging`/`print`; no import of `streamlit`, `google.generativeai`, `src.pipeline`, `src.approval`, or `src.audit`, and no reference to any locked-result or payload model name; no module-level `CLIENT`/`CONFIG` assignment; no `for`/`while` loop wrapping the generation call (AST-verified). |
 
+## Explanation UI Wiring Scenarios (Stage 32, `app.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | No locked result yet | The "Optional AI-generated explanations" section, both buttons, and the campaign selector are all absent. |
+| 2 | A successful deterministic review | Both buttons and the campaign selector appear. |
+| 3 | The explanation section | The exact trust caption is present verbatim. |
+| 4 | A portfolio-explanation click | Builds the real Stage 30 portfolio payload/prompt from the locked result and calls the Stage 31 boundary exactly once with the identical `system_instruction`/`user_content`. |
+| 5 | The campaign selector | Options are formatted exactly `{campaign_id} — {campaign_name}`. |
+| 6 | A campaign-explanation click | Uses exactly the selected campaign's own payload/prompt — never a different campaign's. |
+| 7-8 | `GENERATED`, portfolio and campaign | A local heading identifying which explanation it is, the text via `st.markdown`, and an "AI-generated using {model_name}" caption. |
+| 9 | `UNAVAILABLE`, both flows | Only the sanitized `error_message` via `st.info`. |
+| 10 | `FAILED`, both flows | Only the sanitized `error_message` via `st.error`. |
+| 11 | Any `FAILED` result | No `ErrorCategory` member value ever appears in any rendered element. |
+| 12 | A sanitized failure message | Rendered verbatim; no `Traceback`/`GeminiConfig`/`api_key`/`SecretStr` substring appears anywhere. |
+| 13-14 | One click; then an ordinary rerun | Exactly one generation call after the click; zero additional calls after any number of bare reruns. |
+| 15 | A second click after a first failed attempt | The new result fully replaces the old one — the prior failure message is gone. |
+| 16-18 | Changing the campaign selector without clicking, then returning to the original selection | No new call at any point; the previously selected campaign's explanation is hidden while a different campaign is selected, and reappears unchanged (not regenerated) when the original selection is restored. |
+| 19-20 | A new successful *and* a new invalid deterministic submission | Both clear all three explanation-related session-state keys, even when a valid explanation was previously stored. |
+| 21 | A `FAILED` explanation | Deterministic totals, conservation, the full campaign table (action, budgets, reasons, score, rank), and the conserved/success indicator all remain exactly as before. |
+| 22 | The locked result's `model_dump()`, before and after both explanation actions | Unchanged. |
+| 23 | No `GEMINI_API_KEY` set | The real (unmocked) `UNAVAILABLE` path renders correctly with zero network access. |
+| 24 | A synthetic fake key set in the environment | Never appears in any rendered element or anywhere in session state. |
+| 25 | Module source | `unsafe_allow_html=False` present; `unsafe_allow_html=True` never present. |
+| 26 | An unexpected exception raised while building a payload/prompt/calling the transport | Contained at the single explanation-action boundary: a concise generic error shown, no result stored, the locked result and full table remain visible and unchanged. |
+| 27 | Module source (AST-verified) | No `get_secret_value`/`SecretStr`/`api_key` reference; no `os`/`dotenv` import or `environ`/`getenv`/`dotenv_values`/`load_dotenv` reference; no `GeminiConfig` ever assigned into `session_state`; every explanation click-handler call sits inside an `if` guarded by a `button(...)` call; no `for`/`while` loop in either click handler; no `src.approval`/`src.audit`/`src.exports` import. |
+| 28 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 3 stage.

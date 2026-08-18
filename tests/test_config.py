@@ -398,9 +398,18 @@ def test_no_broad_exception_handling_in_loader_source():
 # ---------------------------------------------------------------------------
 
 
-def test_app_module_does_not_import_config():
+def test_app_module_imports_config_but_never_touches_the_raw_key():
+    # One approved exception (Sprint 3, Development Stage 32): this test
+    # originally asserted app.py never imports `config` at all, which was
+    # correct through Stage 31. app.py now legitimately imports `config`
+    # to call `load_gemini_config()` for the optional Gemini explanation
+    # UI, per explicit approval. The corrected, still-meaningful guarantee
+    # is that app.py imports `config` but never reaches past it to the raw
+    # secret — see tests/test_app_explanation.py for the full AST-based
+    # secret-isolation coverage of app.py.
     app_path = Path(__file__).resolve().parent.parent / "app.py"
-    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    source = app_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
     imported_modules = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
@@ -408,7 +417,11 @@ def test_app_module_does_not_import_config():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported_modules.add(alias.name)
-    assert "config" not in imported_modules
+    assert "config" in imported_modules
+
+    referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    referenced |= {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    assert referenced.isdisjoint({"api_key", "get_secret_value", "SecretStr"})
 
 
 def test_app_functions_without_gemini_key(monkeypatch):

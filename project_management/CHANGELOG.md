@@ -2647,3 +2647,86 @@ All notable changes to this project are documented in this file.
   Stage 31 SDK-decision, transport-boundary, model/settings, failure-mapping, and
   client-lifecycle/secret-redaction policies), and `docs/TEST_SCENARIOS.md` (Stage 31
   scenarios).
+
+## [Unreleased] — 2026-08-18 — Sprint 3, Development Stage 32
+
+### Added
+- Sprint 3, Development Stage 32: extended `app.py` with one optional, click-only Gemini
+  explanation section, rendered strictly after the complete locked deterministic result —
+  one portfolio-level explanation and one explanation for a user-selected campaign, never a
+  batch across the whole portfolio and never generated automatically. The required section
+  header ("Optional AI-generated explanations"), exact trust caption ("Gemini explanations
+  are supplementary and may be inaccurate. The deterministic recommendations above remain
+  authoritative."), and exact widget keys (`generate_portfolio_explanation`,
+  `explanation_campaign_id`, `generate_campaign_explanation`) are implemented exactly as
+  specified; the campaign selector is formatted `{campaign_id} — {campaign_name}`. Both
+  buttons appear only with a locked result, remain enabled regardless of Gemini
+  configuration, and are never placed inside the deterministic-review form; each is its own
+  manual retry/regenerate control — no separate retry control exists.
+- Sprint 3, Development Stage 32: added `portfolio_explanation_result`,
+  `campaign_explanation_result`, and `campaign_explanation_campaign_id` session-state keys
+  alongside the existing `locked_review_result`. All four are cleared at the very start of
+  every new deterministic-review submission, before validation, so a failed resubmission
+  never leaves a stale explanation visible. Ordinary reruns preserve stored explanations and
+  trigger no Gemini call. Each click clears, then rebuilds and replaces, only its own
+  result. The stored campaign explanation renders only when its recorded campaign ID
+  matches the current selection — changing the selector hides a mismatched explanation
+  without a call, and reselecting the original campaign redisplays it without regenerating.
+- Sprint 3, Development Stage 32: portfolio and campaign flows call only the existing
+  Stage 29/30/31 boundary — `build_portfolio_explanation_payload` →
+  `build_portfolio_explanation_prompt` → `load_gemini_config()` →
+  `generate_explanation(prompt, config)` (and its campaign-level counterpart) —
+  `generate_explanation` receives only the resulting `ExplanationPrompt` and `GeminiConfig`,
+  never a locked result or payload model. A shared private rendering helper handles every
+  `ExplanationResult` consistently: `GENERATED` shows a local heading, `explanation_text`
+  via `st.markdown(..., unsafe_allow_html=False)` (never `True`), and an "AI-generated
+  using {model_name}" caption; `UNAVAILABLE`/`FAILED` show only the already-sanitized
+  `error_message`; `error_category` is never displayed. The locked deterministic totals,
+  conservation result, and campaign table remain fully visible and authoritative in every
+  explanation state. `app.py` never accesses `config.api_key`, references `SecretStr`,
+  calls `get_secret_value()`, inspects an environment variable, or reads `.env` directly. An
+  unexpected failure while building a payload/prompt or calling the transport is caught only
+  at one click-handler boundary per action — a concise generic error is shown, no fabricated
+  result is stored, the locked result is preserved untouched, and no automatic retry occurs.
+
+### Fixed
+- Sprint 3, Development Stage 32: one approved, narrow exception to three pre-existing
+  tests. `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+  `test_module_does_not_reference_forbidden_names`, and `tests/test_config.py`'s former
+  `test_app_module_does_not_import_config` (renamed
+  `test_app_module_imports_config_but_never_touches_the_raw_key`), were written when
+  `app.py` legitimately had no reason to import `config`, `src.explanations`, or
+  `src.gemini_analyzer`. Per explicit approval, each test's forbidden set was narrowed to
+  remove only those three entries; every other forbidden entry in all three tests is
+  unchanged and still enforced — mirroring the identical pattern already used at Stages 7,
+  8, and 11.
+
+### Added
+- Sprint 3, Development Stage 32: added a new dedicated test file,
+  `tests/test_app_explanation.py` — 35 new tests, all passing, using explicit
+  fake/monkeypatched generation behavior and zero real Gemini/network calls. Covers:
+  section/widget presence and absence without a locked result; widget and trust-caption
+  presence after a successful review; real Stage 30 payload/prompt construction reaching
+  the real Stage 31 transport boundary unchanged; campaign-selector formatting and
+  exact-campaign resolution; rendering of `GENERATED`/`UNAVAILABLE`/`FAILED` for both flows;
+  `error_category` never rendered and sanitized-message-only verification; one-click/
+  one-call and zero-additional-call-on-rerun discipline; re-click replacement of a prior
+  result; no-call-on-selector-change, stale-explanation hiding, and no-regeneration
+  redisplay on returning to the original selection; explanation-state clearing on both a
+  new successful and a new invalid deterministic submission; full deterministic-result
+  visibility and non-mutation across explanation actions; the real, network-free
+  `UNAVAILABLE` path; API-key absence from every rendered element and from session state;
+  no `unsafe_allow_html=True`; the single explanation-action exception boundary; and
+  AST-based isolation (no secret access, no direct environment/`.env` access, no automatic
+  generation outside button branches, no retry loop, no approval/audit/export imports). A
+  file-scoped autouse fixture defensively restores `app.run_budget_reallocation_review`
+  before every test in this file, since `AppTest`'s embedded `import app` resolves to the
+  same process-wide module object used everywhere else — this protects only this file's own
+  tests and modifies no other file. `tests/test_config.py`, `tests/test_explanations.py`,
+  `tests/test_gemini_analyzer.py`, and `tests/test_integration.py` confirmed unmodified
+  beyond the one approved exception above. Stage 1–31 regression re-confirmed unchanged at
+  1488 tests. Full suite: 1523 tests passing (1488 + 35).
+- Updated `docs/DATA_DICTIONARY.md` (the four explanation-related session-state keys and
+  Stage 32's excluded state), `docs/DECISION_RULES.md` (frozen Stage 32 widget, lifecycle,
+  rendering, secret-boundary, exception-containment, and approved-test-exception policies),
+  and `docs/TEST_SCENARIOS.md` (Stage 32 scenarios).

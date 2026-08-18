@@ -3,10 +3,11 @@
 **Active sprint:** Sprint 3 — Explanation, Approval, and Interface (in progress)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 Sprint 3, Development Stages 28 (deterministic Streamlit review shell), 29 (Gemini
-configuration foundation), 30 (explanation payload and prompt construction), and 31 (Gemini
-explanation transport) are complete. Verified baseline: `1488 passed` (1258 Stage 1–27
-regression + 31 Stage 28 + 45 Stage 29 + 93 Stage 30 + 61 Stage 31). Sprint 3 is not yet
-complete — explanation UI wiring, human approval, audit recording, and exports remain
+configuration foundation), 30 (explanation payload and prompt construction), 31 (Gemini
+explanation transport), and 32 (explanation UI wiring) are complete. Verified baseline:
+`1523 passed` (1258 Stage 1–27 regression + 31 Stage 28 + 45 Stage 29 + 93 Stage 30 + 61
+Stage 31 + 35 Stage 32). Sprint 3 is not yet complete — human approval, audit recording,
+and exports remain
 unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
@@ -1892,17 +1893,114 @@ and initial project-management documentation) is complete and is not re-tracked 
 - The full AI/UI-inclusive end-to-end integration test
   (`tests/test_integration.py`, reserved, untouched).
 
+## Development Stage 32 — Explanation UI Wiring (complete)
+
+- [x] `app.py` (extended, not replaced) — one optional, click-only Gemini
+      explanation section, rendered strictly after the complete locked
+      deterministic result: one portfolio-level explanation and one
+      explanation for a user-selected campaign. Nothing generates
+      automatically; no campaign call is ever batched.
+- [x] **Required section and trust labeling**: `st.subheader("Optional
+      AI-generated explanations")` followed by the fixed caption "Gemini
+      explanations are supplementary and may be inaccurate. The
+      deterministic recommendations above remain authoritative." An
+      explanation is never labeled verified, validated, checked,
+      authoritative, approved, or deterministic.
+- [x] **Exact widgets**: `generate_portfolio_explanation` button;
+      `explanation_campaign_id` selectbox formatted `{campaign_id} —
+      {campaign_name}`; `generate_campaign_explanation` button. Both
+      buttons appear only with a locked result, remain enabled regardless
+      of Gemini configuration, and are never inside the deterministic
+      form.
+- [x] **Session-state lifecycle**: `portfolio_explanation_result`,
+      `campaign_explanation_result`, and `campaign_explanation_campaign_id`
+      (alongside the existing `locked_review_result`) are all cleared at
+      the very start of every new deterministic submission, before
+      validation. Ordinary reruns preserve stored explanations and make
+      no Gemini call. Each click clears-then-replaces its own result. The
+      stored campaign explanation renders only when its recorded campaign
+      ID matches the current selection — changing the selector hides a
+      mismatched explanation without a new call; reselecting the original
+      campaign redisplays it without regenerating.
+- [x] **Exact call chains**: portfolio —
+      `build_portfolio_explanation_payload` →
+      `build_portfolio_explanation_prompt` → `load_gemini_config()` →
+      `generate_explanation(prompt, config)`; campaign — the selected
+      existing locked campaign result →
+      `build_campaign_explanation_payload` →
+      `build_campaign_explanation_prompt` → `load_gemini_config()` →
+      `generate_explanation(prompt, config)`. No Stage 29/30/31 formula
+      is reimplemented in `app.py`.
+- [x] **Rendering policy**: a shared private helper renders every
+      `ExplanationResult`. `GENERATED` shows a local heading, the text via
+      `st.markdown(..., unsafe_allow_html=False)` (never `True`), and an
+      "AI-generated using {model_name}" caption. `UNAVAILABLE`/`FAILED`
+      show only the sanitized `error_message` via `st.info`/`st.error`.
+      `error_category` is never displayed. The locked deterministic
+      totals, conservation, and campaign table remain fully visible and
+      authoritative in every state.
+- [x] **Configuration/secret boundary**: `load_gemini_config()` is called
+      fresh inside each click handler, never cached or stored in session
+      state. `app.py` never accesses `config.api_key`, references
+      `SecretStr`, calls `get_secret_value()`, inspects an environment
+      variable, or reads `.env` directly.
+- [x] **Single explanation-action exception boundary**: an unexpected
+      failure while building a payload/prompt or calling the transport is
+      caught only at the one click-handler boundary per action, showing a
+      concise generic error, storing no fabricated result, preserving the
+      locked result, exposing no raw secret/traceback/configuration, and
+      never retrying automatically.
+- [x] **One approved test exception**: `tests/test_app.py`'s
+      `test_module_does_not_import_forbidden_modules` and
+      `test_module_does_not_reference_forbidden_names`, and
+      `tests/test_config.py`'s former `test_app_module_does_not_import_config`
+      (renamed `test_app_module_imports_config_but_never_touches_the_raw_key`),
+      were narrowed to remove only `config`/`src.explanations`/
+      `src.gemini_analyzer` from their forbidden sets, per explicit
+      approval, because `app.py` now legitimately imports exactly those
+      three. Every other forbidden entry in all three tests is unchanged
+      and still enforced.
+- [x] `tests/test_app_explanation.py` (new dedicated test file) — 35 new
+      Stage 32 tests, all passing, using explicit fake/monkeypatched
+      generation behavior and zero real Gemini/network calls. Covers
+      section/widget presence and absence, the exact trust caption, real
+      Stage 30 payload/prompt construction reaching the real Stage 31
+      transport boundary, campaign-selector formatting and exact-campaign
+      resolution, rendering of every `ExplanationStatus`, one-click/one-call
+      and zero-call-on-rerun discipline, re-click replacement, stale
+      campaign-explanation hiding and redisplay, explanation-state
+      clearing on both successful and failed new submissions, full
+      deterministic-result visibility and non-mutation, the real
+      network-free `UNAVAILABLE` path, API-key absence from rendered
+      output and session state, no unsafe HTML, the single
+      exception-action boundary, and AST-based isolation. `tests/test_config.py`,
+      `tests/test_explanations.py`, `tests/test_gemini_analyzer.py`, and
+      `tests/test_integration.py` confirmed unmodified beyond the one
+      approved narrow exception above. Stage 1–31 regression re-run and
+      confirmed passing unchanged at 1488 tests. Full suite: 1523 tests
+      passing (1488 + 35).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 32 (and not yet started)
+
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+- Any automatic or batched explanation generation.
+
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28, 29, 30, and 31 are complete — Sprint 3
-as a whole is not.** Stage 31 delivered the Gemini transport layer and
-resolved the SDK dependency mismatch, with no change to `app.py`.
+**Sprint 3 is underway; Stages 28 through 32 are complete — Sprint 3 as a
+whole is not.** Stage 32 delivered the optional, click-only Gemini
+explanation UI with the locked deterministic result remaining fully
+visible and authoritative in every state.
 
 The smallest dependency-ordered remaining Sprint 3 work, in provisional
 order (each still requires its own dependency/decision-readiness
-inspection before being frozen): explanation UI wiring (read-only display
-of `ExplanationResult` in `app.py`, degrading clearly by status, with the
-deterministic result unaffected); human approval (`src/approval.py`);
+inspection before being frozen): human approval (`src/approval.py`);
 audit persistence (`src/audit.py`); exports (`src/exports.py`); and
 finally the full end-to-end integration test
 (`tests/test_integration.py`). The remaining `ReasonCode` members'

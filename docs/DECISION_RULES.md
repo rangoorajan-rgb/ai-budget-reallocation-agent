@@ -2360,6 +2360,93 @@ error fields `None`; `UNAVAILABLE` requires `explanation_text=None`, `model_name
 and a nonblank `error_message`. An inconsistent direct construction is rejected by normal
 Pydantic validation, never silently repaired.
 
+## Stage 32 — Explanation UI Wiring
+
+**Rule.** `app.py` (Sprint 3, Development Stage 32) adds one optional, click-only Gemini
+explanation section, rendered strictly after the complete locked deterministic result:
+one portfolio-level explanation and one explanation for a user-selected campaign. Nothing
+is generated automatically — every Gemini call happens only inside a button's own click
+branch, exactly once per click, never on an ordinary rerun and never merely from changing
+the campaign selector. The same two buttons (`generate_portfolio_explanation`,
+`generate_campaign_explanation`) serve as the only manual retry/regenerate controls; no
+separate retry control exists, and no automatic retry is ever performed. No campaign call
+is ever batched across the whole portfolio.
+
+**Required section and trust labeling.** A `st.subheader("Optional AI-generated
+explanations")` followed immediately by the fixed caption "Gemini explanations are
+supplementary and may be inaccurate. The deterministic recommendations above remain
+authoritative." An explanation is never labeled verified, validated, checked, authoritative,
+approved, or deterministic.
+
+**Exact widgets.** `st.button("Generate portfolio explanation",
+key="generate_portfolio_explanation")`; `st.selectbox("Campaign to explain",
+options=<campaign IDs>, format_func=<"{campaign_id} — {campaign_name}">,
+key="explanation_campaign_id")`; `st.button("Generate campaign explanation",
+key="generate_campaign_explanation")`. Both buttons appear only when a locked result
+exists, remain enabled regardless of Gemini configuration, and are never placed inside the
+deterministic-review form.
+
+**Session-state keys and lifecycle.** `PORTFOLIO_EXPLANATION_STATE_KEY =
+"portfolio_explanation_result"`, `CAMPAIGN_EXPLANATION_STATE_KEY =
+"campaign_explanation_result"`, `CAMPAIGN_EXPLANATION_ID_STATE_KEY =
+"campaign_explanation_campaign_id"` — alongside the existing `RESULT_STATE_KEY`. All four
+are cleared at the very start of every new deterministic-review submission, before
+validation or pipeline execution, so a failed resubmission never leaves a stale
+explanation visible. Ordinary reruns preserve stored explanations and trigger no Gemini
+call. A portfolio click clears, then rebuilds and replaces, the portfolio result. A
+campaign click clears, then rebuilds and replaces, both the campaign result and its
+recorded campaign ID. The stored campaign explanation renders only when its recorded
+campaign ID equals the currently selected campaign ID — changing the selector alone hides
+a mismatched explanation (never calling Gemini), and reselecting the original campaign
+redisplays its still-current stored explanation without regenerating it. The widget-owned
+selection value itself is never duplicated under another session-state key. The locked
+result itself, and every campaign result within it, is never mutated.
+
+**Exact call chains, no duplicated logic.** Portfolio:
+`build_portfolio_explanation_payload` → `build_portfolio_explanation_prompt` →
+`load_gemini_config()` → `generate_explanation(prompt, config)`. Campaign: the selected
+existing locked `CampaignBudgetRecommendationResult` → `build_campaign_explanation_payload`
+→ `build_campaign_explanation_prompt` → `load_gemini_config()` →
+`generate_explanation(prompt, config)`. `generate_explanation` receives only the resulting
+`ExplanationPrompt` and `GeminiConfig` — never a locked result, a payload model, or any
+other object. No Stage 29/30/31 formula, payload, prompt, or transport rule is
+reimplemented in `app.py`.
+
+**Rendering policy.** A shared private helper renders every `ExplanationResult`
+consistently. `GENERATED`: a local heading identifying the portfolio or the selected
+campaign, `explanation_text` via `st.markdown(...)` with the default
+`unsafe_allow_html=False` (never `True`), and a caption "AI-generated using
+{model_name}" — `error_category` is never displayed. `UNAVAILABLE`/`FAILED`: only the
+already-sanitized `error_message` via `st.info(...)`/`st.error(...)` respectively — never
+`error_category`, a raw exception, configuration, or the API key. The locked deterministic
+totals, conservation result, and campaign table remain fully visible and authoritative in
+every explanation state.
+
+**Configuration and secret boundary.** `app.py` calls `load_gemini_config()` fresh inside
+each click handler — never cached, never stored in session state (only the resulting
+`ExplanationResult` is kept). `app.py` never accesses `config.api_key`, never references
+`SecretStr`, never calls `get_secret_value()`, never inspects an environment variable or
+reads `.env` directly, and never logs or prints configuration.
+
+**Single explanation-action exception boundary.** An unexpected failure while building a
+payload, prompt, or calling the transport is caught only at the one click-handler boundary
+per action (mirroring Stage 28's own single pipeline-exception boundary): a concise generic
+`st.error` is shown, no fabricated `ExplanationResult` is stored, the locked result is
+preserved untouched, no raw secret/traceback/configuration/provider object is exposed, and
+no automatic retry occurs. Stage 31's own typed-result failure mapping is never
+reimplemented here.
+
+**One approved test exception.** Three pre-existing AST-based isolation assertions —
+`tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, and `tests/test_config.py`'s
+former `test_app_module_does_not_import_config` (renamed
+`test_app_module_imports_config_but_never_touches_the_raw_key`) — were narrowed to remove
+only `config`/`src.explanations`/`src.gemini_analyzer` from their forbidden sets, per
+explicit approval, because `app.py` now legitimately imports exactly those three for the
+explanation UI. Every other forbidden entry in all three tests (`src.approval`,
+`src.audit`, `src.exports`, any Gemini SDK module, `api_key`, `get_secret_value`,
+`SecretStr`) is unchanged and still enforced.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -2467,6 +2554,13 @@ Pydantic validation, never silently repaired.
   policy all recorded above. It does not wire anything into `app.py`,
   does not implement approval, audit, or exports, and defines no response
   contract beyond the plain-text `explanation_text` field already
-  specified. Explanation UI wiring, human approval, audit persistence,
-  exports, and Sprint 4 hardening all remain pending later, separate
-  stages/sprints.
+  specified.
+- Stage 32 resolved explanation UI wiring (see above): the optional,
+  click-only portfolio and campaign explanation section, its exact
+  widgets and session-state lifecycle, stale-explanation prevention, the
+  shared rendering policy for every status, and the single
+  explanation-action exception boundary. It does not implement human
+  approval, audit persistence, exports, or the full integration test, and
+  it never generates an explanation automatically or in a batch. Human
+  approval, audit persistence, exports, and Sprint 4 hardening all remain
+  pending later, separate stages/sprints.

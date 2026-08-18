@@ -1547,6 +1547,22 @@ raw response is never retained regardless. `app.py`, `BudgetReallocationReviewRe
 `CampaignBudgetRecommendationResult`, either explanation payload model, and any approval or
 audit model are never imported or accepted by this module.
 
+## Explanation UI Session State (Stage 32, `app.py`)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `locked_review_result` | `BudgetReallocationReviewResult \| None` | Unchanged since Stage 28; never mutated by the Stage 32 explanation flow. |
+| `portfolio_explanation_result` | `ExplanationResult \| None` | The most recent portfolio explanation attempt's result, or `None` before any click / after a new deterministic submission. |
+| `campaign_explanation_result` | `ExplanationResult \| None` | The most recent campaign explanation attempt's result. |
+| `campaign_explanation_campaign_id` | `str \| None` | The `campaign_id` the stored `campaign_explanation_result` belongs to. Rendered only when this equals the selectbox's current value — a mismatch hides the stale explanation without clearing it, so reselecting the original campaign redisplays it without a new call. |
+
+The selectbox's own widget-owned value lives only under its own Streamlit key,
+`explanation_campaign_id` — it is never duplicated into another session-state key.
+
+**Excluded from Stage 32 entirely**: any configuration object or API key in session state
+(only the already-redacted `ExplanationResult` is ever stored); a batch/whole-portfolio
+campaign result; any approval, audit, or export state.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

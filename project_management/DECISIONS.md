@@ -2834,3 +2834,73 @@ credentials are never stored anywhere. `ExplanationResult` (frozen, `extra="forb
 enforces its state/field invariants via a model validator — an inconsistent direct
 construction is rejected through normal Pydantic validation, never silently repaired.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 32: optional, click-only explanation UI
+
+**Decision:** `app.py` adds one optional Gemini explanation section, rendered strictly
+after the complete locked deterministic result, offering exactly one portfolio-level
+explanation and one explanation for a user-selected campaign — never a batch across the
+whole portfolio. Every Gemini call happens only inside a button's own click branch, exactly
+once per click; nothing is generated automatically, and changing the campaign selector
+alone never triggers a call. The same two buttons are the only manual retry/regenerate
+controls; no separate retry control exists and no automatic retry is ever performed. The
+required section header, trust caption, and widget keys (`generate_portfolio_explanation`,
+`explanation_campaign_id`, `generate_campaign_explanation`) are exactly as specified; an
+explanation is never labeled verified, validated, checked, authoritative, approved, or
+deterministic.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 32: session-state lifecycle and call chains
+
+**Decision:** `portfolio_explanation_result`, `campaign_explanation_result`, and
+`campaign_explanation_campaign_id` are added alongside the existing `locked_review_result`.
+All four are cleared at the very start of every new deterministic-review submission, before
+validation or pipeline execution. Ordinary reruns preserve stored explanations and trigger
+no Gemini call. Each button click clears, then rebuilds and replaces, only its own result.
+The stored campaign explanation renders only when its recorded campaign ID equals the
+currently selected campaign ID — a mismatch hides it without a new call, and reselecting
+the original campaign redisplays the still-current stored explanation without regenerating
+it. The selectbox's own widget-owned value is never duplicated under another session-state
+key. Portfolio and campaign flows call only the existing `build_portfolio_explanation_payload`
+→ `build_portfolio_explanation_prompt` → `load_gemini_config()` → `generate_explanation(prompt,
+config)` chain (and its campaign-level counterpart) — `generate_explanation` receives only
+the resulting `ExplanationPrompt` and `GeminiConfig`, never a locked result or payload
+model, and no Stage 29/30/31 formula is reimplemented in `app.py`. Neither the locked
+result nor any campaign result is ever mutated.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 32: rendering, secret boundary, and exception containment
+
+**Decision:** A shared private rendering helper handles every `ExplanationResult`
+consistently. `GENERATED` shows a local heading, `explanation_text` via
+`st.markdown(..., unsafe_allow_html=False)` (never `True`), and an "AI-generated using
+{model_name}" caption. `UNAVAILABLE`/`FAILED` show only the already-sanitized
+`error_message` via `st.info`/`st.error`; `error_category` is never displayed. The locked
+deterministic totals, conservation result, and campaign table remain fully visible and
+authoritative in every explanation state. `load_gemini_config()` is called fresh inside
+each click handler, never cached and never stored in session state — only the resulting
+`ExplanationResult` is kept. `app.py` never accesses `config.api_key`, references
+`SecretStr`, calls `get_secret_value()`, inspects an environment variable, or reads `.env`
+directly. An unexpected failure while building a payload/prompt or calling the transport is
+caught only at one click-handler boundary per action: a concise generic error is shown, no
+fabricated result is stored, the locked result is preserved untouched, no raw
+secret/traceback/configuration is exposed, and no automatic retry occurs — Stage 31's own
+typed-result failure mapping is never reimplemented in `app.py`.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 32: one approved exception to three pre-existing tests
+
+**Decision:** `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, and `tests/test_config.py`'s former
+`test_app_module_does_not_import_config` (renamed
+`test_app_module_imports_config_but_never_touches_the_raw_key`), were written at Stages
+28–29 when `app.py` legitimately had no reason to import `config`, `src.explanations`, or
+`src.gemini_analyzer`. Stage 32 requires exactly those three imports for the explanation
+UI. Per explicit approval, each test's forbidden set was narrowed to remove only those
+three entries — every other forbidden entry (`src.approval`, `src.audit`, `src.exports`,
+any Gemini SDK module, and, in the renamed `test_config.py` test, `api_key`/
+`get_secret_value`/`SecretStr`) is unchanged and still enforced. This mirrors the identical
+"one approved exception" pattern already used at Stages 7, 8, and 11 when a later, approved
+stage legitimately superseded an earlier test's now-outdated isolation assumption. No
+other test file, and no test's coverage of Stage 1–31 behavior, was altered.
+**Status:** Frozen.
