@@ -2289,6 +2289,77 @@ direct construction (already-enforced upstream business rules are never re-valid
 or an unexpected serialization failure would raise, and any such failure propagates
 unchanged.
 
+## Stage 31 — Gemini Explanation Transport
+
+**Rule.** `src/gemini_analyzer.py` (Sprint 3, Development Stage 31) is the transport/service
+layer that sends one Stage 30 `ExplanationPrompt` to Gemini and returns a typed
+`ExplanationResult`. It consumes only `ExplanationPrompt` and `GeminiConfig` (plus an
+optional injected client and a model-name override) — never a locked pipeline result, a
+payload model, an approval model, an audit model, or Streamlit. `ExplanationResult` has no
+field capable of representing an action, budget, allocation, score, rank, reason, or
+conservation value, so there is structurally no path back into a locked deterministic
+result. One generic `generate_explanation` function is used for both campaign and
+portfolio prompts — no separate campaign/portfolio transport functions, no batch function.
+
+**SDK decision.** Uses `google.genai` exclusively — the current, actively-maintained,
+General Availability Google Gen AI SDK. The legacy `google.generativeai` (declared in
+`requirements.txt` since Stage 1, never actually installed) is removed;
+`requirements.txt` now declares `google-genai>=2,<3`. The legacy SDK is officially
+documented as not actively maintained, with legacy libraries deprecated as of
+2025-11-30. No code anywhere imports `google.generativeai`.
+
+**Exact model and settings, all frozen.** Default model `gemini-2.5-flash-lite`, held in
+one private module constant, overridable via the function's keyword-only `model`
+parameter; `temperature=0.2`; `max_output_tokens=512`; exactly one candidate
+(`candidate_count=1`); a `30_000`-millisecond timeout via `GenerateContentConfig.http_options
+= HttpOptions(timeout=...)`. No structured output, no safety-setting overrides, no seed, no
+stop sequences, no top-p/top-k — none is justified by current evidence.
+
+**Availability guard.** `is_gemini_available(config)` is checked first. When unavailable: no
+SDK client is constructed, no API call is attempted, and the result is
+`UNAVAILABLE`/`CONFIGURATION` with no explanation text or model name.
+
+**Client lifecycle.** An injected `client` (satisfying the narrow structural `GeminiClient`
+protocol) is used as-is and is never closed by this module. When no client is injected,
+`config.api_key.get_secret_value()` is called at exactly one production call site, to build
+one fresh `google.genai.Client` for that call only; that internally-owned client is always
+closed in a `finally` block, on both success and failure. No client or configuration is
+cached at module level; importing this module performs no environment read, no client
+construction, and no network call.
+
+**Provider call and extraction.** `prompt.user_content` is sent as the content;
+`prompt.system_instruction` is forwarded through `GenerateContentConfig.system_instruction`
+unchanged. Only `response.text` is ever extracted; the raw provider response object is
+never retained or returned. A nonblank result is stripped at its outer boundaries and
+returned as `GENERATED`; Markdown inside it is permitted. Response text is never scanned
+for "unsupported" content — the only guarantee this module makes is structural (no path
+back into a locked result), never a claim that generated text has been fact-checked.
+
+**Failure mapping, no retries, no fabricated fallback.** Every failure returns `FAILED` with
+one of the ten frozen `ErrorCategory` values — `CONFIGURATION` (unavailable), `AUTHENTICATION`
+(401/403), `RATE_LIMIT` (429), `SERVER_ERROR` (5xx), `TIMEOUT`, `NETWORK_ERROR`,
+`SAFETY_BLOCK` (explicit provider safety signal, detected before falling through to an
+empty-response check), `EMPTY_RESPONSE` (`None`/blank/whitespace text with no safety
+signal), `MALFORMED_RESPONSE` (extraction itself raises), and `UNEXPECTED_ERROR` (anything
+else). There is no automatic retry — exactly one provider invocation per call, regardless
+of outcome — and no deterministic fallback explanation text is ever fabricated; a
+non-`GENERATED` result carries no `explanation_text`, leaving any user-facing fallback copy
+to a future UI stage.
+
+**Secret redaction.** The raw key exists only inside the one owned-client construction path.
+Any exception message captured while using an internally-owned client has the known secret
+value replaced with a fixed `[REDACTED]` marker before it is placed into `error_message`; no
+raw SDK request, response, header, or credential is ever stored. The injected-client path
+never reads `config.api_key` at all.
+
+**Result-state invariants.** `ExplanationResult` (frozen, `extra="forbid"`) enforces by
+model validator: `GENERATED` requires nonblank `explanation_text` and `model_name` and both
+error fields `None`; `UNAVAILABLE` requires `explanation_text=None`, `model_name=None`,
+`error_category=CONFIGURATION`, and a nonblank `error_message`; `FAILED` requires
+`explanation_text=None`, a nonblank `model_name`, a non-`CONFIGURATION` `error_category`,
+and a nonblank `error_message`. An inconsistent direct construction is rejected by normal
+Pydantic validation, never silently repaired.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -2387,7 +2458,15 @@ unchanged.
   data-free system instruction with its injection-containment measures.
   It does not resolve the `google-generativeai`/`google-genai` dependency
   mismatch, does not call Gemini, does not define a response contract,
-  and does not wire anything into `app.py`. Gemini API integration
-  (including the deferred SDK choice and the response contract),
-  explanation UI wiring, human approval, audit persistence, exports, and
-  Sprint 4 hardening all remain pending later, separate stages/sprints.
+  and does not wire anything into `app.py`.
+- Stage 31 resolved the Gemini transport layer and the SDK dependency
+  mismatch (see above): `google-genai` is now the sole declared and used
+  SDK; `generate_explanation` sends one Stage 30 prompt and returns a
+  typed `ExplanationResult`, with the frozen model/settings, availability
+  guard, client lifecycle, failure-category mapping, and secret-redaction
+  policy all recorded above. It does not wire anything into `app.py`,
+  does not implement approval, audit, or exports, and defines no response
+  contract beyond the plain-text `explanation_text` field already
+  specified. Explanation UI wiring, human approval, audit persistence,
+  exports, and Sprint 4 hardening all remain pending later, separate
+  stages/sprints.

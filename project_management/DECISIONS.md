@@ -2775,3 +2775,62 @@ dependency mismatch recorded at Stage 29 remains unresolved and
 unaffected — `src/explanations.py` imports no Gemini SDK, no `config`,
 and no Streamlit, and `app.py` is not modified.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 31: `google-genai` resolves the SDK mismatch
+
+**Decision:** `requirements.txt` is corrected to declare `google-genai>=2,<3`, replacing
+`google-generativeai`, which was never actually installed in this environment and is
+officially documented as not actively maintained, with legacy libraries deprecated as of
+2025-11-30. `pyproject.toml` is unchanged (it declares no dependencies). No package was
+installed, removed, or upgraded to implement Stage 31 — the already-installed
+`google-genai==2.12.1` satisfies the new pin. No code anywhere imports the legacy
+`google.generativeai`.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 31: prompt/config-only transport boundary
+
+**Decision:** `generate_explanation(prompt: ExplanationPrompt, config: GeminiConfig, *,
+client: GeminiClient | None = None, model: str = "gemini-2.5-flash-lite") ->
+ExplanationResult` is the sole public function — one generic function for both campaign and
+portfolio prompts, never separate transport functions and never a batch function. It
+accepts no locked pipeline result, no payload model, no approval model, no audit model, and
+imports no Streamlit. `ExplanationResult` has no field capable of representing an action,
+budget, allocation, score, rank, reason, or conservation value, so there is structurally no
+path back into a locked deterministic result — this guarantee holds regardless of anything
+Gemini's response text contains.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 31: frozen model, settings, and failure policy
+
+**Decision:** Default model `gemini-2.5-flash-lite`, held in one private module constant,
+overridable via the keyword-only `model` parameter; `temperature=0.2`;
+`max_output_tokens=512`; exactly one candidate; a `30_000`-millisecond timeout via
+`GenerateContentConfig.http_options=HttpOptions(timeout=...)`. No structured output, no
+safety-setting override, no seed, no stop sequences — none is justified by current
+evidence. `is_gemini_available(config)` is checked first; when unavailable, no SDK client
+is constructed and no call is attempted. Every failure returns `FAILED` with one of ten
+frozen `ErrorCategory` values (`CONFIGURATION`, `AUTHENTICATION`, `RATE_LIMIT`,
+`SERVER_ERROR`, `TIMEOUT`, `NETWORK_ERROR`, `SAFETY_BLOCK`, `EMPTY_RESPONSE`,
+`MALFORMED_RESPONSE`, `UNEXPECTED_ERROR`) mapped from the SDK's own public exception/status
+interfaces (`google.genai.errors.ClientError`/`ServerError`, `httpx.TimeoutException`/
+`NetworkError`), never a private undocumented internal. There is no automatic retry —
+exactly one provider invocation per call — and no deterministic fallback explanation text
+is ever fabricated; a non-`GENERATED` result always carries `explanation_text=None`.
+Response text is never scanned for "unsupported" content; the only guarantee is structural.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 31: client lifecycle and secret redaction
+
+**Decision:** An injected client (satisfying the narrow structural `GeminiClient` protocol)
+is used as-is and never closed by this module. When no client is injected,
+`config.api_key.get_secret_value()` is called at exactly one production call site to build
+one fresh `google.genai.Client` for that call only; that internally-owned client is always
+closed in a `finally` block on both success and failure. No client or configuration is
+cached at module level; importing `src/gemini_analyzer.py` performs no environment read, no
+client construction, and no network call. Any exception message captured while using the
+internally-owned client has the known secret value replaced with a fixed `[REDACTED]`
+marker before entering `error_message`; the raw provider response, request, headers, or
+credentials are never stored anywhere. `ExplanationResult` (frozen, `extra="forbid"`)
+enforces its state/field invariants via a model validator — an inconsistent direct
+construction is rejected through normal Pydantic validation, never silently repaired.
+**Status:** Frozen.

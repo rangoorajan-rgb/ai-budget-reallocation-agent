@@ -2575,3 +2575,75 @@ All notable changes to this project are documented in this file.
   excluded values), `docs/DECISION_RULES.md` (frozen Stage 30 Gemini-boundary, granularity,
   serialization, prompt-architecture, injection-containment, and deferred-output-contract
   policies), and `docs/TEST_SCENARIOS.md` (Stage 30 scenarios).
+
+## [Unreleased] — 2026-08-18 — Sprint 3, Development Stage 31
+
+### Changed
+- Sprint 3, Development Stage 31: resolved the recorded SDK dependency mismatch —
+  `requirements.txt` now declares `google-genai>=2,<3`, replacing `google-generativeai`
+  (never actually installed in this environment; officially documented as not actively
+  maintained, with legacy libraries deprecated as of 2025-11-30). `pyproject.toml` is
+  unchanged (no dependency section). No package was installed, removed, or upgraded — the
+  already-installed `google-genai==2.12.1` satisfies the new pin. No code anywhere imports
+  the legacy `google.generativeai`.
+
+### Added
+- Sprint 3, Development Stage 31: filled in the Sprint 1 placeholder `src/gemini_analyzer.py`
+  as the transport/service layer sending one Stage 30 `ExplanationPrompt` to Gemini and
+  returning a typed `ExplanationResult` — `ExplanationStatus` (`GENERATED`/`UNAVAILABLE`/
+  `FAILED`), `ErrorCategory` (ten frozen values), and `ExplanationResult` (frozen,
+  `extra="forbid"`, with a model validator enforcing exact state/field invariants for each
+  status). One generic public function, `generate_explanation(prompt, config, *,
+  client=None, model="gemini-2.5-flash-lite")` — no separate campaign/portfolio transport
+  functions, no batch function. Accepts only `ExplanationPrompt`/`GeminiConfig`(+optional
+  client/model override) — never a locked pipeline result, payload model, approval model,
+  audit model, or Streamlit; `ExplanationResult` has no field capable of representing an
+  action, budget, allocation, score, rank, reason, or conservation value. `app.py` is
+  untouched.
+- Sprint 3, Development Stage 31: frozen model/settings — default model
+  `gemini-2.5-flash-lite` in one private module constant, overridable via the keyword-only
+  `model` parameter; `temperature=0.2`; `max_output_tokens=512`; exactly one candidate; a
+  `30_000`-millisecond timeout via `GenerateContentConfig.http_options=HttpOptions(...)`.
+  No structured output, no safety-setting override, no seed, no stop sequences.
+  `is_gemini_available` checked first — unavailable means zero client construction and zero
+  API attempt, returning `UNAVAILABLE`/`CONFIGURATION` immediately.
+- Sprint 3, Development Stage 31: client lifecycle — an injected client is used as-is and
+  never closed; when none is injected, `config.api_key.get_secret_value()` is called at
+  exactly one production call site to build one fresh `google.genai.Client` for that call
+  only, always closed in `finally` on both success and failure. No module-level client or
+  config singleton; importing the module performs no environment read, client construction,
+  or network call.
+- Sprint 3, Development Stage 31: failure mapping to ten frozen `ErrorCategory` values using
+  the SDK's public exception/status interfaces (`ClientError`/`ServerError` by status code,
+  `httpx.TimeoutException`/`NetworkError`, explicit safety-block signals via
+  `finish_reason`/`prompt_feedback`, and structural extraction failures) — never a private
+  undocumented internal. Exactly one provider invocation per call, no automatic retry, and
+  no fabricated deterministic fallback explanation text. Any exception message from the
+  owned-client path is sanitized — the known secret value replaced with `[REDACTED]` —
+  before entering `error_message`; the raw provider response, request, headers, and
+  credentials are never stored.
+- Sprint 3, Development Stage 31: added a new dedicated test file,
+  `tests/test_gemini_analyzer.py` — 61 new tests, all passing, using explicit fake
+  clients/responses (never loose `MagicMock`) and zero real network/API calls. A real Stage
+  27 sample-data campaign (G002), built through the real Stage 30 payload/prompt chain, is
+  used for the primary success-path test. Covers: exact model schemas, `extra="forbid"`,
+  frozen behavior, every valid state, and rejection of every inconsistent state; exact
+  function signature; missing/blank-configuration unavailability with zero client
+  construction/invocation; exact request-forwarding (system instruction, user content,
+  model, temperature, token limit, timeout); injected-vs-owned client lifecycle including
+  close-on-success/failure; every frozen failure category (authentication, rate limit,
+  server error, timeout, network error, safety block via both finish-reason and
+  prompt-feedback, empty/whitespace response, malformed-response extraction, unexpected
+  exception) each with exactly-one-invocation verification; synthetic-key redaction through
+  the owned-client path; no raw provider response retention; no mutation of locked inputs;
+  import-time side-effect freedom; and AST-based isolation (single `get_secret_value()`
+  call site, no logging/print, no locked-result/approval/audit/Streamlit/legacy-SDK
+  references, no module-level singleton, no retry loop). `tests/test_config.py`,
+  `tests/test_explanations.py`, and `tests/test_integration.py` confirmed unmodified. Stage
+  1–30 regression re-confirmed unchanged at 1427 tests. Full suite: 1488 tests passing
+  (1427 + 61).
+- Updated `docs/DATA_DICTIONARY.md` (the `ExplanationResult`/`ExplanationStatus`/
+  `ErrorCategory` fields and Stage 31's excluded values), `docs/DECISION_RULES.md` (frozen
+  Stage 31 SDK-decision, transport-boundary, model/settings, failure-mapping, and
+  client-lifecycle/secret-redaction policies), and `docs/TEST_SCENARIOS.md` (Stage 31
+  scenarios).

@@ -1227,6 +1227,36 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 23 | Module source | No network/file/environment operation, no `datetime`/`time`/`random`/`uuid`, no logging/`print`, no `try`/`except`, no attribute assignment anywhere (AST-verified). |
 | 24 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
 
+## Gemini Explanation Transport Scenarios (Stage 31, `src/gemini_analyzer.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `ExplanationStatus`, `ErrorCategory`, `ExplanationResult` | Exact declared members/fields; `extra="forbid"` rejects an unknown field; `ExplanationResult` is frozen. |
+| 2 | Direct construction of each state | `GENERATED`/`UNAVAILABLE`/`FAILED` each construct successfully when internally consistent. |
+| 3 | Every inconsistent direct construction (blank text where required, wrong `error_category`, present field where forbidden, absent field where required) | Rejected by normal Pydantic validation — never silently repaired. |
+| 4 | `generate_explanation` signature | Exactly `(prompt, config, *, client=None, model="gemini-2.5-flash-lite")` (source-inspected). |
+| 5 | `GeminiConfig(api_key=None)`, and a blank environment key through the real Stage 29 loader | Both return `UNAVAILABLE`/`CONFIGURATION`. |
+| 6 | Unavailable config, with the internal client factory patched to fail the test if called | Zero client construction, zero invocation. |
+| 7 | A real Stage 27 sample-data campaign (G002) through the real Stage 30 payload/prompt chain, with a fake client | `GENERATED` with the fake response's stripped text. |
+| 8 | The fake client's captured call | `model`, `contents=prompt.user_content`, `config.system_instruction=prompt.system_instruction`, `temperature=0.2`, `max_output_tokens=512`, `candidate_count=1`, `http_options.timeout=30_000` — all forwarded exactly. |
+| 9 | An injected client | Never has `.close()` called, on success or failure. |
+| 10 | No client injected, internal factory patched to a fake | The fake client's `.close()` is called exactly once, on both success and failure, via `finally`. |
+| 11 | `ClientError(401\|403, ...)` | `FAILED`/`AUTHENTICATION`. |
+| 12 | `ClientError(429, ...)` | `FAILED`/`RATE_LIMIT`. |
+| 13 | `ServerError(5xx, ...)` | `FAILED`/`SERVER_ERROR`. |
+| 14 | `httpx.ReadTimeout` | `FAILED`/`TIMEOUT`. |
+| 15 | `httpx.ConnectError` | `FAILED`/`NETWORK_ERROR`. |
+| 16 | A response with `finish_reason=SAFETY` or a set `prompt_feedback.block_reason` | `FAILED`/`SAFETY_BLOCK`, detected before any empty-response check. |
+| 17 | `response.text` of `None`, `""`, `"   "`, `"\t\n"` | All four `FAILED`/`EMPTY_RESPONSE`. |
+| 18 | A response whose `.text` access raises | `FAILED`/`MALFORMED_RESPONSE`. |
+| 19 | An arbitrary unclassified exception (e.g. `ValueError`) | `FAILED`/`UNEXPECTED_ERROR`. |
+| 20 | Every failure scenario above | The fake client's `generate_content` is called exactly once — no automatic retry. |
+| 21 | An owned-client exception whose message contains the real synthetic key | `error_message` contains `[REDACTED]` and never the raw key substring. |
+| 22 | `ExplanationResult.model_dump()` after a successful call | Contains only the five declared fields — the raw fake response object is not present anywhere in it. |
+| 23 | A real locked campaign result and its built prompt, before and after a call | Both `model_dump()`s unchanged — no mutation. |
+| 24 | Fresh import of the module with no `GEMINI_API_KEY` set | No exception; no environment variable created; no module-level client/config attribute exists. |
+| 25 | Module source | Exactly one `get_secret_value()` call site; no `logging`/`print`; no import of `streamlit`, `google.generativeai`, `src.pipeline`, `src.approval`, or `src.audit`, and no reference to any locked-result or payload model name; no module-level `CLIENT`/`CONFIG` assignment; no `for`/`while` loop wrapping the generation call (AST-verified). |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 3 stage.

@@ -1519,6 +1519,34 @@ suitability (Stage 19–20), the API key or any configuration, audit data, times
 any generated explanation text — none is reachable from either payload model or referenced
 anywhere in the module.
 
+## Gemini Explanation Result Fields (Stage 31, `src/gemini_analyzer.py`)
+
+**`ExplanationStatus`** (`str, Enum`): `GENERATED`, `UNAVAILABLE`, `FAILED`.
+
+**`ErrorCategory`** (`str, Enum`): `CONFIGURATION`, `AUTHENTICATION`, `RATE_LIMIT`,
+`SERVER_ERROR`, `TIMEOUT`, `NETWORK_ERROR`, `SAFETY_BLOCK`, `EMPTY_RESPONSE`,
+`MALFORMED_RESPONSE`, `UNEXPECTED_ERROR`.
+
+**`ExplanationResult`** (frozen, `extra="forbid"`) — the only shape a Gemini explanation
+attempt may take; no field can represent, replace, or reinterpret a locked value:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `status` | `ExplanationStatus` | Which of the three states this result represents. |
+| `explanation_text` | `str \| None` | The stripped Gemini response text. Nonblank only when `status=GENERATED`; `None` otherwise. |
+| `model_name` | `str \| None` | The requested model string. `None` only for `UNAVAILABLE`; nonblank for `GENERATED`/`FAILED`. |
+| `error_category` | `ErrorCategory \| None` | `None` only for `GENERATED`; `CONFIGURATION` for `UNAVAILABLE`; any non-`CONFIGURATION` value for `FAILED`. |
+| `error_message` | `str \| None` | A sanitized, nonblank message for `UNAVAILABLE`/`FAILED`; `None` for `GENERATED`. Never contains a raw API key. |
+
+A model validator enforces these state/field combinations; an inconsistent direct
+construction is rejected by normal Pydantic validation, never silently repaired.
+
+**Excluded from Stage 31 entirely**: a prompt/request identifier, timestamps, token usage,
+and the raw provider response object — none has a defined downstream consumer yet, and the
+raw response is never retained regardless. `app.py`, `BudgetReallocationReviewResult`,
+`CampaignBudgetRecommendationResult`, either explanation payload model, and any approval or
+audit model are never imported or accepted by this module.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

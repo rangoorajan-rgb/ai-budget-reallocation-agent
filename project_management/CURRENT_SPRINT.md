@@ -2,11 +2,11 @@
 
 **Active sprint:** Sprint 3 — Explanation, Approval, and Interface (in progress)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
-Sprint 3, Development Stage 28 (deterministic Streamlit review shell), Development Stage 29
-(Gemini configuration foundation), and Development Stage 30 (explanation payload and prompt
-construction) are complete. Verified baseline: `1427 passed` (1258 Stage 1–27 regression +
-31 Stage 28 + 45 Stage 29 + 93 Stage 30). Sprint 3 is not yet complete — Gemini API
-integration, explanation UI wiring, human approval, audit recording, and exports remain
+Sprint 3, Development Stages 28 (deterministic Streamlit review shell), 29 (Gemini
+configuration foundation), 30 (explanation payload and prompt construction), and 31 (Gemini
+explanation transport) are complete. Verified baseline: `1488 passed` (1258 Stage 1–27
+regression + 31 Stage 28 + 45 Stage 29 + 93 Stage 30 + 61 Stage 31). Sprint 3 is not yet
+complete — explanation UI wiring, human approval, audit recording, and exports remain
 unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
@@ -1815,20 +1815,94 @@ and initial project-management documentation) is complete and is not re-tracked 
 - The full AI/UI-inclusive end-to-end integration test
   (`tests/test_integration.py`, reserved, untouched).
 
+## Development Stage 31 — Gemini Explanation Transport (complete)
+
+- [x] `src/gemini_analyzer.py` (placeholder filled in for the first time —
+      the Sprint 1 placeholder Gemini-integration module) — the
+      transport/service layer sending one Stage 30 `ExplanationPrompt` to
+      Gemini and returning a typed `ExplanationResult`. Consumes only
+      `ExplanationPrompt` and `GeminiConfig` (plus an optional injected
+      client and a model-name override) — never a locked pipeline result,
+      a payload model, an approval model, an audit model, or Streamlit.
+      One generic `generate_explanation` function only — no separate
+      campaign/portfolio transport functions, no batch function. `app.py`
+      is untouched.
+- [x] **SDK dependency mismatch resolved**: `requirements.txt` now
+      declares `google-genai>=2,<3` (removed `google-generativeai`,
+      which was never actually installed and is officially documented as
+      not actively maintained, with legacy libraries deprecated as of
+      2025-11-30). No code anywhere imports `google.generativeai`.
+      `pyproject.toml` unchanged (it has no dependency section). No
+      package was installed or upgraded — the already-installed
+      `google-genai==2.12.1` satisfies the new pin.
+- [x] **Frozen model and settings**: default model `gemini-2.5-flash-lite`
+      in one private module constant, overridable via the keyword-only
+      `model` parameter; `temperature=0.2`; `max_output_tokens=512`;
+      exactly one candidate; a `30_000`-millisecond timeout via
+      `GenerateContentConfig.http_options=HttpOptions(timeout=...)`. No
+      structured output, no safety-setting overrides, no seed, no stop
+      sequences.
+- [x] **Availability guard and client lifecycle**: `is_gemini_available`
+      checked first — unavailable means zero client construction and
+      zero API attempt. An injected client is used as-is and never
+      closed; when none is injected, `get_secret_value()` is called at
+      exactly one production call site to build one fresh
+      `google.genai.Client` for that call only, always closed in
+      `finally` on both success and failure. No module-level client or
+      config singleton; no import-time side effect.
+- [x] **Failure mapping, no retries, no fabricated fallback**: every
+      failure returns `FAILED` with one of ten frozen `ErrorCategory`
+      values (`CONFIGURATION`, `AUTHENTICATION`, `RATE_LIMIT`,
+      `SERVER_ERROR`, `TIMEOUT`, `NETWORK_ERROR`, `SAFETY_BLOCK`,
+      `EMPTY_RESPONSE`, `MALFORMED_RESPONSE`, `UNEXPECTED_ERROR`).
+      Exactly one provider invocation per call; no fabricated
+      deterministic fallback explanation text is ever returned.
+- [x] **Secret redaction**: any exception message from the owned-client
+      path has the known key value replaced with `[REDACTED]` before
+      entering `error_message`; the raw provider response, request,
+      headers, and credentials are never stored; the injected-client path
+      never reads `config.api_key` at all.
+- [x] **Result-state invariants**: `ExplanationResult` (frozen,
+      `extra="forbid"`) enforces by model validator that `GENERATED`
+      requires nonblank `explanation_text`/`model_name` and no error
+      fields; `UNAVAILABLE` requires no text/model, `CONFIGURATION`, and
+      a nonblank message; `FAILED` requires no text, a nonblank model, a
+      non-`CONFIGURATION` category, and a nonblank message. Inconsistent
+      direct construction is rejected, never silently repaired.
+- [x] `tests/test_gemini_analyzer.py` (new dedicated test file) — 61 new
+      Stage 31 tests, all passing, using explicit fake clients/responses
+      (never loose `MagicMock`) and zero real network/API calls. A real
+      Stage 27 sample-data campaign (G002) is used for the primary
+      success-path test, built through the real Stage 30 payload/prompt
+      chain. `tests/test_config.py`, `tests/test_explanations.py`, and
+      `tests/test_integration.py` confirmed unmodified. Stage 1–30
+      regression re-run and confirmed passing unchanged at 1427 tests.
+      Full suite: 1488 tests passing (1427 + 61).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 31 (and not yet started)
+
+- Any UI wiring in `app.py` — including a missing-key or failure display.
+- Response parsing beyond plain `.text` extraction; any structured
+  response schema.
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28, 29, and 30 are complete — Sprint 3 as
-a whole is not.** Stage 30 delivered deterministic explanation payload
-and prompt construction with no forward dependency on Gemini, approval,
-audit, or exports, and no change to `app.py`.
+**Sprint 3 is underway; Stages 28, 29, 30, and 31 are complete — Sprint 3
+as a whole is not.** Stage 31 delivered the Gemini transport layer and
+resolved the SDK dependency mismatch, with no change to `app.py`.
 
 The smallest dependency-ordered remaining Sprint 3 work, in provisional
 order (each still requires its own dependency/decision-readiness
-inspection before being frozen): Gemini API integration
-(`src/gemini_analyzer.py` — must first resolve the
-`google-generativeai`/`google-genai` dependency mismatch recorded at
-Stage 29 and define the response contract deferred by Stage 30); wiring
-explanation display into the shell; human approval (`src/approval.py`);
+inspection before being frozen): explanation UI wiring (read-only display
+of `ExplanationResult` in `app.py`, degrading clearly by status, with the
+deterministic result unaffected); human approval (`src/approval.py`);
 audit persistence (`src/audit.py`); exports (`src/exports.py`); and
 finally the full end-to-end integration test
 (`tests/test_integration.py`). The remaining `ReasonCode` members'
