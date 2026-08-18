@@ -2411,3 +2411,111 @@ master plan for exactly this responsibility — are filled in for the first
 time, rather than a new module being created. No existing non-placeholder
 test file required modification.
 **Status:** Frozen.
+
+## 2026-08-18 — Stage 27 approved responsibility and validation boundary
+
+**Decision:** Sprint 1, Development Stage 27 orchestrates every
+already-approved Stage 3–26 production function, in their exact frozen
+dependency order, over one already-validated `ReviewSetup` and one
+already-validated `tuple[CampaignInput, ...]`, and returns one compact,
+typed, auditable portfolio result via
+`run_budget_reallocation_review(review: ReviewSetup, campaigns:
+tuple[CampaignInput, ...]) -> BudgetReallocationReviewResult`. This
+completes the master plan's Sprint 2 "Deterministic Core Engine" goal in
+full. It does not implement Streamlit, Gemini explanation, human
+approval, audit persistence, exports, or Sprint 4 hardening,
+all of which remain explicitly out of scope and deferred to Sprint 3/4.
+**Validation remains entirely outside this stage** — it never reads a
+CSV, never calls `validate_campaign_csv`, never returns validation
+issues, and never re-checks campaign-ID uniqueness, already a Stage 2
+responsibility trusted here exactly as every downstream stage has
+trusted its own upstream guarantees since Stage 12. An empty campaign
+tuple is valid and produces an empty portfolio result. **Pure
+orchestration**: every deterministic fact is produced by calling the
+real, already-approved function that owns it; no formula is duplicated,
+approximated, reopened, or recalculated from an upstream result object —
+the only new arithmetic is the explicitly authorised final-budget
+formula.
+**Status:** Frozen.
+
+## 2026-08-18 — Stage 27: exact models, final-movement, and final-budget policy
+
+**Decision:** `CampaignBudgetRecommendationResult` (frozen, immutable;
+`extra="forbid"`; exactly `campaign_id`, `campaign_name`, `platform`,
+`current_budget: Currency`, `recommendation_action`, `allocated_amount:
+Currency` constrained `>= 0`, `recommended_budget: Currency` constrained
+`>= 0`, `reason_codes: tuple[ReasonCode, ...]`, `performance_band`,
+`trend_direction`, `confidence`, `pacing_status`,
+`reallocation_priority_score: int` constrained `0..100`, `rank: int |
+None` constrained `>= 1` when present) carries no signed movement,
+raw/effective constraint capacity, availability/suitability object,
+tracking status, validation issue, reserve, campaign count, timestamp, or
+version field. `BudgetReallocationReviewResult` (frozen, immutable;
+`extra="forbid"`; exactly `review_id`, `campaign_results:
+tuple[CampaignBudgetRecommendationResult, ...]`, `total_current_budget:
+Currency` constrained `>= 0`, `total_recommended_budget: Currency`
+constrained `>= 0`, `conservation: CampaignReallocationConservation`)
+carries no formal audit-trace object. **Approved final-movement policy:**
+exactly one unsigned `allocated_amount` per campaign — direction is
+carried only by `recommendation_action`, never re-encoded through sign.
+For a directional recommendation matched to a Stage 25 allocation record,
+that record's exact amount is used. For `HOLD`/`MAINTAIN`, and for a
+directional recommendation with no matching allocation record (excluded
+from Stage 24's ranking because its Stage 23 score was zero, or ranked
+but left unfunded), the amount is exactly `Decimal("0.00")`. **A
+zero-funded `INCREASE`/`REDUCE` recommendation is never rewritten to
+`MAINTAIN`/`HOLD`** — confirmed against the real G002 sample result,
+which remains `INCREASE` with `allocated_amount=Decimal("0.00")`.
+**Approved final-budget formula**, using only Stage 25's actual allocated
+amount, never raw or effective constraint limits directly:
+```
+INCREASE → current_budget + allocated_amount
+REDUCE   → current_budget - allocated_amount
+MAINTAIN → current_budget
+HOLD     → current_budget
+```
+All cross-collection matching (rank, allocation) is by `campaign_id`
+value, never tuple position; `campaign_results` preserves the original
+`campaigns` input order — never re-sorted by ID, score, rank, or action;
+Stage 24's increase/reduce rankings remain independent, with no global
+cross-direction rank ever constructed.
+**Status:** Frozen.
+
+## 2026-08-18 — Stage 27: conservation policy, Decimal/context policy, and module ownership
+
+**Decision:** The embedded Stage 26 `CampaignReallocationConservation`
+result is always present in the returned `BudgetReallocationReviewResult`,
+regardless of `is_conserved` — never hidden, gated, or omitted; this
+stage never raises merely because an allocation is unconserved.
+**As a defence-in-depth check, distinct from and never a replacement for
+Stage 26's own invariant**, this stage additionally verifies that a
+*conserved* allocation also preserves the portfolio's total budget:
+`total_recommended_budget == total_current_budget` whenever
+`conservation.is_conserved`, raising exactly
+`RuntimeError("Conserved allocation must preserve the total campaign
+budget.")` only if that narrower guarantee is ever violated — which would
+indicate a defect in this stage's own campaign-to-allocation matching,
+never in Stage 25/26 themselves. **Decimal and context policy:** `Decimal`
+exclusively, never `float`; every addition, subtraction, and
+portfolio-level sum runs inside an explicitly-scoped `localcontext`, with
+precision derived from the actual operands' digit counts and collection
+size — never a blindly assumed fixed value — so the ambient global
+`Decimal` context can never affect the result (confirmed by test:
+mutated ambient precision/rounding restored afterward; extreme
+28-significant-digit budget magnitudes preserved exactly). Stage 22's
+ordered `reason_codes` are passed through unchanged; no allocation-specific
+reason code is ever invented. **Fails fast**: any unexpected exception,
+or a `ValueError` raised by an underlying Stage 1–26 function, propagates
+unchanged — no `try`/`except`, no retry, no partial portfolio result, no
+campaign ever silently dropped, no input or upstream result object ever
+mutated. **Dedicated module:** `src/pipeline.py` is a new production
+module — no existing placeholder (`app.py`, `config.py`,
+`src/explanations.py`, `src/gemini_analyzer.py`, `src/approval.py`,
+`src/audit.py`, `src/exports.py`) is scoped for deterministic
+orchestration; each remains reserved for its own Sprint 3 responsibility,
+untouched. `tests/test_pipeline.py` is a new dedicated test file,
+deliberately distinct from `tests/test_integration.py`, which remains
+reserved for the later, materially larger AI/UI-inclusive end-to-end
+flow and was not modified. **This completes the master plan's Sprint 2
+"Deterministic Core Engine" goal.**
+**Status:** Frozen.

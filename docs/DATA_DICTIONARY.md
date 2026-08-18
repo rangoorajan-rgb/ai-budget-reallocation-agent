@@ -1,10 +1,12 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 26 (adds deterministic, independent budget
-> conservation verification —
-> `CampaignReallocationConservation` — from `src/conservation.py` — to the
-> Stage 1 enumerations, numerical constants, core input models, CSV
-> schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4
+> Sprint 1, Development Stage 27 (adds the final deterministic
+> responsibility — end-to-end pipeline orchestration and portfolio
+> reporting — `BudgetReallocationReviewResult`/
+> `CampaignBudgetRecommendationResult` — from `src/pipeline.py`,
+> completing the master plan's Sprint 2 "Deterministic Core Engine" goal
+> — to the Stage 1 enumerations, numerical constants, core input models,
+> CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4
 > pacing facts, Stage 5 performance classification, Stage 6 trend
 > classification, Stage 7 conversion-volume confidence classification,
 > Stage 8 tracking-based assessability, Stage 9 pacing interpretation,
@@ -16,11 +18,14 @@
 > limit, Stage 19 campaign action availability, Stage 20 campaign action
 > suitability, Stage 21 recommendation-action selection, Stage 22
 > recommendation reasons, Stage 23 single-campaign reallocation priority
-> scoring, Stage 24 cross-campaign reallocation ranking, and Stage 25
-> cross-campaign budget allocation). Combined assessment,
+> scoring, Stage 24 cross-campaign reallocation ranking, Stage 25
+> cross-campaign budget allocation, and Stage 26 independent budget
+> conservation verification). Combined assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode`
-> trigger conditions, final deterministic integration/reporting, and other
-> derived/decision fields, plus export fields, are pending later stages.
+> trigger conditions, and other derived/decision fields, plus export
+> fields, are pending later stages. Streamlit/UI, Gemini explanation,
+> human approval, audit persistence, exports, and Sprint 4 hardening
+> remain pending separate, later sprints.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
@@ -1342,11 +1347,81 @@ counts and record count — never a blindly assumed fixed value — so the
 ambient global context can never affect the result and local-context
 rounding can never make two unequal totals compare as equal.
 
+## Budget Reallocation Review Result Fields (`src/pipeline.py`)
+
+Produced by `run_budget_reallocation_review(review: ReviewSetup,
+campaigns: tuple[CampaignInput, ...]) -> BudgetReallocationReviewResult`
+— the final deterministic responsibility, orchestrating every
+already-approved Stage 3–26 production function into one portfolio-level
+result. Completes the master plan's Sprint 2 "Deterministic Core Engine"
+goal. `CampaignBudgetRecommendationResult` and
+`BudgetReallocationReviewResult` are both frozen (immutable) and reject
+unknown fields (`extra="forbid"`).
+
+### `CampaignBudgetRecommendationResult`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `campaign_id`, `campaign_name`, `platform` | — | Copied unchanged from the campaign's `CampaignInput`. |
+| `current_budget` | `Currency` | Copied unchanged from `CampaignInput.current_budget`. |
+| `recommendation_action` | `RecommendationAction` | Stage 21's selected action, passed through unchanged — never rewritten because allocation is zero. |
+| `allocated_amount` | `Currency`, `>= 0` | Stage 25's exact allocated amount for a matched directional recommendation; exactly `Decimal("0.00")` for `HOLD`/`MAINTAIN` or an unmatched directional recommendation. Always unsigned — direction is carried only by `recommendation_action`. |
+| `recommended_budget` | `Currency`, `>= 0` | `current_budget ± allocated_amount` per the exact formula below; unchanged for `MAINTAIN`/`HOLD`. |
+| `reason_codes` | `tuple[ReasonCode, ...]` | Stage 22's ordered tuple, passed through unchanged — never recomputed, never appended to. |
+| `performance_band`, `trend_direction`, `confidence`, `pacing_status` | — | Stage 5/6/7/9's classifications, passed through for grounding and display. |
+| `reallocation_priority_score` | `int`, `0..100` | Stage 23's score, always present (including `0` for non-directional actions). |
+| `rank` | `int \| None`, `>= 1` when present | Stage 24's direction-specific dense rank; `None` for `HOLD`/`MAINTAIN` and for a directional recommendation excluded from ranking because its score was zero. Never a global cross-direction rank. |
+
+### `BudgetReallocationReviewResult`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `review_id` | `str` | Copied unchanged from `ReviewSetup.review_id`. |
+| `campaign_results` | `tuple[CampaignBudgetRecommendationResult, ...]` | One record per input campaign, in the original `campaigns` input order — never re-sorted by ID, score, rank, or action. |
+| `total_current_budget` | `Currency`, `>= 0` | Independently summed `current_budget` across all campaign results. |
+| `total_recommended_budget` | `Currency`, `>= 0` | Independently summed `recommended_budget` across all campaign results. |
+| `conservation` | `CampaignReallocationConservation` | Stage 26's result, embedded unchanged and always present — never hidden, gated, or omitted based on `is_conserved`. |
+
+**Validation stays entirely outside this stage.** `ReviewSetup` and every
+`CampaignInput` must already be valid; this stage never reads a CSV,
+never calls `validate_campaign_csv`, never returns validation issues, and
+never re-checks campaign-ID uniqueness (already Stage 2's responsibility).
+An empty campaign tuple is valid and produces an empty portfolio result.
+
+**Pure orchestration — no formula is duplicated.** Every fact is produced
+by calling the real Stage 3–26 function that owns it; the only new
+arithmetic is the final-budget formula:
+```
+INCREASE → current_budget + allocated_amount
+REDUCE   → current_budget - allocated_amount
+MAINTAIN → current_budget
+HOLD     → current_budget
+```
+
+**Conservation is always exposed, never repaired.** As a defence-in-depth
+check distinct from Stage 26's own invariant, a *conserved* allocation
+whose recomputed totals fail to match exactly raises `RuntimeError` —
+this would indicate a defect in this stage's own campaign-to-allocation
+matching, never in Stage 25/26 themselves. `is_conserved=False` is never
+hidden or silently ignored.
+
+**Matching, ordering, and Decimal policy** all directly extend Stage
+24–26's own established discipline: `campaign_id`-value matching only
+(never tuple position), original input order preserved, `Decimal`
+exclusively with every arithmetic operation inside an explicitly-scoped
+`localcontext` sized from actual operand digits and collection size,
+immune to ambient global context mutation.
+
+**Excluded from this result entirely**: signed movement, raw/effective
+constraint capacities, availability/suitability objects, tracking status,
+validation issues, reserve, campaign count, timestamps, version fields,
+and any formal audit-trace object.
+
 ## Derived Fields
 
 > Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
-> conditions, final deterministic integration/reporting).
+> conditions).
 
 ## Export Fields
 

@@ -1109,6 +1109,46 @@ capacity, ranking, recommendation, or reason data.
 | 36 | Module attributes | No `repair_allocation`/`rebalance_allocation`/batch function exists. |
 | 37 | `data/sample_campaigns.csv`'s real Stage 25 result (`G002` at `Decimal("0.00")`, no `REDUCE` allocations) | `total_increase_allocated=0.00`, `total_decrease_allocated=0.00`, `net_change=0.00`, `is_conserved=True` — explicitly not evidence that G002 received funding. |
 
+## Budget Reallocation Review Scenarios
+
+All scenarios below use `run_budget_reallocation_review(review: ReviewSetup,
+campaigns: tuple[CampaignInput, ...]) -> BudgetReallocationReviewResult`
+from `src/pipeline.py` (`tests/test_pipeline.py` — the final deterministic
+responsibility). No scenario reads a CSV, calls `validate_campaign_csv`,
+rewrites a zero-funded directional recommendation, reimplements a
+Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
+
+| # | Scenario | Expected outcome |
+|---|----------|-------------------|
+| 1 | `CampaignBudgetRecommendationResult` field set | Exactly the 14 fields in the frozen model — no signed movement, raw/effective capacity, availability/suitability, tracking status, or explanatory text. |
+| 2 | `BudgetReallocationReviewResult` field set | Exactly `review_id`, `campaign_results`, `total_current_budget`, `total_recommended_budget`, `conservation`. |
+| 3 | Construct either model with an unknown field | Rejected (`extra="forbid"`). |
+| 4 | Attempt to mutate either model | Rejected (`frozen=True`). |
+| 5 | `rank=0` | Rejected (`Field(ge=1)`); `rank=None` accepted. |
+| 6 | `reallocation_priority_score=101` | Rejected (`Field(ge=0, le=100)`). |
+| 7 | `data/sample_campaigns.csv` run through the real Stage 3–26 chain | Exact G001/M001/G002/G003 result (actions, reasons, scores, ranks, allocated/current/recommended budgets) matching the frozen sample table; portfolio totals `11700.00`/`11700.00`; conservation `0.00`/`0.00`/`0.00`/`True`. |
+| 8 | G002 (`INCREASE`, `allocated_amount=0.00`) | Recommendation remains `INCREASE` — never reinterpreted as `MAINTAIN`/`HOLD`. |
+| 9 | A balanced, non-zero recipient/donor pair | Final budgets change for both campaigns exactly by their allocated amount; `total_recommended_budget == total_current_budget`; `is_conserved=True`. |
+| 10 | Higher recipient rank fully funded, lower rank unfunded | Unfunded campaign retains its directional action with `allocated_amount=0.00` and an unchanged recommended budget. |
+| 11 | `HOLD` | `allocated_amount=0.00`, `recommended_budget` equals `current_budget` exactly, `rank=None`. |
+| 12 | `MAINTAIN` | Same. |
+| 13 | Directional recommendation excluded from ranking (zero score) | `allocated_amount=0.00`, `rank=None`, action unchanged. |
+| 14 | Every non-directional (`HOLD`/`MAINTAIN`) result | `rank` is always `None`. |
+| 15 | A ranked directional result | `rank` is always `>= 1`. |
+| 16 | No campaign ever appears with a rank from the opposite direction | Confirmed — no global cross-direction rank exists anywhere in the model. |
+| 17 | Empty `campaigns` tuple | `campaign_results=()`, both totals `0.00`, `is_conserved=True` — valid, not an error. |
+| 18 | Campaigns supplied in an arbitrary order | `campaign_results` preserves that exact original order — never re-sorted by ID, score, rank, or action. |
+| 19 | Matching between recommendations, rankings, and allocation records | Always by `campaign_id` value — never tuple position. |
+| 20 | Ambient global `Decimal` precision/rounding mutated before calling | Result unaffected; ambient context restored to its original values afterward. |
+| 21 | Extreme valid budget magnitudes (28 significant digits) | Exact result, no precision loss, portfolio totals exact. |
+| 22 | A genuinely conserved chain | The defence-in-depth total-budget check never raises. |
+| 23 | `conservation.is_conserved` | Always present in the result, regardless of value — never hidden, gated, or omitted. |
+| 24 | Inputs (`ReviewSetup`, each `CampaignInput`) after a call | Remain unchanged — no mutation. |
+| 25 | An unexpected exception (e.g. a malformed input) | Propagates unchanged — no `try`/`except` anywhere in `run_budget_reallocation_review`'s source (AST-verified), no partial result, no silently dropped campaign. |
+| 26 | Module source | No `float` referenced anywhere (AST-verified); every `BinOp` in the module belongs only to the explicitly authorised final-budget/summation helpers (AST-verified) — no Stage 1–26 formula is reimplemented. |
+| 27 | `src/pipeline.py` | Calls every required Stage 3–26 production function (AST-verified); never imports `src.validation`, `src.gemini_analyzer`, `src.explanations`, `src.approval`, `src.audit`, `src.exports`, Streamlit, or a Gemini SDK (AST-verified). |
+| 28 | Module attributes | No `run_budget_reallocation_reviews` batch wrapper exists. |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 1 stage.

@@ -2237,3 +2237,134 @@ All notable changes to this project are documented in this file.
   deterministic integration/reporting remains the sole outstanding
   downstream stage), and `docs/TEST_SCENARIOS.md` (37 concrete Stage 26
   scenarios).
+
+- Sprint 1, Development Stage 27: added a new dedicated module,
+  `src/pipeline.py` — the final deterministic responsibility, completing
+  the master plan's Sprint 2 "Deterministic Core Engine" goal in full —
+  containing `CampaignBudgetRecommendationResult` (frozen, immutable,
+  `extra="forbid"`: `campaign_id`, `campaign_name`, `platform`,
+  `current_budget: Currency`, `recommendation_action`, `allocated_amount:
+  Currency` constrained `>= 0`, `recommended_budget: Currency`
+  constrained `>= 0`, `reason_codes: tuple[ReasonCode, ...]`,
+  `performance_band`, `trend_direction`, `confidence`, `pacing_status`,
+  `reallocation_priority_score: int` constrained `0..100`, `rank: int |
+  None` constrained `>= 1` when present only), `BudgetReallocationReviewResult`
+  (frozen, immutable, `extra="forbid"`: `review_id`, `campaign_results:
+  tuple[CampaignBudgetRecommendationResult, ...]`, `total_current_budget:
+  Currency` constrained `>= 0`, `total_recommended_budget: Currency`
+  constrained `>= 0`, `conservation: CampaignReallocationConservation`
+  only), and `run_budget_reallocation_review(review: ReviewSetup,
+  campaigns: tuple[CampaignInput, ...]) -> BudgetReallocationReviewResult`.
+  Orchestrates every already-approved Stage 3–26 production function, in
+  their exact frozen dependency order, over one already-validated review
+  and campaign collection. **Approved validation boundary:** validation
+  remains entirely outside this stage — never reads a CSV, never calls
+  `validate_campaign_csv`, never returns validation issues, never
+  re-checks campaign-ID uniqueness (already Stage 2's responsibility); an
+  empty campaign tuple is valid and returns an empty portfolio result.
+  **Pure orchestration:** every fact is produced by calling the real,
+  already-approved function that owns it — no formula duplicated,
+  approximated, reopened, or recalculated from an upstream result object.
+  **Approved final-movement policy:** exactly one unsigned
+  `allocated_amount` per campaign — direction carried only by
+  `recommendation_action`, never re-encoded through sign; `Decimal("0.00")`
+  for `HOLD`/`MAINTAIN` and for any directional recommendation with no
+  matching Stage 25 allocation record (excluded from ranking because its
+  score was zero, or ranked but unfunded); a zero-funded `INCREASE`/`REDUCE`
+  is never rewritten to `MAINTAIN`/`HOLD` — confirmed against the real
+  G002 sample result, which remains `INCREASE` with `allocated_amount=0.00`.
+  **Approved final-budget formula**, using only Stage 25's actual
+  allocated amount, never raw or effective constraint limits directly:
+  `INCREASE → current_budget + allocated_amount`; `REDUCE →
+  current_budget - allocated_amount`; `MAINTAIN`/`HOLD → current_budget`
+  unchanged. **Approved conservation policy:** the embedded Stage 26
+  `CampaignReallocationConservation` result is always present regardless
+  of `is_conserved` — never hidden, gated, or omitted; never raises
+  merely because an allocation is unconserved. A defence-in-depth check,
+  distinct from and never a replacement for Stage 26's own invariant,
+  raises exactly `RuntimeError("Conserved allocation must preserve the
+  total campaign budget.")` only if a *conserved* allocation's recomputed
+  portfolio totals fail to match exactly. **Approved matching/ordering:**
+  all cross-collection matching (rank, allocation) is by `campaign_id`
+  value, never tuple position; `campaign_results` preserves the original
+  `campaigns` input order; Stage 24's increase/reduce rankings remain
+  independent, with no global cross-direction rank ever constructed.
+  Plain `Decimal` throughout — never `float`; every addition, subtraction,
+  and portfolio-level sum runs inside an explicitly-scoped `localcontext`,
+  with precision derived from the actual operands' digit counts and
+  collection size, immune to ambient global context mutation, directly
+  extending the corrected discipline established at Stages 25 and 26.
+  Stage 22's ordered `reason_codes` are passed through unchanged; no
+  allocation-specific reason code is ever invented. Fails fast on any
+  unexpected exception or upstream `ValueError` — no `try`/`except`, no
+  retry, no partial result, no campaign ever silently dropped, no input
+  or upstream result object ever mutated. No enum was added or changed.
+  No existing Stage 1–26 production or test module was modified.
+- Sprint 1, Development Stage 27: added 35 new tests to
+  `tests/test_pipeline.py` (new dedicated test file, deliberately distinct
+  from `tests/test_integration.py`, which remains reserved for the later,
+  materially larger AI/UI-inclusive end-to-end flow and was not modified;
+  all passing), covering result-model shape/immutability/range validation
+  (no signed movement, raw/effective capacity, availability/suitability,
+  tracking status, validation issue, reserve, campaign count, timestamp,
+  version, or audit-trace field), the exact real Stage 3–26 sample-data
+  result over `data/sample_campaigns.csv` (G001/M001/G002/G003 actions,
+  reasons, scores, ranks, allocated/current/recommended budgets; portfolio
+  totals `11700.00`/`11700.00`; conservation `0.00`/`0.00`/`0.00`/`True`),
+  explicit confirmation G002 remains `INCREASE` despite
+  `allocated_amount=0.00`, a balanced non-zero recipient/donor pair where
+  final budgets change exactly by the allocated amount and portfolio
+  totals remain equal, `HOLD`/`MAINTAIN` producing zero movement and an
+  unchanged recommended budget, optional-rank behavior (present only for
+  ranked directional campaigns, always `None` for `HOLD`/`MAINTAIN` and
+  for zero-score-excluded directional campaigns), empty-portfolio
+  handling, original input-order preservation under arbitrary campaign
+  ordering, `campaign_id`-based matching confirmed independent of
+  internal Stage 24/25 reordering, Decimal-context correctness (no
+  `float`; mutated ambient precision/rounding confirmed not to affect the
+  result and confirmed restored afterward; extreme
+  28-significant-digit budget magnitudes), the conservation and
+  total-budget invariants (conservation always exposed; the
+  defence-in-depth check confirmed never to raise for a genuinely
+  conserved real chain), input/upstream-object immutability, fail-fast
+  propagation of an unexpected exception with no `try`/`except` anywhere
+  in the function's source (AST-verified via absence of any `ast.Try`
+  node), and isolation from AI/UI/approval/audit/export/CSV-
+  reading/validation imports and calls, from any duplicated Stage 1–26
+  formula (AST-verified — every `BinOp` in the module belongs only to the
+  explicitly authorised final-budget/summation helpers), and confirmation
+  every required Stage 3–26 production function is actually called
+  (AST-verified). `tests/test_conservation.py` unchanged at 50 tests,
+  `tests/test_allocation.py` unchanged at 79 tests,
+  `tests/test_ranking.py` unchanged at 69 tests,
+  `tests/test_scoring.py` unchanged at 81 tests,
+  `tests/test_reasons.py` unchanged at 69 tests,
+  `tests/test_recommendation.py` unchanged at 84 tests,
+  `tests/test_suitability.py` unchanged at 67 tests,
+  `tests/test_availability.py` unchanged at 61 tests,
+  `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+  (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+  re-run and confirmed passing — no behavioural regression, and no
+  existing test module required modification this stage. Full suite:
+  1258 tests passing (92 Stage 1 + 44 Stage 2 + 28 Stage 3 + 30 Stage 4 +
+  23 Stage 5 + 29 Stage 6 + 32 Stage 7 + 30 Stage 8 + 33 Stage 9 + 322
+  Stage 10–18 combined in `tests/test_constraints.py` + 61 Stage 19 in
+  `tests/test_availability.py` + 67 Stage 20 in `tests/test_suitability.py`
+  + 84 Stage 21 in `tests/test_recommendation.py` + 69 Stage 22 in
+  `tests/test_reasons.py` + 81 Stage 23 in `tests/test_scoring.py` + 69
+  Stage 24 in `tests/test_ranking.py` + 79 Stage 25 in
+  `tests/test_allocation.py` + 50 Stage 26 in `tests/test_conservation.py`
+  + 35 Stage 27 in `tests/test_pipeline.py`).
+- Updated `docs/DATA_DICTIONARY.md` (`CampaignBudgetRecommendationResult`/
+  `BudgetReallocationReviewResult` fields; the validation boundary; the
+  final-movement and final-budget policies; the conservation policy; the
+  matching/ordering/Decimal policy; the complete exclusion list),
+  `docs/DECISION_RULES.md` (frozen Stage 27 final deterministic pipeline
+  integration and reporting rule, including the exact dependency order,
+  the exact final-movement and final-budget formulas, the exact
+  conservation and defence-in-depth policies, the exact result models,
+  and the revised Pending section confirming the deterministic core
+  engine is now complete while Streamlit/UI, Gemini explanation, human
+  approval, audit persistence, exports, and Sprint 4 hardening remain
+  pending separate, later sprints), and `docs/TEST_SCENARIOS.md` (28
+  concrete Stage 27 scenarios).

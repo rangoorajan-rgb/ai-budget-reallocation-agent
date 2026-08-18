@@ -1440,21 +1440,133 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Streamlit interface, Gemini integration, approval workflow, audit, exports.
 - Tests for any of the above.
 
+## Development Stage 27 — Final Deterministic Pipeline Integration and Reporting (complete)
+
+- [x] `src/pipeline.py` (new production module — no existing placeholder
+      was scoped for deterministic orchestration; `app.py`, `config.py`,
+      `src/explanations.py`, `src/gemini_analyzer.py`, `src/approval.py`,
+      `src/audit.py`, `src/exports.py` all remain reserved for their own
+      Sprint 3 responsibilities, untouched) —
+      `CampaignBudgetRecommendationResult` (frozen, `extra="forbid"`:
+      `campaign_id`, `campaign_name`, `platform`, `current_budget:
+      Currency`, `recommendation_action`, `allocated_amount: Currency`
+      `>= 0`, `recommended_budget: Currency` `>= 0`, `reason_codes:
+      tuple[ReasonCode, ...]`, `performance_band`, `trend_direction`,
+      `confidence`, `pacing_status`, `reallocation_priority_score: int`
+      `0..100`, `rank: int | None` `>= 1` when present),
+      `BudgetReallocationReviewResult` (frozen, `extra="forbid"`:
+      `review_id`, `campaign_results:
+      tuple[CampaignBudgetRecommendationResult, ...]`,
+      `total_current_budget: Currency` `>= 0`, `total_recommended_budget:
+      Currency` `>= 0`, `conservation: CampaignReallocationConservation`),
+      and `run_budget_reallocation_review(review: ReviewSetup, campaigns:
+      tuple[CampaignInput, ...]) -> BudgetReallocationReviewResult`. This
+      completes the master plan's Sprint 2 "Deterministic Core Engine"
+      goal. No Stage 1–26 production or test module was modified; no enum
+      was added or changed.
+- [x] **Approved orchestration**: calls every already-approved Stage 3–26
+      production function, in their exact frozen dependency order, per
+      campaign then once per portfolio (ranking → allocation →
+      conservation), then assembles final results in the original input
+      order — no formula duplicated, approximated, reopened, or
+      recalculated from an upstream result object.
+- [x] **Approved validation boundary**: `ReviewSetup` and every
+      `CampaignInput` are accepted only already-validated; this stage
+      never reads a CSV, never calls `validate_campaign_csv`, never
+      returns validation issues, and never re-checks campaign-ID
+      uniqueness (already Stage 2's responsibility). An empty campaign
+      tuple is valid and returns an empty portfolio result.
+- [x] **Approved final-movement and final-budget policy**: exactly one
+      unsigned `allocated_amount` per campaign (direction carried only by
+      `recommendation_action`); `Decimal("0.00")` for `HOLD`/`MAINTAIN`
+      and for any directional recommendation with no matching Stage 25
+      allocation record; a zero-funded `INCREASE`/`REDUCE` is never
+      rewritten to `MAINTAIN`/`HOLD` (verified for the real G002 sample
+      result). Final budget: `INCREASE → current_budget +
+      allocated_amount`; `REDUCE → current_budget - allocated_amount`;
+      `MAINTAIN`/`HOLD → current_budget` unchanged — computed only from
+      Stage 25's actual allocated amount, never from raw/effective
+      constraint limits.
+- [x] **Approved conservation policy**: the embedded Stage 26
+      `CampaignReallocationConservation` result is always present,
+      regardless of `is_conserved` — never hidden, gated, or omitted; this
+      stage never raises merely because an allocation is unconserved. A
+      defence-in-depth check — distinct from, and never a replacement
+      for, Stage 26's own invariant — raises exactly
+      `RuntimeError("Conserved allocation must preserve the total
+      campaign budget.")` only if a *conserved* allocation's recomputed
+      portfolio totals fail to match exactly.
+- [x] **Approved matching/ordering**: all cross-collection matching
+      (rank, allocation) is by `campaign_id` value, never tuple position;
+      `campaign_results` preserves the original `campaigns` input order;
+      Stage 24's increase/reduce rankings remain independent, with no
+      global cross-direction rank ever constructed.
+- [x] Plain `Decimal` throughout — never `float`; every addition,
+      subtraction, and portfolio-level sum runs inside an
+      explicitly-scoped `localcontext`, with precision derived from the
+      actual operands' digit counts and collection size, immune to
+      ambient global context mutation — directly extending the corrected
+      discipline established at Stages 25 and 26. Stage 22's ordered
+      `reason_codes` are passed through unchanged; no allocation-specific
+      reason code is ever invented. Fails fast on any unexpected exception
+      or upstream `ValueError` — no `try`/`except`, no retry, no partial
+      result, no campaign ever silently dropped, no input or upstream
+      result object ever mutated.
+- [x] `tests/test_pipeline.py` (new dedicated test file — deliberately
+      distinct from `tests/test_integration.py`, which remains reserved
+      for the later, materially larger AI/UI-inclusive end-to-end flow)
+      — 35 new Stage 27 tests, all passing. `tests/test_conservation.py`
+      unchanged at 50 tests, `tests/test_allocation.py` unchanged at 79
+      tests, `tests/test_ranking.py` unchanged at 69 tests,
+      `tests/test_scoring.py` unchanged at 81 tests,
+      `tests/test_reasons.py` unchanged at 69 tests,
+      `tests/test_recommendation.py` unchanged at 84 tests,
+      `tests/test_suitability.py` unchanged at 67 tests,
+      `tests/test_availability.py` unchanged at 61 tests,
+      `tests/test_constraints.py` unchanged at 322 tests. `tests/test_models.py`
+      (Stage 1) through `tests/test_pacing_interpretation.py` (Stage 9)
+      re-run and confirmed passing — no regression, no existing test
+      module required modification.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`
+      updated.
+
+## Explicitly Out of Scope for Stage 27 (and not yet started)
+
+- Streamlit interface (`app.py`), configuration wiring (`config.py`).
+- Gemini explanation (`src/gemini_analyzer.py`, `src/explanations.py`).
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+- `ACCOUNT_RESERVE_REQUIRED`, `NO_ELIGIBLE_RECIPIENT`, and the remaining
+  ten `ReasonCode` members' trigger conditions (see Stage 22's
+  Explicitly-Out-of-Scope list above).
+- `Confidence.NOT_ASSESSABLE` ownership/trigger and the combined
+  confidence/tracking/pacing assessment question.
+- Sprint 4 hardening and documentation finalization.
+- Tests for any of the above.
+
 ## Next Stage
 
-Stage 27 (not started, scope not yet frozen): requires its own dependency
-and decision-readiness inspection before being frozen, not file-list order.
-Final deterministic integration/reporting is the leading candidate — the
-deterministic ranking → allocation → conservation sequence is now
-complete, and this next stage would consume `CampaignReallocationAllocation`
-(Stage 25) and `CampaignReallocationConservation` (Stage 26) together to
-decide, among other open questions, whether to gate publication on
-`is_conserved` and whether/where final campaign budgets
-(`current_budget ± allocated amount`) are computed. After that, Streamlit/UI
-and Gemini explanation remain the rest of the planned sequence, per the
-master plan's own Sprint 2/Sprint 3 boundary (deterministic core first,
-AI explanation only after). The remaining `ReasonCode` members' trigger
-conditions (see Stage 26's Explicitly-Out-of-Scope list above) remain
-open, with two of the four blocking categories (performance severity,
-constraint binding-source identity) each potentially warranting their own
-dedicated stage before further `ReasonCode` coverage is possible.
+**The deterministic core engine (Sprint 2) is now complete.** Stage 27
+delivered the final missing piece — one reusable, well-typed, tested
+entry point wiring every Stage 1–26 responsibility together — satisfying
+the master plan's Sprint 2 exit criteria in full.
+
+Sprint 3 ("Explanation, Approval, and Interface") is next, per the
+master plan's own frozen sequence, requiring its own dependency and
+decision-readiness inspection(s) before any of it is frozen: the
+Streamlit interface (`app.py`, `config.py`), the Gemini explanation layer
+(`src/gemini_analyzer.py`, `src/explanations.py` — explanation-only,
+operating on `BudgetReallocationReviewResult`'s already-locked,
+already-computed values, per the frozen human-in-the-loop boundary), the
+human approval/rejection workflow (`src/approval.py`), immutable JSON
+audit recording (`src/audit.py`), and CSV export generation
+(`src/exports.py`) — culminating in the full end-to-end integration test
+(`tests/test_integration.py`). The remaining `ReasonCode` members'
+trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
+remain open, with two of the four blocking categories (performance
+severity, constraint binding-source identity) each potentially
+warranting their own dedicated stage before further `ReasonCode` coverage
+is possible — independent of, and not blocking, Sprint 3's own start.
