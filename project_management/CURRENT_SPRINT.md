@@ -1,9 +1,11 @@
 # Current Sprint
 
-**Active sprint:** Sprint 3 — Explanation, Approval, and Interface (not yet started)
-**Status:** Sprint 2 — Deterministic Core Engine is complete. Development Stages 1–27 are
-complete; Stage 27 completed the deterministic core engine. Verified baseline:
-`1258 passed`. Sprint 3 is next; no Sprint 3 implementation has yet been completed.
+**Active sprint:** Sprint 3 — Explanation, Approval, and Interface (in progress)
+**Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
+Sprint 3, Development Stage 28 (deterministic Streamlit review shell) is complete.
+Verified baseline: `1289 passed` (1258 Stage 1–27 regression + 31 Stage 28). Sprint 3 is
+not yet complete — Gemini explanation, human approval, audit recording, exports, and
+configuration wiring remain unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -1549,26 +1551,117 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Sprint 4 hardening and documentation finalization.
 - Tests for any of the above.
 
+## Development Stage 28 — Deterministic Streamlit Review Shell (complete)
+
+- [x] `app.py` (placeholder filled in for the first time — the Sprint 1
+      placeholder Streamlit entry point) — a deterministic-only Streamlit
+      review shell. Collects raw `ReviewSetup` input and an uploaded
+      campaign CSV, calls the existing Stage 2 `validate_review_setup`/
+      `validate_campaign_csv` functions, displays every validation issue,
+      and — only when the frozen execution-gating policy permits — calls
+      the existing Stage 27 `run_budget_reallocation_review` and displays
+      the locked, read-only `BudgetReallocationReviewResult`. No
+      validation rule, business formula, or Stage 1–27 calculation is
+      reimplemented; `app.py` only calls the three existing functions and
+      renders their already-computed output. `config.py`,
+      `src/gemini_analyzer.py`, `src/explanations.py`, `src/approval.py`,
+      `src/audit.py`, `src/exports.py` remain untouched Sprint 3
+      placeholders.
+- [x] **Frozen execution-gating policy** (all seven required
+      simultaneously; warnings never block): the form was explicitly
+      submitted; `validate_review_setup` returned a non-`None` review with
+      no errors; a CSV file was supplied and decoded as UTF-8; the
+      campaign validation report contains no errors (a CSV with any
+      error — even alongside otherwise-valid rows — never runs a partial
+      portfolio); and `valid_campaigns` is non-empty. Implemented as a
+      pure predicate, `_may_run_pipeline`, decoupled from all Streamlit
+      rendering so it is directly unit-testable. Does not change the
+      lower-level pipeline's own valid empty-tuple behavior — this is a
+      UI-level policy only.
+- [x] **Submission and session-state policy**: an explicit
+      `st.form_submit_button` ("Run deterministic review") gates every
+      pipeline invocation — `_handle_submission` is only ever called
+      inside `if submitted:`, confirmed by an AST test, so an ordinary
+      Streamlit rerun never recomputes the pipeline. The locked result is
+      held under the session-state key `locked_review_result`, explicitly
+      cleared to `None` at the start of every new submission before
+      validation begins, so a failed resubmission never leaves a stale
+      result visible as though it belonged to the new submission. No
+      `st.cache_data`/`st.cache_resource` is used.
+- [x] **Pipeline-exception policy**: the deterministic pipeline itself
+      remains unchanged and fail-fast (no `try`/`except` inside
+      `run_budget_reallocation_review`). `app.py` adds exactly one
+      deliberate `except Exception` at the Streamlit UI boundary around
+      the pipeline call — on an unexpected exception it keeps
+      `locked_review_result` empty, shows a clear `st.error` including the
+      exception's own message, and does not retry, reclassify, wrap in a
+      new exception type, or fabricate a result.
+- [x] **Locked-result rendering**: read-only. Displays portfolio-level
+      `review_id`, `total_current_budget`, `total_recommended_budget`, and
+      every `conservation` field; every campaign result in original
+      pipeline order (never sorted) with all fourteen
+      `CampaignBudgetRecommendationResult` fields, ordered `reason_codes`
+      preserved, and a missing `rank` shown as "Not ranked" rather than a
+      fabricated number. No control edits any locked value. Decimal
+      values are formatted via `format(value, "f")` — no `float`
+      conversion anywhere in the module (AST-verified).
+- [x] **Conservation rendering**: always visible for a successful result.
+      A conserved result shows a clear success state; an unconserved
+      result shows a prominent error state, states plainly that the
+      allocation is not conserved, and continues to display the full
+      locked result for inspection — never concealed, repaired,
+      rebalanced, or rerun, and with no approval control regardless of
+      conservation status (Stage 28 has none at all).
+- [x] **Explicitly excluded**: Gemini/`google-generativeai`, `config`,
+      `src.explanations`, `src.approval`, `src.audit`, `src.exports` are
+      neither imported nor referenced (AST-verified); no explanation,
+      approval, audit, or export control exists anywhere on the page.
+- [x] `tests/test_app.py` (new dedicated test file) — 31 new Stage 28
+      tests, all passing, using Streamlit `AppTest` (confirmed available
+      and sufficient in the installed `streamlit==1.59.2`, including
+      programmatic `file_uploader` population via `set_value`/`upload` —
+      no widget-boundary mocking was needed). The real deterministic
+      chain is exercised for every successful-path test; the only
+      deliberate mock is a single exception-path test that replaces
+      `run_budget_reallocation_review` to verify UI failure handling,
+      which cannot otherwise be triggered by any legitimately valid input.
+      `tests/test_integration.py` remains the untouched Sprint 3 full-flow
+      placeholder (AST-confirmed: no function or class definitions).
+      Stage 1–27 regression re-run and confirmed passing unchanged at
+      1258 tests. Full suite: 1289 tests passing (1258 + 31).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 28 (and not yet started)
+
+- `config.py` — configuration/secret wiring (env vars, Gemini
+  availability). No secret is needed by a deterministic-only shell.
+- Gemini explanation (`src/gemini_analyzer.py`, `src/explanations.py`).
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+- Any visual/styling design beyond a clear, functional page structure.
+- Approval granularity, rejection-comment requirement, and audit-record
+  content — open questions reserved for their own later stages.
+
 ## Next Stage
 
-**The deterministic core engine (Sprint 2) is now complete.** Stage 27
-delivered the final missing piece — one reusable, well-typed, tested
-entry point wiring every Stage 1–26 responsibility together — satisfying
-the master plan's Sprint 2 exit criteria in full.
+**Sprint 3 is underway; only Stage 28 is complete — Sprint 3 as a whole
+is not.** Stage 28 delivered the first Sprint 3 increment: a
+deterministic-only Streamlit shell with no forward dependency on
+configuration, Gemini, approval, audit, or exports.
 
-Sprint 3 ("Explanation, Approval, and Interface") is next, per the
-master plan's own frozen sequence, requiring its own dependency and
-decision-readiness inspection(s) before any of it is frozen: the
-Streamlit interface (`app.py`, `config.py`), the Gemini explanation layer
-(`src/gemini_analyzer.py`, `src/explanations.py` — explanation-only,
-operating on `BudgetReallocationReviewResult`'s already-locked,
-already-computed values, per the frozen human-in-the-loop boundary), the
-human approval/rejection workflow (`src/approval.py`), immutable JSON
-audit recording (`src/audit.py`), and CSV export generation
-(`src/exports.py`) — culminating in the full end-to-end integration test
+The smallest dependency-ordered remaining Sprint 3 work, per the Stage 28
+read-only inspection, in provisional order (each still requires its own
+dependency/decision-readiness inspection before being frozen):
+configuration foundation (`config.py` — env-var loading, Gemini-
+availability flag, secret-redaction discipline); the Gemini explanation
+service (`src/explanations.py` + `src/gemini_analyzer.py`); wiring
+explanation display into the shell; human approval
+(`src/approval.py`); audit persistence (`src/audit.py`); exports
+(`src/exports.py`); and finally the full end-to-end integration test
 (`tests/test_integration.py`). The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
-remain open, with two of the four blocking categories (performance
-severity, constraint binding-source identity) each potentially
-warranting their own dedicated stage before further `ReasonCode` coverage
-is possible — independent of, and not blocking, Sprint 3's own start.
+remain open and independent of this sequence. Sprint 4 remains deferred.

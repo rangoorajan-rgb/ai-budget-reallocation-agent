@@ -1,10 +1,11 @@
 # Data Dictionary
 
-> Sprint 1, Development Stage 27 (adds the final deterministic
+> Sprint 3, Development Stage 28 (adds the deterministic-only Streamlit
+> review shell, `app.py`, consuming Sprint 2's Stage 27 final deterministic
 > responsibility — end-to-end pipeline orchestration and portfolio
 > reporting — `BudgetReallocationReviewResult`/
-> `CampaignBudgetRecommendationResult` — from `src/pipeline.py`,
-> completing the master plan's Sprint 2 "Deterministic Core Engine" goal
+> `CampaignBudgetRecommendationResult` — from `src/pipeline.py`, which
+> completed the master plan's Sprint 2 "Deterministic Core Engine" goal
 > — to the Stage 1 enumerations, numerical constants, core input models,
 > CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4
 > pacing facts, Stage 5 performance classification, Stage 6 trend
@@ -1416,6 +1417,45 @@ immune to ambient global context mutation.
 constraint capacities, availability/suitability objects, tracking status,
 validation issues, reserve, campaign count, timestamps, version fields,
 and any formal audit-trace object.
+
+## Deterministic Streamlit Review Shell (Stage 28, `app.py`)
+
+Introduces **no new Pydantic model**. `app.py` is a pure consumer of already-frozen
+models — `ReviewSetup`, `CampaignInput`, `ValidationIssue`, `ValidationReport`,
+`BudgetReallocationReviewResult`, `CampaignBudgetRecommendationResult`,
+`CampaignReallocationConservation` — and renders their fields directly.
+
+**Session state.** One key, `locked_review_result` (`str`, module constant
+`app.RESULT_STATE_KEY`), holding the last successfully computed
+`BudgetReallocationReviewResult`, or `None`/absent when no successful submission has
+completed yet. Cleared to `None` at the start of every new form submission, before
+validation begins.
+
+**Raw review-setup input mapping** (built by `_build_raw_review_setup`, passed directly
+to `validate_review_setup`): `review_id`, `review_date`, `period_start`, `period_end`,
+`reviewer_name`, `approved_monthly_budget` (raw string, never `float`),
+`initial_account_reserve` (raw string, never `float`) are always present;
+`default_max_change_percentage` (raw string) and `review_notes` are present only when
+their widget's text is non-blank, so `ReviewSetup`'s own defaults apply otherwise.
+
+**Locked-result display mapping** (`_campaign_result_row`, one row per
+`CampaignBudgetRecommendationResult`, in original pipeline order): `campaign_id`,
+`campaign_name`, `platform` (`.value`), `current_budget` (`format(value, "f")`),
+`recommendation_action` (`.value`), `allocated_amount` (`format(value, "f")`),
+`recommended_budget` (`format(value, "f")`), `reason_codes` (comma-joined `.value`s, in
+order), `performance_band` (`.value`), `trend_direction` (`.value`), `confidence`
+(`.value`), `pacing_status` (`.value`), `reallocation_priority_score` (`int`), `rank`
+(`str(rank)` or the literal string `"Not ranked"` when absent — never a fabricated
+number).
+
+**Portfolio-level display fields**: `review_id`, `total_current_budget`,
+`total_recommended_budget`, `conservation.total_increase_allocated`,
+`conservation.total_decrease_allocated`, `conservation.net_change`,
+`conservation.is_conserved` — all shown unconditionally for a successful result, every
+Decimal formatted via `format(value, "f")`.
+
+**Excluded from Stage 28 entirely**: `config.py`, any Gemini input/output model, any
+approval-decision model, any audit-record model, any export format — none exists yet.
 
 ## Derived Fields
 

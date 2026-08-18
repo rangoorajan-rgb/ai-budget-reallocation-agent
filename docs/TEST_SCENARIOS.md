@@ -1149,6 +1149,31 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 27 | `src/pipeline.py` | Calls every required Stage 3–26 production function (AST-verified); never imports `src.validation`, `src.gemini_analyzer`, `src.explanations`, `src.approval`, `src.audit`, `src.exports`, Streamlit, or a Gemini SDK (AST-verified). |
 | 28 | Module attributes | No `run_budget_reallocation_reviews` batch wrapper exists. |
 
+## Deterministic Streamlit Review Shell Scenarios (Stage 28, `app.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | Initial page load, no submission | Renders without exception; no pipeline invocation; no locked result in session state; no dataframe or error/success elements shown. |
+| 2 | Every `ReviewSetup` field | A widget exists for `review_id`, `review_date`, `period_start`, `period_end`, `reviewer_name`, `approved_monthly_budget`, `initial_account_reserve`, `default_max_change_percentage`, `review_notes`. |
+| 3 | Blank optional review fields (`default_max_change_percentage`, `review_notes`) | Omitted from the raw mapping passed to `validate_review_setup`, so `ReviewSetup`'s own defaults apply — never a substitute default invented in `app.py`. |
+| 4 | No CSV file supplied, form submitted | Visible `st.error`; pipeline never invoked; `locked_review_result` is `None`. |
+| 5 | Invalid `ReviewSetup` input (e.g. blank `review_id`/`reviewer_name`) | Every issue from the real `validate_review_setup` call is rendered, in its original order; execution blocked. |
+| 6 | Campaign CSV with one valid row and one malformed row | Every issue rendered; execution blocked entirely — no partial portfolio, even though one row was valid. |
+| 7 | A `ValidationReport` with only a `WARNING`-severity issue and a non-empty `valid_campaigns` | `_may_run_pipeline` returns `True` — warnings never block execution. |
+| 8 | A `ValidationReport` with no issues and an empty `valid_campaigns` | `_may_run_pipeline` returns `False` — blocked at the UI boundary, independent of the (currently unreachable via real CSV) `is_valid` value. |
+| 9 | Valid `ReviewSetup` input and the real `data/sample_campaigns.csv` | The real `run_budget_reallocation_review` chain is invoked; exact totals `total_current_budget=11700.00`, `total_recommended_budget=11700.00`; G002 remains `INCREASE` with `allocated_amount=0.00`, `rank=1`, `recommended_budget` unchanged; G001/M001/G003 show `rank="Not ranked"`; ordered `reason_codes` preserved exactly. |
+| 10 | A successful result's conservation | `conservation.is_conserved is True` shown as a clear success state. |
+| 11 | A real `CampaignReallocationConservation(is_conserved=False, ...)` fixture rendered directly | Shown as a prominent error state stating the allocation is not conserved; no success state; nothing repaired, rebalanced, or rerun. |
+| 12 | `run_budget_reallocation_review` raising an unexpected exception | Visible `st.error` including the exception's own message; `locked_review_result` stays `None`; no retry, no reclassification, no fabricated result. |
+| 13 | A successful submission, then a second submission with invalid input | The previously stored successful result is cleared (`None`) before the new submission's own validation begins. |
+| 14 | A successful submission, then a bare rerun with no new form-submit click | `submit_review` button value is `False`; the stored locked result is unchanged — the pipeline is not recomputed. |
+| 15 | Campaign rows supplied in a non-alphabetical order | `campaign_results` and the rendered table preserve that exact original order. |
+| 16 | An uploaded file containing invalid UTF-8 bytes | Visible decode-failure `st.error`; `validate_campaign_csv` and the pipeline are never called. |
+| 17 | `_decode_csv_upload` given a fake uploaded-file object | Never calls `.close()` on it; only reads via `.getvalue()`. |
+| 18 | Module source | No `float` referenced anywhere (AST-verified); no arithmetic operator beyond type-union annotations (AST-verified); no Stage 1–27 production function reimplemented; no attribute assignment (no model mutation); `_handle_submission` called only inside `if submitted:` (AST-verified). |
+| 19 | Module imports/references | Never imports or references `config`, Gemini/`google-generativeai`, `src.explanations`, `src.approval`, `src.audit`, `src.exports` (AST-verified). |
+| 20 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
+
 ## Approval / Audit Scenarios
 
-> Pending a later Sprint 1 stage.
+> Pending a later Sprint 3 stage.

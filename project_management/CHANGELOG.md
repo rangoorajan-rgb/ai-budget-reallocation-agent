@@ -2386,3 +2386,65 @@ All notable changes to this project are documented in this file.
   corrected to "Sprint 2, Development Stage N", including the Stage 1 fix note above. No
   stage number, implementation behaviour, test result, or code changed as part of this
   correction; Sprint 1 remains, unchanged, the pre-development foundation phase.
+
+## [Unreleased] — 2026-08-18 — Sprint 3, Development Stage 28
+
+### Added
+- Sprint 3, Development Stage 28: filled in the Sprint 1 placeholder `app.py` as a
+  deterministic-only Streamlit review shell — the first Sprint 3 implementation stage.
+  Collects raw `ReviewSetup` input (`review_id`, `review_date`, `period_start`,
+  `period_end`, `reviewer_name`, `approved_monthly_budget`, `initial_account_reserve`,
+  `default_max_change_percentage`, `review_notes`) and an uploaded campaign CSV, calls the
+  existing `validate_review_setup`/`validate_campaign_csv` (Stage 2) and
+  `run_budget_reallocation_review` (Stage 27) functions, and renders their already-computed
+  output. Reimplements no validation rule and no Stage 1–27 business formula. Currency and
+  percentage text inputs are passed through as raw strings straight into the existing
+  validator, never converted through `float`.
+- Sprint 3, Development Stage 28: frozen execution-gating policy implemented as a pure,
+  independently-testable predicate, `_may_run_pipeline` — the pipeline runs only when the
+  form was explicitly submitted, review-setup validation returned a non-`None` review with
+  no errors, a CSV was supplied and decoded as UTF-8, the campaign validation report
+  contains no errors, and `valid_campaigns` is non-empty. A campaign CSV with any error —
+  even alongside otherwise-valid rows — blocks the entire portfolio; warnings alone never
+  block execution. Does not alter `run_budget_reallocation_review`'s own valid empty-tuple
+  behavior.
+- Sprint 3, Development Stage 28: explicit `st.form_submit_button` submission and
+  session-state policy — `_handle_submission` runs only inside `if submitted:` (AST-
+  verified), so an ordinary rerun never recomputes the pipeline; the locked result is held
+  under session-state key `locked_review_result`, cleared to `None` at the start of every
+  new submission before validation begins. One deliberate `except Exception` at the
+  Streamlit UI boundary around the pipeline call keeps `locked_review_result` empty and
+  shows an `st.error` with the exception's own message on an unexpected failure, without
+  retrying, reclassifying, or fabricating a result; `run_budget_reallocation_review` itself
+  remains unchanged and fail-fast.
+- Sprint 3, Development Stage 28: read-only locked-result rendering — portfolio totals and
+  every `conservation` field, plus every campaign result in original pipeline order (never
+  sorted) with all fourteen `CampaignBudgetRecommendationResult` fields, ordered
+  `reason_codes` preserved, and a missing `rank` shown as "Not ranked" rather than a
+  fabricated number. Conservation is always visible for a successful result — an
+  unconserved result is prominently flagged and remains fully inspectable, never concealed,
+  repaired, rebalanced, or rerun; Stage 28 has no approval controls at all. All Decimal
+  values are formatted via `format(value, "f")`; `float` is never referenced anywhere in
+  the module.
+- Sprint 3, Development Stage 28: added a new dedicated test file, `tests/test_app.py` — 31
+  new tests using Streamlit `AppTest` (confirmed available and sufficient in the installed
+  `streamlit==1.59.2`, including programmatic `file_uploader` population, so no
+  widget-boundary mocking was needed). The real deterministic chain is exercised for every
+  successful-path test; the sole deliberate mock replaces `run_budget_reallocation_review`
+  in one dedicated exception-path test. Covers: widget presence and raw-input assembly;
+  the execution-gating predicate (including warnings-non-blocking and
+  empty-valid-campaigns-blocked cases); ordered validation-issue rendering for both invalid
+  review setup and invalid/partially-valid CSV uploads; the exact real sample-data
+  portfolio result (G001/M001/G002/G003, totals `11700.00`/`11700.00`, G002 remaining
+  `INCREASE` with `allocated_amount=0.00` and `rank=1`); unranked-campaign display;
+  conserved and unconserved conservation rendering; the pipeline-exception UI boundary;
+  clear-before-validate and no-recompute-on-plain-rerun session-state behavior; Decimal-only
+  formatting; non-alphabetical input-order preservation; invalid-UTF-8 upload handling; and
+  AST-based isolation from Gemini/`config`/`src.explanations`/`src.approval`/`src.audit`/
+  `src.exports` and from any duplicated Stage 1–27 formula or model mutation.
+  `tests/test_integration.py` remains the untouched Sprint 3 full-flow placeholder
+  (AST-confirmed: no function or class definitions). Stage 1–27 regression re-confirmed
+  unchanged at 1258 tests. Full suite: 1289 tests passing (1258 + 31).
+- Updated `docs/DATA_DICTIONARY.md` (Stage 28's consumed-model mapping and session-state
+  key), `docs/DECISION_RULES.md` (frozen Stage 28 execution-gating, submission/session-state,
+  exception, and rendering policies), and `docs/TEST_SCENARIOS.md` (Stage 28 scenarios).

@@ -2095,6 +2095,62 @@ final allocated movement.
   `tests/test_integration.py`, which remains reserved for the later,
   materially larger AI/UI-inclusive end-to-end flow.
 
+## Stage 28 — Deterministic Streamlit Review Shell
+
+**Rule.** `app.py` (Sprint 3, Development Stage 28) is a deterministic-only Streamlit
+review shell. It collects raw `ReviewSetup` input and an uploaded campaign CSV, calls the
+existing `validate_review_setup`, `validate_campaign_csv` (Stage 2), and
+`run_budget_reallocation_review` (Stage 27) functions unmodified, and renders their
+already-computed output. It reimplements no validation rule and no Stage 1–27 business
+formula; every currency/percentage input is passed through as a raw string directly into
+the existing validator, never converted through `float`.
+
+**Excluded.** `config.py`, Gemini/`google-generativeai`, `src.explanations`,
+`src.approval`, `src.audit`, `src.exports` are neither imported nor referenced. Stage 28
+adds no explanation, approval, audit, or export control.
+
+**Frozen execution-gating policy.** The pipeline runs only when all seven conditions hold
+simultaneously: (1) the form was explicitly submitted; (2) `validate_review_setup`
+returned a non-`None` review; (3) the review validation report contains no errors; (4) a
+CSV file was supplied; (5) CSV decoding succeeded; (6) the campaign validation report
+contains no errors; (7) `valid_campaigns` is non-empty. Warnings alone never block
+execution. A campaign CSV containing any error — even alongside otherwise-valid rows —
+never runs a partial portfolio; the whole upload must be corrected and resubmitted. An
+empty `valid_campaigns` collection is blocked at the UI boundary with a clear message,
+without changing `run_budget_reallocation_review`'s own valid empty-tuple behavior.
+Implemented as one pure predicate, `_may_run_pipeline`, independent of any Streamlit
+rendering.
+
+**Submission and session-state policy.** An explicit `st.form_submit_button` ("Run
+deterministic review") is the sole trigger for pipeline execution; `_handle_submission` is
+never called unconditionally, so an ordinary Streamlit rerun never recomputes the
+pipeline. The locked result is held under session-state key `locked_review_result`,
+explicitly cleared to `None` at the start of every new submission, before validation
+begins, so a failed resubmission never leaves a stale result visible as though it
+belonged to the new submission. No `st.cache_data`/`st.cache_resource` is used.
+
+**Pipeline-exception policy.** `run_budget_reallocation_review` itself remains unchanged
+and fail-fast (no internal `try`/`except`). `app.py` adds exactly one deliberate `except
+Exception` at the Streamlit UI boundary, around the pipeline call only. On an unexpected
+exception: `locked_review_result` stays empty, a clear `st.error` is shown including the
+exception's own message, and the exception is never retried, reclassified, wrapped in a
+new business exception type, or swallowed into a fabricated result.
+
+**Locked-result rendering.** Read-only; no control edits any locked value. Portfolio-level
+`review_id`, `total_current_budget`, `total_recommended_budget`, and every `conservation`
+field are shown. Every campaign result is shown in original pipeline order (never
+sorted) with all fourteen `CampaignBudgetRecommendationResult` fields; ordered
+`reason_codes` are preserved in order; a missing `rank` is shown as "Not ranked" rather
+than a fabricated number; a zero-funded `INCREASE`/`REDUCE` is never relabeled as
+`MAINTAIN`/`HOLD`. Every Decimal value is formatted via `format(value, "f")` — `float` is
+never referenced anywhere in the module.
+
+**Conservation rendering.** Always visible for a successful result. A conserved result
+shows a clear success state. An unconserved result shows a prominent error state, states
+plainly that the allocation is not conserved, and continues to display the full locked
+result for inspection — never concealed, repaired, rebalanced, or rerun. Stage 28 has no
+approval controls at all, regardless of conservation status.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -2173,6 +2229,11 @@ final allocated movement.
 - Stage 27 resolved final deterministic integration and portfolio
   reporting, including final campaign-budget computation and always-exposed
   (never gated/hidden) conservation status (see above). The deterministic
-  core engine is now complete. Streamlit/UI, Gemini explanation, human
+  core engine is now complete.
+- Stage 28 resolved the first Sprint 3 increment: a deterministic-only
+  Streamlit review shell consuming Stage 2 validation and the Stage 27
+  pipeline (see above). Configuration wiring, Gemini explanation, human
   approval, audit persistence, exports, and Sprint 4 hardening all remain
-  pending later, separate sprints — none is implemented by Stage 27.
+  pending later, separate stages/sprints — none is implemented by Stage
+  28. Approval granularity, rejection-comment requirement, and audit-record
+  content also remain open, reserved for their own later stages.

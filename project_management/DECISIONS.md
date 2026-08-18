@@ -2530,3 +2530,89 @@ completed Sprint 2 in full. Sprint 3 ("Explanation, Approval, and Interface") is
 is a labelling correction only: no stage was renumbered, no technical decision's substance
 changed, and no code or test was modified.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 28: deterministic-only Streamlit shell boundary
+
+**Decision:** Stage 28 fills in the `app.py` placeholder as a
+deterministic-only Streamlit review shell: it collects `ReviewSetup`
+input and a campaign CSV, calls the existing `validate_review_setup`,
+`validate_campaign_csv`, and `run_budget_reallocation_review` functions,
+and renders their output. It reimplements no validation rule and no
+Stage 1–27 business formula. `config.py` is deliberately **not** touched
+in Stage 28 — a deterministic-only shell needs no secret, and giving
+`config.py` empty content now would invent scope ahead of need. Gemini,
+`src.explanations`, `src.approval`, `src.audit`, and `src.exports` are
+neither imported nor referenced (AST-verified test coverage). This
+matches the Stage 28 read-only inspection's recommended option: the
+deterministic Streamlit shell has zero forward dependency on
+configuration, Gemini, approval, audit, or exports, unlike every other
+compared option.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 28: frozen execution-gating policy
+
+**Decision:** The pipeline runs only when all seven conditions hold
+simultaneously: the form was explicitly submitted; `validate_review_setup`
+returned a non-`None` review with no errors; a CSV file was supplied and
+decoded as UTF-8; the campaign validation report contains no errors; and
+`valid_campaigns` is non-empty. A campaign CSV containing any
+error — even alongside otherwise-valid rows — never runs a partial
+portfolio; the entire upload must be corrected and resubmitted. An empty
+`valid_campaigns` collection is blocked at the UI boundary with a clear
+message, distinct from and without changing `run_budget_reallocation_review`'s
+own valid empty-tuple behavior. Warnings alone never block execution.
+Implemented as a single pure predicate, `_may_run_pipeline`, so the
+policy is directly unit-testable independent of any Streamlit rendering.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 28: submission, session-state, and exception policy
+
+**Decision:** An explicit `st.form_submit_button` ("Run deterministic
+review") is the sole trigger for `_handle_submission`; it is never called
+unconditionally (AST-verified), so an ordinary Streamlit rerun never
+recomputes the pipeline. The locked result lives under session-state key
+`locked_review_result`, explicitly cleared to `None` at the very start of
+every new submission, before validation begins — so a failed
+resubmission never leaves a stale result visible as though it belonged to
+the new submission. No `st.cache_data`/`st.cache_resource` is used; the
+explicit form and session-state boundary are sufficient. `app.py` adds
+exactly one deliberate `except Exception` at the Streamlit UI boundary,
+around the pipeline call only — `run_budget_reallocation_review` itself
+remains unchanged and fail-fast (no internal `try`/`except`). On an
+unexpected exception, `app.py` keeps `locked_review_result` empty, shows
+an `st.error` including the exception's own message, and does not retry,
+reclassify, wrap in a new exception type, or fabricate a result.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 28: locked-result and conservation rendering
+
+**Decision:** The locked result is rendered read-only, in original
+pipeline order (never sorted), with every `CampaignBudgetRecommendationResult`
+field displayed, ordered `reason_codes` preserved, and a missing `rank`
+shown as "Not ranked" rather than a fabricated number. No control edits
+any locked value. `conservation` is always visible for a successful
+result: a conserved result shows a clear success state; an unconserved
+result shows a prominent error state, states plainly that the allocation
+is not conserved, and continues to display the full locked result for
+inspection — never concealed, repaired, rebalanced, or rerun. Stage 28
+has no approval controls at all, regardless of conservation status. All
+Decimal values are formatted via `format(value, "f")`; `float` is never
+referenced anywhere in the module (AST-verified).
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 28: tests/test_app.py, not tests/test_integration.py
+
+**Decision:** Stage 28 tests are added in a new, dedicated
+`tests/test_app.py`, using Streamlit `AppTest` — confirmed available and
+sufficient in the installed `streamlit==1.59.2`, including programmatic
+`file_uploader` population, so no widget-boundary mocking was needed.
+`tests/test_integration.py` remains the untouched Sprint 3 full-flow
+placeholder, reserved for the complete upload → validate → assess →
+recommend → lock → explain → approve → audit → export flow once every
+component exists. The real deterministic chain (`validate_review_setup`,
+`validate_campaign_csv`, `run_budget_reallocation_review`) is exercised
+for every successful-path test; the sole deliberate mock replaces
+`run_budget_reallocation_review` in one dedicated exception-path test, to
+verify the UI's failure handling for a scenario no legitimately valid
+input can trigger through the real chain.
+**Status:** Frozen.
