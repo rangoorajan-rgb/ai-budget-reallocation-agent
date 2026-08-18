@@ -2502,3 +2502,76 @@ All notable changes to this project are documented in this file.
   values), `docs/DECISION_RULES.md` (frozen Stage 29 source-precedence, normalization,
   secret-protection, import/side-effect, deterministic-independence, and deferred-SDK
   policies), and `docs/TEST_SCENARIOS.md` (Stage 29 scenarios).
+
+## [Unreleased] — 2026-08-18 — Sprint 3, Development Stage 30
+
+### Added
+- Sprint 3, Development Stage 30: filled in the Sprint 1 placeholder `src/explanations.py`
+  as a pure, deterministic boundary between an already-locked pipeline result and whatever
+  future stage actually calls Gemini — `CampaignExplanationPayload`,
+  `PortfolioExplanationPayload`, `ExplanationPrompt` (all frozen, `extra="forbid"`), and
+  exactly five public functions: `build_campaign_explanation_payload`,
+  `build_portfolio_explanation_payload`, `serialize_explanation_payload`,
+  `build_campaign_explanation_prompt`, `build_portfolio_explanation_prompt` — no
+  orchestration wrapper. Never calls Gemini; never imports `config`, `GeminiConfig`,
+  `is_gemini_available`, or `GEMINI_API_KEY`; never imports Streamlit or any Gemini SDK;
+  never mutates a locked result. `app.py` is untouched.
+- Sprint 3, Development Stage 30: frozen the Gemini boundary and the authorized-field
+  set — `CampaignExplanationPayload` copies exactly fourteen authorized campaign fields
+  directly from one locked `CampaignBudgetRecommendationResult`;
+  `PortfolioExplanationPayload` copies `review_id`, both totals, and all four conservation
+  fields directly from `result.conservation`, never recalculated. Raw CSV data,
+  `ReviewSetup.review_notes`, raw metrics, validation issues, intermediate constraints,
+  availability/suitability, the API key, and audit data are all excluded and unreachable.
+  Campaign and portfolio payloads are structurally separate — no sibling-campaign data in
+  one, no campaign list in the other, and no function loops over the full campaign
+  collection to build a combined prompt, structurally preventing unsupported
+  cross-campaign comparison.
+- Sprint 3, Development Stage 30: canonical, deterministic, compact JSON serialization —
+  key order matches Pydantic model field declaration order (never sorted),
+  `ensure_ascii=False`, separators exactly `(",", ":")`, no indentation. `Decimal`/
+  `Currency` values serialize as fixed-point strings via `format(value, "f")` (reusing the
+  exact convention proven in `app.py` at Stage 28) — never a JSON number, never `float`,
+  never scientific notation. Enums serialize to `.value`; tuples to JSON arrays, order
+  preserved; `None` to `null`. Identical input produces byte-for-byte identical output.
+- Sprint 3, Development Stage 30: one fixed, shared system-instruction constant — identical
+  regardless of payload contents, containing no campaign/portfolio data, API key, SDK
+  detail, model name, or generation parameter — states that supplied values are locked and
+  authoritative, that the assistant explains but never decides, that reason-code order is
+  authoritative, that a missing rank means "not ranked" (never rank zero), that a
+  zero-funded directional action is not `MAINTAIN`/`HOLD`, and that an unconserved
+  portfolio must be disclosed plainly, never concealed or repaired. User content contains
+  one fixed sentence plus the canonical JSON between fixed
+  `BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` markers — no field interpolated individually into
+  prose. `campaign_name` is treated as untrusted data; JSON escaping plus system/user
+  separation are documented as containment, not elimination, of prompt injection — the
+  decisive protection remains structural: no Gemini output ever has a path back into a
+  locked deterministic model.
+- Sprint 3, Development Stage 30: the output contract (response parsing, a response model,
+  structured output, retries, timeouts, fallback explanations, API-error handling,
+  persistence) and the `google-generativeai`/`google-genai` dependency mismatch recorded at
+  Stage 29 both remain explicitly deferred to the future Gemini API-integration stage.
+- Sprint 3, Development Stage 30: added a new dedicated test file,
+  `tests/test_explanations.py` — 93 new tests, all passing. Real Stage 27 sample-data
+  results used for primary success-path coverage (including the G002 zero-funded-INCREASE
+  and G001 unranked cases); hand-built frozen fixtures used only for states unreachable
+  through the real pipeline (an unconserved portfolio, extreme 28-significant-digit Decimal
+  magnitudes, an empty portfolio). Covers: exact model schemas, `extra="forbid"`, frozen
+  behavior, and exact function signatures; authorized-field copying with no recalculation
+  and no unauthorized field; missing-rank and reason-code-order preservation; zero-funded
+  `INCREASE` retained; no input mutation; canonical JSON (key order, separators, no
+  indentation, enum/tuple/`None`/Decimal serialization, no float, no scientific notation,
+  byte-for-byte determinism); shared fixed system instruction containing every frozen
+  boundary rule and no campaign/portfolio/secret/SDK data; single-JSON-block user content;
+  adversarial-campaign-name containment (quotes, backslashes, braces, newlines, Markdown,
+  Unicode, literal marker text, instruction-like phrasing) with exact JSON round-tripping
+  and structural marker-line safety; unconserved and empty-portfolio normal-state handling;
+  and AST-based isolation from `config`, secrets, Streamlit, any Gemini SDK, the network,
+  timestamps, randomness, logging, and broad exception handling. No Gemini output
+  fabricated; no SDK mocked. `tests/test_app.py`, `tests/test_config.py`, and
+  `tests/test_integration.py` confirmed unmodified. Stage 1–29 regression re-confirmed
+  unchanged at 1334 tests. Full suite: 1427 tests passing (1334 + 93).
+- Updated `docs/DATA_DICTIONARY.md` (the three payload/prompt models' fields and Stage 30's
+  excluded values), `docs/DECISION_RULES.md` (frozen Stage 30 Gemini-boundary, granularity,
+  serialization, prompt-architecture, injection-containment, and deferred-output-contract
+  policies), and `docs/TEST_SCENARIOS.md` (Stage 30 scenarios).

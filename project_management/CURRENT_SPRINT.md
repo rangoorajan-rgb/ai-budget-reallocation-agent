@@ -2,10 +2,12 @@
 
 **Active sprint:** Sprint 3 — Explanation, Approval, and Interface (in progress)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
-Sprint 3, Development Stage 28 (deterministic Streamlit review shell) and Development
-Stage 29 (Gemini configuration foundation) are complete. Verified baseline: `1334 passed`
-(1258 Stage 1–27 regression + 31 Stage 28 + 45 Stage 29). Sprint 3 is not yet complete —
-Gemini explanation, human approval, audit recording, and exports remain unimplemented.
+Sprint 3, Development Stage 28 (deterministic Streamlit review shell), Development Stage 29
+(Gemini configuration foundation), and Development Stage 30 (explanation payload and prompt
+construction) are complete. Verified baseline: `1427 passed` (1258 Stage 1–27 regression +
+31 Stage 28 + 45 Stage 29 + 93 Stage 30). Sprint 3 is not yet complete — Gemini API
+integration, explanation UI wiring, human approval, audit recording, and exports remain
+unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -1720,22 +1722,115 @@ and initial project-management documentation) is complete and is not re-tracked 
 - The full AI/UI-inclusive end-to-end integration test
   (`tests/test_integration.py`, reserved, untouched).
 
+## Development Stage 30 — Explanation Payload and Prompt Construction (complete)
+
+- [x] `src/explanations.py` (placeholder filled in for the first time — the
+      Sprint 1 placeholder explanation module) — a pure, deterministic
+      boundary between an already-locked pipeline result and whatever
+      future stage actually calls Gemini: `CampaignExplanationPayload`,
+      `PortfolioExplanationPayload`, `ExplanationPrompt` (all frozen,
+      `extra="forbid"`), `build_campaign_explanation_payload`,
+      `build_portfolio_explanation_payload`, `serialize_explanation_payload`,
+      `build_campaign_explanation_prompt`, `build_portfolio_explanation_prompt`
+      — exactly these five public functions, no orchestration wrapper. Never
+      calls Gemini, never imports `config`/`GeminiConfig`/
+      `is_gemini_available`/`GEMINI_API_KEY`, never imports Streamlit or any
+      Gemini SDK, never mutates a locked result. `app.py` is untouched.
+- [x] **Frozen Gemini boundary**: Gemini is explanation-only — it may
+      explain only the locked facts supplied in a payload, and must never
+      select/change an action, allocation, budget, score, or rank;
+      add/remove/reorder reason codes; change a classification; hide,
+      repair, or reinterpret conservation; rewrite a zero-funded
+      directional action to `MAINTAIN`/`HOLD`; approve/reject; create
+      audit facts; infer from data outside the payload; or introduce
+      unsupported claims. Stage 30 creates prompts only — it never
+      generates or fabricates an explanation.
+- [x] **Authorized fields only**: `CampaignExplanationPayload` copies
+      exactly the fourteen authorized campaign fields from one locked
+      `CampaignBudgetRecommendationResult`; `PortfolioExplanationPayload`
+      copies `review_id`, both totals, and all four conservation fields
+      directly from `result.conservation` — never recalculated. Raw CSV
+      data, `review_notes`, raw metrics, validation issues, intermediate
+      constraints, availability/suitability, the API key, and audit data
+      are all excluded and unreachable.
+- [x] **Granularity**: campaign and portfolio payloads are structurally
+      separate — one campaign payload contains exactly one campaign with
+      no sibling-campaign data; the portfolio payload contains only
+      totals/conservation, never a campaign list. No function loops over
+      the full campaign collection to build a combined prompt.
+- [x] **Canonical serialization**: compact JSON, key order matches model
+      field declaration order (never sorted), `ensure_ascii=False`,
+      separators exactly `(",", ":")`, no indentation. `Decimal`/
+      `Currency` serialize as fixed-point strings via `format(value,
+      "f")` — never a JSON number, never `float`, never scientific
+      notation. Enums serialize to `.value`; tuples to JSON arrays,
+      order preserved; `None` to `null`. Identical input produces
+      byte-for-byte identical output.
+- [x] **Prompt architecture**: one fixed system instruction, byte-for-byte
+      identical regardless of payload contents, containing no campaign/
+      portfolio data, API key, SDK detail, model name, or generation
+      parameter — it states every frozen boundary rule above plus the
+      "not ranked, never rank zero" and "disclose, never conceal" rules.
+      User content contains one fixed sentence plus the canonical JSON
+      between fixed `BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` markers; no
+      field is interpolated individually into prose.
+- [x] **Injection containment, honestly scoped**: `campaign_name` is
+      treated as untrusted data — JSON escaping plus system/user
+      separation verified against embedded quotes, backslashes, braces,
+      newlines, Markdown, Unicode, literal marker text, and
+      instruction-like phrasing. This does not eliminate prompt
+      injection; the decisive protection is structural — no Gemini
+      output ever writes back into a locked deterministic model.
+- [x] **Output contract deferred**: concise, grounded, plain-language text
+      only is requested; response parsing, a response model, structured
+      output, retries, timeouts, fallback explanations, API-error
+      handling, and persistence all remain reserved for the future Gemini
+      API-integration stage, along with the still-unresolved
+      `google-generativeai`/`google-genai` mismatch.
+- [x] `tests/test_explanations.py` (new dedicated test file) — 93 new
+      Stage 30 tests, all passing. Real Stage 27 sample-data results used
+      for primary success-path coverage (including the G002 zero-funded-
+      `INCREASE` and G001 unranked cases); hand-built frozen fixtures used
+      only for states unreachable through the real pipeline (an
+      unconserved portfolio, extreme 28-significant-digit Decimal
+      magnitudes, an empty portfolio). No Gemini output fabricated; no SDK
+      mocked. `tests/test_app.py`, `tests/test_config.py`, and
+      `tests/test_integration.py` confirmed unmodified. Stage 1–29
+      regression re-run and confirmed passing unchanged at 1334 tests.
+      Full suite: 1427 tests passing (1334 + 93).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 30 (and not yet started)
+
+- Any Gemini SDK import or live API call.
+- Resolving the `google-generativeai`/`google-genai` dependency mismatch.
+- A Gemini response model, response parsing, or structured output.
+- Retries, timeouts, fallback explanations, or API-error handling.
+- Explanation persistence.
+- Any UI wiring in `app.py`.
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28 and 29 are complete — Sprint 3 as a
-whole is not.** Stage 29 delivered the Gemini API-key configuration
-boundary with no forward dependency on Gemini, approval, audit, or
-exports, and no change to `app.py`.
+**Sprint 3 is underway; Stages 28, 29, and 30 are complete — Sprint 3 as
+a whole is not.** Stage 30 delivered deterministic explanation payload
+and prompt construction with no forward dependency on Gemini, approval,
+audit, or exports, and no change to `app.py`.
 
 The smallest dependency-ordered remaining Sprint 3 work, in provisional
 order (each still requires its own dependency/decision-readiness
-inspection before being frozen): explanation payload/prompt construction
-(`src/explanations.py` — defining exactly which locked fields Gemini may
-see); Gemini API integration (`src/gemini_analyzer.py` — must first
-resolve the `google-generativeai`/`google-genai` dependency mismatch
-recorded above); wiring explanation display into the shell; human
-approval (`src/approval.py`); audit persistence (`src/audit.py`); exports
-(`src/exports.py`); and finally the full end-to-end integration test
+inspection before being frozen): Gemini API integration
+(`src/gemini_analyzer.py` — must first resolve the
+`google-generativeai`/`google-genai` dependency mismatch recorded at
+Stage 29 and define the response contract deferred by Stage 30); wiring
+explanation display into the shell; human approval (`src/approval.py`);
+audit persistence (`src/audit.py`); exports (`src/exports.py`); and
+finally the full end-to-end integration test
 (`tests/test_integration.py`). The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
 remain open and independent of this sequence. Sprint 4 remains deferred.

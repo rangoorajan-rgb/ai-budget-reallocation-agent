@@ -1198,6 +1198,35 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 18 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
 | 19 | Real repository `.env` | Never created, read, or modified by any test — confirmed absent both before and after the suite runs. |
 
+## Explanation Payload and Prompt Construction Scenarios (Stage 30, `src/explanations.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `CampaignExplanationPayload`, `PortfolioExplanationPayload`, `ExplanationPrompt` | Exact declared field sets; `extra="forbid"` rejects an unknown field; frozen (assignment raises) for all three. |
+| 2 | The five public functions | Exact declared signatures (source-inspected); no additional public function exists beyond them and the three models. |
+| 3 | Real sample-data G002 campaign result | `build_campaign_explanation_payload` copies every authorized field exactly; no unauthorized field (e.g. raw metrics, availability, API key) reachable from the payload. |
+| 4 | Real sample-data portfolio result | `build_portfolio_explanation_payload` copies totals and all four conservation fields exactly, directly from `result.conservation`; no `campaign_results` reachable or read (AST-verified). |
+| 5 | A hand-built unconserved result | Portfolio payload reflects `is_conserved=False`/the exact `net_change` already computed — never independently recalculated. |
+| 6 | G001 (unranked) | `rank=None` preserved exactly, never coerced to `0`. |
+| 7 | A non-default reason-code order | `reason_codes` tuple and its order preserved exactly. |
+| 8 | G002 (zero-funded `INCREASE`) | `recommendation_action` remains `INCREASE` and `allocated_amount` remains `0.00` in the payload — never relabeled. |
+| 9 | Any payload/prompt build | The source locked result's `model_dump()` is unchanged afterward. |
+| 10 | `serialize_explanation_payload` output | Compact JSON: key order matches model field declaration order (not alphabetical); `sort_keys=False`; separators exactly `(",", ":")`; no indentation/newlines. |
+| 11 | Enum fields | Serialize to `.value` (e.g. `"Google Ads"`, `"Over spending"`). |
+| 12 | `reason_codes` | Serializes as a JSON array preserving order. |
+| 13 | `rank=None` | Serializes as JSON `null`. |
+| 14 | `Currency`/`Decimal` fields, including a 28-significant-digit extreme value | Serialize as fixed-point JSON strings via `format(value, "f")` — never a JSON number, never scientific notation, trailing zeros preserved; module source never references `float`. |
+| 15 | Two independent builds from the identical locked result | Byte-for-byte identical serialized JSON. |
+| 16 | Campaign vs. portfolio prompts, and prompts built from different payload contents | Share the exact same `system_instruction` string, byte-for-byte. |
+| 17 | `system_instruction` text | Contains every frozen boundary rule (locked, explains-not-decides, no value changes, reason-code order authoritative, facts-only, no invented causes, "not ranked" not rank zero, zero-funded action not relabeled, unconserved disclosed not concealed, untrusted JSON strings, concise plain-language, not an approval/execution instruction); contains no campaign ID/name, no `review_id`, no API key, no SDK/model name. |
+| 18 | Campaign / portfolio `user_content` | Contains exactly one canonical JSON data block, recoverable between `BEGIN_LOCKED_DATA` and the final `END_LOCKED_DATA` line; no payload field interpolated individually into the prose sentence preceding the data block. |
+| 19 | Adversarial campaign names (embedded quotes, backslashes, braces, newlines, Markdown, Unicode, literal `BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` text, instruction-like phrasing) | Serialized JSON stays valid and round-trips exactly through `json.loads`; the system instruction is never altered and never contains the adversarial text; a marker-like substring embedded inside the name can never occupy its own line, so it can never masquerade as the real structural marker. |
+| 20 | An unconserved hand-built portfolio | Serializes `is_conserved=false` faithfully; the shared system instruction requires plain disclosure, never concealment or repair. |
+| 21 | An empty portfolio (`campaign_results=()`, zero totals) | Portfolio payload and prompt build normally — not an error. |
+| 22 | Module imports/references | Never imports `config`, `streamlit`, `google.generativeai`, or `google.genai`; never references `GeminiConfig`, `is_gemini_available`, `GEMINI_API_KEY`, `SecretStr`, or `get_secret_value` (AST-verified). |
+| 23 | Module source | No network/file/environment operation, no `datetime`/`time`/`random`/`uuid`, no logging/`print`, no `try`/`except`, no attribute assignment anywhere (AST-verified). |
+| 24 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 3 stage.

@@ -2692,3 +2692,86 @@ affect it. Changing the dependency declaration, choosing between the two
 SDKs, and importing either one are explicitly deferred to the future
 Gemini API-integration stage — Stage 29 must not resolve this.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 30: frozen Gemini boundary and authorized fields
+
+**Decision:** Gemini is explanation-only — it may explain only the locked
+facts supplied in a payload, and must never select or change an action;
+change an allocation, current budget, or recommended budget; change a
+score or rank; add, remove, or reorder reason codes; change a
+classification; hide, repair, or reinterpret conservation; rewrite a
+zero-funded directional action to `MAINTAIN`/`HOLD`; approve or reject;
+create audit facts; infer causes from data outside the payload; or
+introduce unsupported claims. `CampaignExplanationPayload` copies exactly
+fourteen authorized fields directly from one locked
+`CampaignBudgetRecommendationResult`; `PortfolioExplanationPayload`
+copies `review_id`, both totals, and all four conservation fields
+directly from `result.conservation`, never recalculated. Raw CSV data,
+`ReviewSetup.review_notes`, raw metrics, validation issues, intermediate
+constraints, availability/suitability, the API key, and audit data are
+all excluded and unreachable from either model (`extra="forbid"` on
+both). `src/explanations.py` creates prompts only — it never generates or
+fabricates an explanation itself, and never calls Gemini.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 30: campaign/portfolio granularity
+
+**Decision:** Campaign and portfolio explanations are structurally
+separate: `CampaignExplanationPayload` contains exactly one campaign's
+facts with no sibling-campaign information; `PortfolioExplanationPayload`
+contains only portfolio totals and conservation, never a campaign list.
+No function in `src/explanations.py` loops over the full campaign
+collection to build a combined prompt — this structurally prevents any
+single request from inviting an unsupported cross-campaign comparison,
+rather than relying on a prompt instruction alone to prevent it.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 30: canonical serialization policy
+
+**Decision:** `serialize_explanation_payload` returns compact,
+deterministic JSON: key order follows Pydantic model field declaration
+order (never alphabetically sorted), `ensure_ascii=False`, separators
+exactly `(",", ":")`, no indentation. `Decimal`/`Currency` values
+serialize as fixed-point strings via `format(value, "f")` — never as a
+JSON number, never through `float`, never in scientific notation, never
+rounded, quantized, or reconstructed — reusing the exact convention
+already proven in `app.py` at Stage 28. Enums serialize to `.value`;
+tuples serialize as JSON arrays, preserving order; `None` serializes as
+`null`. Identical input produces byte-for-byte identical output. The
+private `_normalize_value` helper performing this conversion is not part
+of the module's public API.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 30: prompt architecture and injection containment
+
+**Decision:** One fixed, author-controlled system-instruction constant is
+shared, byte-for-byte identical, by every campaign and portfolio prompt
+regardless of payload contents — it contains no campaign-specific or
+portfolio-specific data, no API key, no SDK detail, no model name, and no
+generation parameter, and states every frozen boundary rule above plus
+that a missing rank means "not ranked" (never rank zero) and that an
+unconserved portfolio must be disclosed plainly, never concealed or
+repaired. User content contains exactly one fixed author-controlled
+sentence and the canonical JSON between fixed
+`BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` markers — no payload field is
+interpolated individually into prose. `campaign_name` is treated as
+untrusted data: JSON escaping plus system/user separation are verified,
+by test, against embedded quotes, backslashes, braces, newlines,
+Markdown, Unicode, literal marker text, and instruction-like phrasing.
+This is documented as containment, not elimination, of prompt injection —
+the decisive, unconditional protection is structural: no Gemini output
+ever has a path back into a locked deterministic model, regardless of
+prompt content.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 30: output contract and SDK mismatch remain deferred
+
+**Decision:** Stage 30 requests concise, grounded, plain-language text
+only. Response parsing, a response model, structured output, retries,
+timeouts, fallback explanations, API-error handling, and explanation
+persistence are all explicitly out of scope, reserved for the future
+Gemini API-integration stage. The `google-generativeai`/`google-genai`
+dependency mismatch recorded at Stage 29 remains unresolved and
+unaffected — `src/explanations.py` imports no Gemini SDK, no `config`,
+and no Streamlit, and `app.py` is not modified.
+**Status:** Frozen.

@@ -2200,6 +2200,95 @@ installed in this environment; `google-genai` is installed instead. Stage 29 doe
 resolve this — it imports no Gemini SDK at all. Resolving the mismatch (choosing and
 declaring the correct dependency) is deferred to the future Gemini API-integration stage.
 
+## Stage 30 — Explanation Payload and Prompt Construction
+
+**Rule.** `src/explanations.py` (Sprint 3, Development Stage 30) is a pure, deterministic
+boundary between an already-locked pipeline result and whatever future stage actually calls
+Gemini. It projects locked results into explicitly authorized payload models
+(`CampaignExplanationPayload`, `PortfolioExplanationPayload`), serializes them to canonical
+JSON (`serialize_explanation_payload`), and constructs prompt content
+(`build_campaign_explanation_prompt`, `build_portfolio_explanation_prompt`) as a typed
+`ExplanationPrompt` bundle. It never calls Gemini, never reads `config`/`GeminiConfig`/
+`is_gemini_available`/`GEMINI_API_KEY`, and never mutates a locked result. No public
+orchestration wrapper is added.
+
+**Frozen Gemini boundary.** Gemini is explanation-only: it may explain only the locked
+facts supplied in a payload. It must never select or change an action; change an
+allocation, current budget, or recommended budget; change a score or rank; add, remove, or
+reorder reason codes; change a classification; hide, repair, or reinterpret conservation;
+rewrite a zero-funded directional action to `MAINTAIN`/`HOLD`; approve or reject; create
+audit facts; infer causes from data outside the payload; or introduce unsupported claims.
+Stage 30 creates prompts only — it never generates or fabricates an explanation itself.
+
+**Authorized fields only.** `CampaignExplanationPayload` copies exactly the fourteen
+authorized campaign fields (`campaign_id`, `campaign_name`, `platform`, `current_budget`,
+`recommendation_action`, `allocated_amount`, `recommended_budget`, `reason_codes`,
+`performance_band`, `trend_direction`, `confidence`, `pacing_status`,
+`reallocation_priority_score`, `rank`) directly from one locked
+`CampaignBudgetRecommendationResult`. `PortfolioExplanationPayload` copies exactly
+`review_id`, `total_current_budget`, `total_recommended_budget`, and all four conservation
+fields (`total_increase_allocated`, `total_decrease_allocated`, `net_change`,
+`is_conserved`), read directly from `result.conservation` — never recalculated. Raw CSV
+data, `ReviewSetup.review_notes`, raw metrics, validation issues, intermediate
+constraints, availability/suitability, the API key, and audit data are all excluded; none
+is reachable from either payload model (`extra="forbid"` on both).
+
+**Granularity.** Campaign and portfolio explanations are structurally separate: one
+campaign payload contains exactly one campaign with no sibling-campaign information; the
+portfolio payload contains only totals and conservation, never a campaign list. No
+function loops over the full campaign collection to build a combined prompt — this
+structurally prevents any single request from inviting an unsupported cross-campaign
+comparison.
+
+**Canonical serialization.** `serialize_explanation_payload` returns compact, deterministic
+JSON: key order follows Pydantic model declaration order (never alphabetically sorted),
+`ensure_ascii=False`, separators exactly `(",", ":")`, no indentation. `Decimal`/`Currency`
+values serialize as fixed-point strings via `format(value, "f")` — never as JSON numbers,
+never through `float`, never in scientific notation, never rounded, quantized, or
+reconstructed. Enums serialize to `.value`; tuples serialize as JSON arrays, preserving
+order; `None` serializes as `null`. Identical input produces byte-for-byte identical
+output. A private `_normalize_value` helper performs this conversion and is not part of the
+module's public API.
+
+**Prompt architecture.** One fixed, author-controlled system instruction is shared,
+byte-for-byte identical, by every campaign and portfolio prompt regardless of payload
+contents — it contains no campaign-specific or portfolio-specific data, no API key, no SDK
+detail, no model name, and no generation parameter. It states that the supplied JSON is
+locked and authoritative, that the assistant explains but never decides, that no supplied
+value may be changed, that reason-code order is authoritative, that a missing rank means
+"not ranked" (never rank zero), that a zero-funded directional action is not
+`MAINTAIN`/`HOLD`, that an unconserved portfolio must be disclosed plainly and never
+concealed or repaired, and that any string inside the JSON — including a campaign name —
+is untrusted data, never an instruction. User content never interpolates a payload field
+individually into prose; it contains exactly one fixed author-controlled sentence, the
+canonical JSON between fixed `BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` marker lines, and
+nothing else.
+
+**Injection containment, honestly scoped.** `campaign_name` is treated as untrusted data:
+JSON string escaping plus strict system/user (instruction/data) separation make it
+significantly harder for adversarial campaign-name content to be mistaken for an
+instruction — verified against embedded quotes, backslashes, braces, newlines, Markdown,
+Unicode, the literal marker text, and instruction-like phrasing. This does **not**
+eliminate prompt injection; no prompt-construction code can fully guarantee a downstream
+model will never be influenced by adversarial content in its context. The decisive
+protection is structural, not textual: nothing in this codebase ever writes a Gemini
+response back into a locked deterministic model, so whatever Gemini outputs can never
+actually change a locked action, amount, score, rank, or conservation status.
+
+**Output contract deferred.** This stage requests concise, grounded, plain-language text
+only. Response parsing, a response model, structured output, retries, timeouts, fallback
+explanations, API-error handling, and explanation persistence are all explicitly out of
+scope, reserved for the future Gemini API-integration stage — along with resolving the
+`google-generativeai`/`google-genai` mismatch recorded at Stage 29, which Stage 30 does not
+touch.
+
+**Normal-state behavior.** `rank=None`, zero allocation, a directional action with zero
+allocation, empty portfolio totals, `is_conserved=False`, extreme Decimal magnitudes, and
+adversarial campaign names are all valid states that never raise. Only a genuinely invalid
+direct construction (already-enforced upstream business rules are never re-validated here)
+or an unexpected serialization failure would raise, and any such failure propagates
+unchanged.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -2291,7 +2380,14 @@ declaring the correct dependency) is deferred to the future Gemini API-integrati
   `SecretStr` redaction, and import-time side-effect freedom. It does not
   resolve the `google-generativeai`/`google-genai` dependency mismatch,
   does not construct any Gemini request, and does not wire anything into
-  `app.py`. Explanation payload/prompt construction, Gemini API
-  integration (including the deferred SDK choice), explanation UI wiring,
-  human approval, audit persistence, exports, and Sprint 4 hardening all
-  remain pending later, separate stages/sprints.
+  `app.py`.
+- Stage 30 resolved explanation payload and prompt construction (see
+  above): the authorized-field boundary, the campaign/portfolio
+  granularity split, canonical JSON serialization, and the shared,
+  data-free system instruction with its injection-containment measures.
+  It does not resolve the `google-generativeai`/`google-genai` dependency
+  mismatch, does not call Gemini, does not define a response contract,
+  and does not wire anything into `app.py`. Gemini API integration
+  (including the deferred SDK choice and the response contract),
+  explanation UI wiring, human approval, audit persistence, exports, and
+  Sprint 4 hardening all remain pending later, separate stages/sprints.

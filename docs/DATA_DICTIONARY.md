@@ -1472,6 +1472,53 @@ concern): Gemini model name, request timeout, temperature, token/output limit, r
 count, environment name, debug flag, audit/export directories, application title,
 deterministic feature flags. No Gemini SDK model or request/response type exists yet.
 
+## Explanation Payload and Prompt Fields (Stage 30, `src/explanations.py`)
+
+**`CampaignExplanationPayload`** (frozen, `extra="forbid"`) — one locked campaign's
+authorized facts, copied directly from a `CampaignBudgetRecommendationResult`, never
+recalculated:
+
+| Field | Type | Source |
+|-------|------|--------|
+| `campaign_id` | `str` | copied unchanged |
+| `campaign_name` | `str` | copied unchanged — the sole free-text/untrusted field |
+| `platform` | `Platform` | copied unchanged |
+| `current_budget` | `Currency` | copied unchanged |
+| `recommendation_action` | `RecommendationAction` | copied unchanged |
+| `allocated_amount` | `Currency` (`>= 0`) | copied unchanged |
+| `recommended_budget` | `Currency` (`>= 0`) | copied unchanged |
+| `reason_codes` | `tuple[ReasonCode, ...]` | copied unchanged, order preserved |
+| `performance_band` | `PerformanceBand` | copied unchanged |
+| `trend_direction` | `TrendDirection` | copied unchanged |
+| `confidence` | `Confidence` | copied unchanged |
+| `pacing_status` | `PacingStatus` | copied unchanged |
+| `reallocation_priority_score` | `int` (`0..100`) | copied unchanged |
+| `rank` | `int \| None` (`>= 1` when present) | copied unchanged — `None` means "not ranked," never rank zero |
+
+**`PortfolioExplanationPayload`** (frozen, `extra="forbid"`) — one locked portfolio's
+authorized totals and conservation facts, never a campaign list:
+
+| Field | Type | Source |
+|-------|------|--------|
+| `review_id` | `str` | `result.review_id` |
+| `total_current_budget` | `Currency` (`>= 0`) | `result.total_current_budget` |
+| `total_recommended_budget` | `Currency` (`>= 0`) | `result.total_recommended_budget` |
+| `total_increase_allocated` | `Currency` (`>= 0`) | `result.conservation.total_increase_allocated` |
+| `total_decrease_allocated` | `Currency` (`>= 0`) | `result.conservation.total_decrease_allocated` |
+| `net_change` | `Decimal` | `result.conservation.net_change` |
+| `is_conserved` | `bool` | `result.conservation.is_conserved` — never recalculated |
+
+**`ExplanationPrompt`** (frozen, `extra="forbid"`): `system_instruction: str` (fixed,
+identical across every prompt, contains no campaign or portfolio data) and
+`user_content: str` (one fixed sentence plus the canonical JSON between
+`BEGIN_LOCKED_DATA`/`END_LOCKED_DATA` markers).
+
+**Excluded from Stage 30 entirely**: raw CSV data, `ReviewSetup.review_notes`, raw
+`CampaignMetrics`, validation issues, intermediate constraints (Stage 10–18), availability/
+suitability (Stage 19–20), the API key or any configuration, audit data, timestamps, and
+any generated explanation text — none is reachable from either payload model or referenced
+anywhere in the module.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,
