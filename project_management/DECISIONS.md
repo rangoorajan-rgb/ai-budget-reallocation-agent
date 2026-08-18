@@ -95,7 +95,7 @@ percentage values have different rounding semantics and must not share one type.
 ## 2026-08-09 — Nine frozen numerical constants reserved in src/constants.py
 
 **Decision:** `src/constants.py` reserves nine named numerical constants for use by later
-Sprint 1 stages (pacing, classification, scoring, allocation, conservation), with no
+Sprint 2 stages (pacing, classification, scoring, allocation, conservation), with no
 calculation logic attached to them yet: `DEFAULT_MAX_CHANGE_PERCENTAGE = Decimal("0.20")`,
 `TREND_THRESHOLD = Decimal("0.10")`, `SEVEN_DAY_WEIGHT = Decimal("0.40")`,
 `TWENTY_EIGHT_DAY_WEIGHT = Decimal("0.60")`, `INCREASE_THRESHOLD = Decimal("1.15")`,
@@ -207,7 +207,7 @@ leaking the internal exception. No other exception type is broadly suppressed.
 
 ## 2026-08-10 — Stage 3 is metric calculation, chosen by dependency order not file-list order
 
-**Decision:** `src/metrics.py` is Sprint 1, Development Stage 3, selected because every
+**Decision:** `src/metrics.py` is Sprint 2, Development Stage 3, selected because every
 one of the nine frozen numerical constants operates on `CampaignInput` KPI/conversion
 fields (not budget-pacing fields), `MASTER_PROJECT_PLAN.md`'s Sprint 2 goal sentence names
 "metric" logic but not pacing, and classification's `ReasonCode` members that depend on a
@@ -276,7 +276,7 @@ remain entirely out of scope for Stage 3.
 
 ## 2026-08-10 — Stage 4 is campaign pacing, confirmed by weighing mixed dependency evidence
 
-**Decision:** `src/pacing.py` is Sprint 1, Development Stage 4. Constants-readiness
+**Decision:** `src/pacing.py` is Sprint 2, Development Stage 4. Constants-readiness
 evidence alone favoured classification (5 of 9 frozen constants are classification-domain,
 and `CampaignMetrics` newly satisfies its prerequisite), but pacing was confirmed instead
 because `README.md`'s "Proposed Solution" explicitly names pacing as one of exactly two
@@ -363,7 +363,7 @@ type-contract error rather than being silently coerced.
 
 ## 2026-08-10 — Stage 5 is neutral performance classification, narrower than "classification"
 
-**Decision:** Sprint 1, Development Stage 5 is scoped to *neutral performance
+**Decision:** Sprint 2, Development Stage 5 is scoped to *neutral performance
 classification only* — not the full "classification" responsibility named in
 `MASTER_PROJECT_PLAN.md`. Trend classification, conversion-volume confidence, and
 tracking-status interpretation are each deferred to a later stage, because each has its
@@ -416,7 +416,7 @@ override rule for those later considerations.
 
 ## 2026-08-10 — Stage 6 is neutral trend classification, independent of PerformanceBand
 
-**Decision:** Sprint 1, Development Stage 6 adds neutral trend classification to
+**Decision:** Sprint 2, Development Stage 6 adds neutral trend classification to
 `src/classification.py`, as an *addition* alongside Stage 5's performance
 classification — not a modification of it. `CampaignPerformanceClass` and
 `PerformanceBand` are unmodified. Confidence, tracking interpretation, pacing
@@ -465,7 +465,7 @@ construction, since Stage 3 already direction-normalised CPA and ROAS so that
 
 ## 2026-08-11 — Stage 7 is conversion-volume confidence only; independent of Stage 5/6 classifications
 
-**Decision:** Sprint 1, Development Stage 7 adds conversion-volume confidence
+**Decision:** Sprint 2, Development Stage 7 adds conversion-volume confidence
 classification to `src/classification.py`, as an *addition* alongside Stage 5's
 performance classification and Stage 6's trend classification — not a modification of
 either. `CampaignPerformanceClass`, `PerformanceBand`, `CampaignTrendClass`, and
@@ -547,7 +547,7 @@ out-of-scope `src.*` modules) is unchanged and still enforced by both tests.
 
 ## 2026-08-11 — Stage 8 is narrow tracking-based assessability, not full tracking interpretation
 
-**Decision:** Sprint 1, Development Stage 8 adds a narrow tracking-based assessability
+**Decision:** Sprint 2, Development Stage 8 adds a narrow tracking-based assessability
 fact to `src/classification.py`, as an *addition* alongside Stages 5–7's independent
 results — not a modification of any of them. `CampaignPerformanceClass`,
 `PerformanceBand`, `CampaignTrendClass`, `TrendDirection`, `CampaignConfidenceClass`, and
@@ -625,7 +625,7 @@ were not affected (neither ever forbade `TrackingStatus`) and were not modified.
 
 ## 2026-08-11 — Stage 9 is deterministic pacing interpretation, using pacing_ratio only
 
-**Decision:** Sprint 1, Development Stage 9 adds a neutral pacing-status classification
+**Decision:** Sprint 2, Development Stage 9 adds a neutral pacing-status classification
 to `src/pacing.py`, as an *addition* alongside Stage 4's `CampaignPacing`/
 `calculate_campaign_pacing` — not a modification of either. `CampaignPacing` and its
 calculation formulas are unmodified. `CampaignPacing.pacing_ratio` is the sole
@@ -704,7 +704,7 @@ needed, unlike Stages 7 and 8.
 
 ## 2026-08-11 — Stage 10 is static budget-bound calculation only, not effective constraints
 
-**Decision:** Sprint 1, Development Stage 10 populates `src/constraints.py` (previously
+**Decision:** Sprint 2, Development Stage 10 populates `src/constraints.py` (previously
 a bare placeholder) with a narrow, deterministic **static** budget-bound fact
 calculation — not the full "constraints" responsibility named in `MASTER_PROJECT_PLAN.md`.
 For one already-validated `CampaignInput`, it calculates the distance from
@@ -779,7 +779,7 @@ it was not a modification of prior-stage behaviour.
 
 ## 2026-08-11 — Stage 11 is applicable maximum-change-percentage resolution only
 
-**Decision:** Sprint 1, Development Stage 11 adds a narrow, deterministic percentage-
+**Decision:** Sprint 2, Development Stage 11 adds a narrow, deterministic percentage-
 resolution fact to `src/constraints.py`, as an *addition* alongside Stage 10's
 `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room` — not a modification
 of either. For one already-validated `ReviewSetup` and one already-validated
@@ -860,7 +860,7 @@ preserved unmodified; only this one assertion's forbidden-name set was narrowed.
 
 ## 2026-08-11 — Stage 12 is a raw, informational percentage-based monetary movement-cap fact only
 
-**Decision:** Sprint 1, Development Stage 12 adds a narrow, deterministic raw
+**Decision:** Sprint 2, Development Stage 12 adds a narrow, deterministic raw
 percentage-based monetary movement-cap calculation to `src/constraints.py`, as an
 *addition* alongside Stage 10's `CampaignStaticBudgetRoom`/
 `calculate_campaign_static_budget_room` and Stage 11's
@@ -957,7 +957,7 @@ name needed importing.
 
 ## 2026-08-11 — Stage 13 is a raw, informational test-floor distance fact only
 
-**Decision:** Sprint 1, Development Stage 13 adds a narrow, deterministic test-floor
+**Decision:** Sprint 2, Development Stage 13 adds a narrow, deterministic test-floor
 distance calculation to `src/constraints.py`, as an *addition* alongside Stage 10's
 `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage 11's
 `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
@@ -1041,7 +1041,7 @@ available.
 
 ## 2026-08-11 — Stage 14 is a neutral, decrease-specific protection constraint only
 
-**Decision:** Sprint 1, Development Stage 14 adds a narrow, deterministic protection
+**Decision:** Sprint 2, Development Stage 14 adds a narrow, deterministic protection
 constraint to `src/constraints.py`, as an *addition* alongside Stage 10's
 `CampaignStaticBudgetRoom`/`calculate_campaign_static_budget_room`, Stage 11's
 `CampaignApplicableChangePercentage`/`resolve_campaign_applicable_change_percentage`,
@@ -1106,7 +1106,7 @@ no new import beyond what `src/constraints.py` already had available.
 
 ## 2026-08-11 — Stage 15: test_budget_floor approved as an additional retained-spend floor for test campaigns
 
-**Decision:** Sprint 1, Development Stage 15 approves the first constraints-domain
+**Decision:** Sprint 2, Development Stage 15 approves the first constraints-domain
 business precedence rule: for a test campaign, `test_budget_floor` is an *additional*
 retained-spend floor alongside `minimum_budget` — not an alternative that replaces
 it, and not a decrease-only-vs-general distinction left unresolved. The **higher**
@@ -1182,7 +1182,7 @@ exception was needed, since Stage 15 introduces no new import beyond what
 
 ## 2026-08-14 — Stage 16: both upward constraints apply simultaneously; the smaller controls
 
-**Decision:** Sprint 1, Development Stage 16 approves the raw increase limit business
+**Decision:** Sprint 2, Development Stage 16 approves the raw increase limit business
 rule: `room_to_static_maximum` (Stage 10) and `raw_percentage_movement_cap` (Stage
 12) are two independent upward constraints that apply simultaneously — the smaller of
 the two is the binding limit: `raw_increase_limit = min(room_to_static_maximum,
@@ -1250,7 +1250,7 @@ no new import beyond what `src/constraints.py` already had available.
 
 ## 2026-08-14 — Stage 17: both decrease-side constraints apply simultaneously; the smaller controls
 
-**Decision:** Sprint 1, Development Stage 17 approves the raw decrease limit
+**Decision:** Sprint 2, Development Stage 17 approves the raw decrease limit
 business rule: `test_aware_static_decrease_room` (Stage 15) and
 `raw_percentage_movement_cap` (Stage 12) are two independent decrease-side
 constraints that apply simultaneously — the smaller of the two is the binding
@@ -1332,7 +1332,7 @@ what `src/constraints.py` already had available.
 
 ## 2026-08-14 — Stage 18 is protection-adjusted effective decrease only; no effective increase field is created
 
-**Decision:** Sprint 1, Development Stage 18 applies Stage 14's
+**Decision:** Sprint 2, Development Stage 18 applies Stage 14's
 `CampaignProtectionConstraint` to Stage 17's `CampaignRawDecreaseLimit`, producing
 one protection-adjusted effective decrease limit — `effective_decrease_limit =
 Decimal("0.00")` when `decrease_blocked` is `True`, otherwise `raw_decrease_limit`
@@ -1432,7 +1432,7 @@ exception was needed, since Stage 18 introduces no new import beyond what
 
 ## 2026-08-14 — Stage 19: approved concept boundary — "action availability," not "eligibility"
 
-**Decision:** Sprint 1, Development Stage 19 produces a deterministic
+**Decision:** Sprint 2, Development Stage 19 produces a deterministic
 `CampaignActionAvailability` result answering only whether `INCREASE`, `MAINTAIN`,
 and `REDUCE` are each mechanically and operationally available. The term
 **"availability"** is used throughout, never "eligibility" — eligibility had been
@@ -1571,7 +1571,7 @@ modification for Stage 19 — a new dedicated test file was created instead.
 
 ## 2026-08-14 — Stage 20: approved concept boundary — suitability is not recommendation
 
-**Decision:** Sprint 1, Development Stage 20 produces a deterministic,
+**Decision:** Sprint 2, Development Stage 20 produces a deterministic,
 categorical `CampaignActionSuitability` result for `INCREASE`, `MAINTAIN`, and
 `REDUCE`. Availability (Stage 19) answers "can this action be taken
 mechanically and operationally?"; suitability answers "do the approved
@@ -1698,7 +1698,7 @@ test file was created instead.
 
 ## 2026-08-14 — Stage 21 approved responsibility and HOLD-versus-MAINTAIN meaning
 
-**Decision:** Sprint 1, Development Stage 21 selects exactly one
+**Decision:** Sprint 2, Development Stage 21 selects exactly one
 `RecommendationAction` (`INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`) per campaign,
 using campaign status, tracking assessability, and Stage 20 action
 suitability. It does not produce `ReasonCode`, calculate monetary movement,
@@ -1813,7 +1813,7 @@ Stage 21 — a new dedicated test file was created instead.
 
 ## 2026-08-14 — Stage 22 approved responsibility and reason-semantics scope
 
-**Decision:** Sprint 1, Development Stage 22 explains, for one
+**Decision:** Sprint 2, Development Stage 22 explains, for one
 already-selected `CampaignRecommendation` (Stage 21), why that action was
 selected — producing a non-empty, ordered, deduplicated tuple of
 `ReasonCode`. It does not select or change the action, calculate a
@@ -1930,7 +1930,7 @@ occurs anywhere in Stage 22. No existing test file required modification
 
 ## 2026-08-15 — Stage 23 approved responsibility and business meaning
 
-**Decision:** Sprint 1, Development Stage 23 computes one deterministic,
+**Decision:** Sprint 2, Development Stage 23 computes one deterministic,
 campaign-level, dimensionless `int` reallocation priority score for one
 already-selected `CampaignRecommendation` (Stage 21), consumed later by a
 cross-campaign ranking stage. **Business meaning:** *"the relative
@@ -2044,7 +2044,7 @@ modification.
 
 ## 2026-08-15 — Stage 24 approved responsibility and direction separation
 
-**Decision:** Sprint 1, Development Stage 24 is the first genuinely
+**Decision:** Sprint 2, Development Stage 24 is the first genuinely
 cross-campaign responsibility in this repository. It matches each
 already-selected `CampaignRecommendation` (Stage 21) with its
 already-calculated `CampaignReallocationPriorityScore` (Stage 23) by
@@ -2177,7 +2177,7 @@ repository, ever supported a full-limit-as-recommendation assumption.
 
 ## 2026-08-15 — Stage 25 approved responsibility and reserve exclusion
 
-**Decision:** Sprint 1, Development Stage 25 converts Stage 24's
+**Decision:** Sprint 2, Development Stage 25 converts Stage 24's
 direction-separated, dense-ranked candidate populations into actual,
 balanced, campaign-level monetary movements. It allocates only available
 reduction supply, prioritises campaigns by dense rank, treats limits
@@ -2309,7 +2309,7 @@ non-placeholder test file required modification.
 
 ## 2026-08-17 — Stage 26 approved responsibility and conservation equation
 
-**Decision:** Sprint 1, Development Stage 26 independently verifies the
+**Decision:** Sprint 2, Development Stage 26 independently verifies the
 monetary invariant of one already-produced Stage 25
 `CampaignReallocationAllocation`. It independently recomputes total
 allocated increases and total allocated decreases, calculates their exact
@@ -2414,7 +2414,7 @@ test file required modification.
 
 ## 2026-08-18 — Stage 27 approved responsibility and validation boundary
 
-**Decision:** Sprint 1, Development Stage 27 orchestrates every
+**Decision:** Sprint 2, Development Stage 27 orchestrates every
 already-approved Stage 3–26 production function, in their exact frozen
 dependency order, over one already-validated `ReviewSetup` and one
 already-validated `tuple[CampaignInput, ...]`, and returns one compact,
@@ -2518,4 +2518,15 @@ deliberately distinct from `tests/test_integration.py`, which remains
 reserved for the later, materially larger AI/UI-inclusive end-to-end
 flow and was not modified. **This completes the master plan's Sprint 2
 "Deterministic Core Engine" goal.**
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint-label documentation correction
+
+**Decision:** The frozen `MASTER_PROJECT_PLAN.md` controls Sprint classification. Sprint 1
+is the pre-development repository-foundation/scaffolding phase only. Development Stages
+1–27 — every module and decision recorded above under the (now corrected) "Sprint 2,
+Development Stage N" labels — constitute Sprint 2 ("Deterministic Core Engine"); Stage 27
+completed Sprint 2 in full. Sprint 3 ("Explanation, Approval, and Interface") is next. This
+is a labelling correction only: no stage was renumbered, no technical decision's substance
+changed, and no code or test was modified.
 **Status:** Frozen.

@@ -12,24 +12,24 @@ All notable changes to this project are documented in this file.
   `README.md`, `LICENSE` (MIT, 2026 Rangoo Rajan), `.gitignore`, `.env.example`.
 - Project-management documentation: master project plan, current sprint tracker, decisions
   log, and this changelog.
-- Sprint 1, Development Stage 1: frozen enumerations in `src/constants.py` (`Platform`,
+- Sprint 2, Development Stage 1: frozen enumerations in `src/constants.py` (`Platform`,
   `KPIType`, `CampaignStatus`, `TrackingStatus`, `BusinessPriority`, `RecommendationAction`,
   `Confidence`, `ReviewStatus`, `ValidationSeverity`, `ReasonCode`) plus nine frozen
   numerical constants (`DEFAULT_MAX_CHANGE_PERCENTAGE`, `TREND_THRESHOLD`,
   `SEVEN_DAY_WEIGHT`, `TWENTY_EIGHT_DAY_WEIGHT`, `INCREASE_THRESHOLD`,
   `MAINTAIN_THRESHOLD`, `MINIMUM_CONVERSIONS`, `HIGH_CONFIDENCE_CONVERSIONS`,
   `CURRENCY_QUANTUM`).
-- Sprint 1, Development Stage 1: exactly two Pydantic v2 input models in `src/models.py`
+- Sprint 2, Development Stage 1: exactly two Pydantic v2 input models in `src/models.py`
   (`ReviewSetup`, `CampaignInput`) with currency fields quantised to `CURRENCY_QUANTUM` via
   `ROUND_HALF_UP`, KPI/percentage fields left unquantised, conventional boolean parsing for
   `is_protected`/`is_test_campaign`, and full model-level structural validation (budget
   bounds, spend/conversion ordering, period ordering, reserve-vs-budget, percentage bounds,
   test-budget-floor requiredness).
-- Sprint 1, Development Stage 1: exact 20-field `CampaignInput` CSV schema;
+- Sprint 2, Development Stage 1: exact 20-field `CampaignInput` CSV schema;
   `data/campaign_template.csv` (header only) and `data/sample_campaigns.csv` (4 synthetic
   rows covering an active Google Ads CPA campaign, an active Meta Ads ROAS campaign, a
   protected active campaign, and a test campaign with a `test_budget_floor`).
-- Sprint 1, Development Stage 1: `tests/test_models.py` (92 tests) covering enum values,
+- Sprint 2, Development Stage 1: `tests/test_models.py` (92 tests) covering enum values,
   frozen constants, model structural rules, currency quantisation, conventional boolean
   parsing, and CSV-schema consistency.
 - Updated `docs/DATA_DICTIONARY.md` and `docs/DECISION_RULES.md` with the CSV schema,
@@ -40,14 +40,17 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - Corrected an earlier draft of this stage that had used unapproved 24-field/renamed
   `CampaignInput` columns, `SCREAMING_SNAKE` CSV enum values instead of approved
-  human-readable values, an unauthorised `ValidationIssue` model, a blanket rejection of
-  `float` input, and an incorrect "Sprint 2" classification for this work.
+  human-readable values, an unauthorised `ValidationIssue` model, and a blanket rejection of
+  `float` input. That same earlier correction also relabelled this work from "Sprint 2" to
+  "Sprint 1" — a 2026-08-18 consistency audit against the frozen master plan found that
+  relabelling was itself mistaken: this work is Sprint 2 (Deterministic Core Engine) content.
+  See the 2026-08-18 documentation-correction entry below.
 
-- Sprint 1, Development Stage 2: added `ValidationCode` enum to `src/constants.py`
+- Sprint 2, Development Stage 2: added `ValidationCode` enum to `src/constants.py`
   (`INVALID_REVIEW_FIELD`, `EMPTY_FILE`, `INVALID_HEADER`, `NO_CAMPAIGN_ROWS`,
   `MALFORMED_ROW`, `INVALID_CAMPAIGN_FIELD`, `DUPLICATE_CAMPAIGN_ID`), distinct from
   `ReasonCode`. `src/models.py` unchanged.
-- Sprint 1, Development Stage 2: implemented `src/validation.py` — `ValidationIssue` and
+- Sprint 2, Development Stage 2: implemented `src/validation.py` — `ValidationIssue` and
   `ValidationReport` models (with `error_count`/`warning_count`/`is_valid` computed from
   `issues`, not independently settable); `validate_review_setup(data)` translating
   `ReviewSetup`'s `pydantic.ValidationError` into `INVALID_REVIEW_FIELD` issues; and
@@ -62,7 +65,7 @@ All notable changes to this project are documented in this file.
   Also catches a real, empirically confirmed `decimal.DecimalException` leak from the
   frozen `Currency` type's quantisation (e.g. for `Decimal("1E+30")`), reporting it safely
   instead of leaking the raw exception, without modifying `src/models.py`.
-- Sprint 1, Development Stage 2: `tests/test_validation.py` (44 tests) covering
+- Sprint 2, Development Stage 2: `tests/test_validation.py` (44 tests) covering
   `ValidationIssue`/`ValidationReport` construction and derived fields, review validation,
   CSV header/row/duplicate handling, and physical line-number correctness. `data/
   sample_campaigns.csv` validates with 4 campaigns and zero issues; `data/
@@ -72,7 +75,7 @@ All notable changes to this project are documented in this file.
   `docs/DECISION_RULES.md` (frozen Stage 2 validation rules and `ValidationCode` table),
   and `docs/TEST_SCENARIOS.md` (43 concrete Stage 2 scenarios).
 
-- Sprint 1, Development Stage 3: implemented `src/metrics.py` — `CampaignMetrics` (frozen,
+- Sprint 2, Development Stage 3: implemented `src/metrics.py` — `CampaignMetrics` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `performance_ratio_7d`,
   `performance_ratio_28d`, `weighted_performance_ratio`, `trend_delta` — facts only, no
   KPI type, raw KPI values, conversions, confidence, trend label, recommendation action,
@@ -87,7 +90,7 @@ All notable changes to this project are documented in this file.
   `ROUND_HALF_UP`), isolated from a mutated global context; no quantisation, no `float`,
   no `CURRENCY_QUANTUM`, no new rounding/ratio constant. `src/constants.py`,
   `src/models.py`, and `src/validation.py` are unchanged.
-- Sprint 1, Development Stage 3: `tests/test_metrics.py` (28 tests) covering result-model
+- Sprint 2, Development Stage 3: `tests/test_metrics.py` (28 tests) covering result-model
   shape/immutability, ROAS and CPA ratio calculation, direction-normalisation parity
   between KPI types, the weighted-ratio and trend-delta formulas (including a relative-
   not-subtractive trend proof), Decimal precision-28/ROUND_HALF_UP behaviour (including a
@@ -100,7 +103,7 @@ All notable changes to this project are documented in this file.
   confidence explicitly re-confirmed as pending classification), and
   `docs/TEST_SCENARIOS.md` (27 concrete Stage 3 scenarios).
 
-- Sprint 1, Development Stage 4: implemented `src/pacing.py` — `CampaignPacing` (frozen,
+- Sprint 2, Development Stage 4: implemented `src/pacing.py` — `CampaignPacing` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `elapsed_days`, `total_period_days`,
   `elapsed_fraction`, `expected_spend`, `spend_variance`, `pacing_ratio`,
   `remaining_budget`, `projected_end_of_period_spend` — facts only, no pacing status,
@@ -123,7 +126,7 @@ All notable changes to this project are documented in this file.
   unchanged; `src/pacing.py` imports neither `CampaignMetrics` nor any later-stage
   module, and never uses `platform`, `kpi_type`, KPI values, or performance/trend/
   conversion-volume constants — Stage 4 is independent of Stage 3.
-- Sprint 1, Development Stage 4: `tests/test_pacing.py` (30 tests) covering result-model
+- Sprint 2, Development Stage 4: `tests/test_pacing.py` (30 tests) covering result-model
   shape/immutability, inclusive date arithmetic and clamping (first/middle/last day,
   before/after the period, one-day periods, a leap-year February), the exact-on-pace/
   below-pace/above-pace worked examples, zero-denominator `None` behaviour, Decimal
@@ -138,7 +141,7 @@ All notable changes to this project are documented in this file.
   pending a later classification/constraints stage), and `docs/TEST_SCENARIOS.md` (30
   concrete Stage 4 scenarios).
 
-- Sprint 1, Development Stage 5: implemented `src/classification.py` — `PerformanceBand`
+- Sprint 2, Development Stage 5: implemented `src/classification.py` — `PerformanceBand`
   enum (`ABOVE_TARGET`, `ON_TARGET`, `BELOW_TARGET` — deliberately distinct from
   `RecommendationAction`) and `CampaignPerformanceClass` (frozen, immutable,
   `extra="forbid"`: `campaign_id`, `performance_band` only) and
@@ -157,7 +160,7 @@ All notable changes to this project are documented in this file.
   question that would otherwise require inventing a rule. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, and `src/pacing.py` are
   unchanged.
-- Sprint 1, Development Stage 5: `tests/test_classification.py` (23 tests) covering
+- Sprint 2, Development Stage 5: `tests/test_classification.py` (23 tests) covering
   result-model shape/immutability, exact threshold-boundary equality behaviour (all 8
   boundary values one `Decimal` increment either side of both thresholds),
   `campaign_id` propagation, CPA/ROAS normalisation-independence established through the
@@ -175,7 +178,7 @@ All notable changes to this project are documented in this file.
   recommendation explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (22 concrete Stage 5 scenarios).
 
-- Sprint 1, Development Stage 6: added `TrendDirection` enum (`IMPROVING`, `STABLE`,
+- Sprint 2, Development Stage 6: added `TrendDirection` enum (`IMPROVING`, `STABLE`,
   `DECLINING`) and `CampaignTrendClass` (frozen, immutable, `extra="forbid"`:
   `campaign_id`, `trend_direction` only) and `classify_campaign_trend(metrics:
   CampaignMetrics) -> CampaignTrendClass` to `src/classification.py`, alongside but fully
@@ -192,7 +195,7 @@ All notable changes to this project are documented in this file.
   `RecommendationAction`, `Confidence`, or `ReasonCode`, and never calls
   `classify_campaign_performance`. `src/constants.py`, `src/models.py`,
   `src/validation.py`, `src/metrics.py`, and `src/pacing.py` are unchanged.
-- Sprint 1, Development Stage 6: `tests/test_trend_classification.py` (29 tests)
+- Sprint 2, Development Stage 6: `tests/test_trend_classification.py` (29 tests)
   covering result-model shape/immutability, exact threshold-boundary equality behaviour
   (all 11 boundary/large-magnitude values), `campaign_id` propagation, CPA/ROAS
   normalisation-independence established through the full `CampaignInput` →
@@ -215,7 +218,7 @@ All notable changes to this project are documented in this file.
   stages), and `docs/TEST_SCENARIOS.md` (26 concrete Stage 6 scenarios, including a
   synthetic `DECLINING` case since no sample campaign has a negative `trend_delta`).
 
-- Sprint 1, Development Stage 7: added `CampaignConfidenceClass` (frozen, immutable,
+- Sprint 2, Development Stage 7: added `CampaignConfidenceClass` (frozen, immutable,
   `extra="forbid"`: `campaign_id`, `confidence` only, reusing the existing `Confidence`
   enum unchanged) and `classify_campaign_confidence(campaign: CampaignInput) ->
   CampaignConfidenceClass` to `src/classification.py`, alongside but fully separate from
@@ -243,7 +246,7 @@ All notable changes to this project are documented in this file.
   7 legitimately needed them). With explicit approval, both tests' forbidden-import sets
   were narrowed to drop only `CampaignInput`/`Confidence`/`src.models`; every other
   forbidden entry is unchanged and still enforced.
-- Sprint 1, Development Stage 7: `tests/test_confidence_classification.py` (32 tests)
+- Sprint 2, Development Stage 7: `tests/test_confidence_classification.py` (32 tests)
   covering result-model shape/immutability, exact threshold-boundary equality behaviour
   (all 9 boundary/large-magnitude values, including zero), `campaign_id` propagation,
   `conversions_28d`-only window selection (including a conflicting `conversions_7d=5`/
@@ -265,7 +268,7 @@ All notable changes to this project are documented in this file.
   interpretation and the `NOT_ASSESSABLE` trigger explicitly re-confirmed as pending
   later stages), and `docs/TEST_SCENARIOS.md` (28 concrete Stage 7 scenarios).
 
-- Sprint 1, Development Stage 8: added `CampaignTrackingAssessment` (frozen, immutable,
+- Sprint 2, Development Stage 8: added `CampaignTrackingAssessment` (frozen, immutable,
   `extra="forbid"`: `campaign_id`, `tracking_status`, `is_assessable` only) and
   `assess_campaign_tracking(campaign: CampaignInput) -> CampaignTrackingAssessment` to
   `src/classification.py`, alongside but fully separate from Stage 5's
@@ -294,7 +297,7 @@ All notable changes to this project are documented in this file.
   every other forbidden entry is unchanged and still enforced.
   `tests/test_classification.py` and `tests/test_trend_classification.py` were not
   affected and were not modified.
-- Sprint 1, Development Stage 8: `tests/test_tracking_assessment.py` (30 tests) covering
+- Sprint 2, Development Stage 8: `tests/test_tracking_assessment.py` (30 tests) covering
   result-model shape/immutability, exact `HEALTHY`/`WARNING`/`UNRELIABLE` →
   `True`/`True`/`False` mapping, `campaign_id` propagation, information preservation
   (`WARNING` never collapsed into `HEALTHY`; no severity score or replacement enum
@@ -317,7 +320,7 @@ All notable changes to this project are documented in this file.
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (21 concrete Stage
   8 scenarios).
 
-- Sprint 1, Development Stage 9: added `PACING_LOWER_THRESHOLD = Decimal("0.90")` and
+- Sprint 2, Development Stage 9: added `PACING_LOWER_THRESHOLD = Decimal("0.90")` and
   `PACING_UPPER_THRESHOLD = Decimal("1.10")` to `src/constants.py` (a symmetric +/-10%
   on-pace tolerance around `1.00`), and `PacingStatus` enum (`UNDERSPENDING = "Under
   spending"`, `ON_PACE = "On pace"`, `OVERSPENDING = "Over spending"`, `NOT_AVAILABLE =
@@ -344,7 +347,7 @@ All notable changes to this project are documented in this file.
   `assess_campaign_tracking` (or vice versa). Descriptive only — does not judge whether
   overspending or underspending is desirable. `src/models.py`, `src/validation.py`,
   `src/metrics.py`, and `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 9: `tests/test_pacing_interpretation.py` (33 tests)
+- Sprint 2, Development Stage 9: `tests/test_pacing_interpretation.py` (33 tests)
   covering enum members/values, threshold constants (exact `Decimal`, never `float`),
   result-model shape/immutability/`campaign_id` copying, incompatible-input rejection
   (`AttributeError`, no silent coercion), exact boundary classification (immediately
@@ -374,7 +377,7 @@ All notable changes to this project are documented in this file.
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (29 concrete Stage
   9 scenarios).
 
-- Sprint 1, Development Stage 10: populated the previously-placeholder `src/constraints.py`
+- Sprint 2, Development Stage 10: populated the previously-placeholder `src/constraints.py`
   with `CampaignStaticBudgetRoom` (frozen, immutable, `extra="forbid"`: `campaign_id`,
   `room_to_static_maximum`, `room_to_static_minimum` only) and
   `calculate_campaign_static_budget_room(campaign: CampaignInput) ->
@@ -399,7 +402,7 @@ All notable changes to this project are documented in this file.
   Stages 3–4; no `float`, no re-quantisation, no rounding of the output. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 10: populated the previously-placeholder
+- Sprint 2, Development Stage 10: populated the previously-placeholder
   `tests/test_constraints.py` (25 tests) covering result-model shape/immutability/
   `campaign_id` copying, incompatible-input rejection (`AttributeError`, no silent
   coercion), exact calculations for a campaign strictly between bounds, exactly at
@@ -433,7 +436,7 @@ All notable changes to this project are documented in this file.
   re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (22 concrete
   Stage 10 scenarios).
 
-- Sprint 1, Development Stage 11: added `CampaignApplicableChangePercentage` (frozen,
+- Sprint 2, Development Stage 11: added `CampaignApplicableChangePercentage` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `applicable_max_change_percentage` only)
   and `resolve_campaign_applicable_change_percentage(review: ReviewSetup, campaign:
   CampaignInput) -> CampaignApplicableChangePercentage` to `src/constraints.py`,
@@ -459,7 +462,7 @@ All notable changes to this project are documented in this file.
   intersection, or any permissible budget movement. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 11: extended `tests/test_constraints.py` with 24 new
+- Sprint 2, Development Stage 11: extended `tests/test_constraints.py` with 24 new
   tests (all 25 existing Stage 10 tests preserved unchanged; 49 tests total) covering
   result-model shape/immutability/`campaign_id` copying/no-`None`-result,
   incompatible-input rejection (`AttributeError`, no silent coercion), exact
@@ -501,7 +504,7 @@ All notable changes to this project are documented in this file.
   handling, and eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (21 concrete Stage 11 scenarios).
 
-- Sprint 1, Development Stage 12: added `CampaignRawPercentageMovementCap` (frozen,
+- Sprint 2, Development Stage 12: added `CampaignRawPercentageMovementCap` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `raw_percentage_movement_cap` only) and
   `calculate_campaign_raw_percentage_movement_cap(campaign: CampaignInput,
   applicable_percentage: CampaignApplicableChangePercentage) ->
@@ -544,7 +547,7 @@ All notable changes to this project are documented in this file.
   ignores `is_protected`/`is_test_campaign`/`test_budget_floor`. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 12: extended `tests/test_constraints.py` with 35 new
+- Sprint 2, Development Stage 12: extended `tests/test_constraints.py` with 35 new
   tests (all 49 existing Stage 10/11 tests preserved unchanged; 84 tests total)
   covering result-model shape/immutability/`campaign_id` copying/no-`None`-result/
   two-decimal-place quantisation, incompatible-input rejection (`AttributeError`, no
@@ -588,7 +591,7 @@ All notable changes to this project are documented in this file.
   eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (29 concrete Stage 12 scenarios).
 
-- Sprint 1, Development Stage 13: added `CampaignTestFloorRoom` (frozen, immutable,
+- Sprint 2, Development Stage 13: added `CampaignTestFloorRoom` (frozen, immutable,
   `extra="forbid"`: `campaign_id`, `room_to_test_floor: Decimal | None` only) and
   `calculate_campaign_test_floor_room(campaign: CampaignInput) ->
   CampaignTestFloorRoom` to `src/constraints.py`, alongside but fully separate from
@@ -618,7 +621,7 @@ All notable changes to this project are documented in this file.
   re-quantised. The global `Decimal` context is never mutated and is unaffected by
   the call. `src/constants.py`, `src/models.py`, `src/validation.py`,
   `src/metrics.py`, `src/pacing.py`, and `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 13: extended `tests/test_constraints.py` with 35 new
+- Sprint 2, Development Stage 13: extended `tests/test_constraints.py` with 35 new
   tests (all 84 existing Stage 10/11/12 tests preserved unchanged; 119 tests total)
   covering result-model shape/immutability/`campaign_id` copying/two-decimal-place
   preservation, incompatible-input rejection (`AttributeError`, no silent coercion),
@@ -657,7 +660,7 @@ All notable changes to this project are documented in this file.
   protected-campaign handling explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (24 concrete Stage 13 scenarios).
 
-- Sprint 1, Development Stage 14: added `CampaignProtectionConstraint` (frozen,
+- Sprint 2, Development Stage 14: added `CampaignProtectionConstraint` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `decrease_blocked: bool` only) and
   `resolve_campaign_protection_constraint(campaign: CampaignInput) ->
   CampaignProtectionConstraint` to `src/constraints.py`, alongside but fully separate
@@ -686,7 +689,7 @@ All notable changes to this project are documented in this file.
   remains entirely unaddressed rather than assumed either way. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 14: extended `tests/test_constraints.py` with 28 new
+- Sprint 2, Development Stage 14: extended `tests/test_constraints.py` with 28 new
   tests (all 119 existing Stage 10/11/12/13 tests preserved unchanged; 147 tests
   total) covering result-model shape/immutability/`campaign_id` copying/no-Decimal-
   field confirmation, incompatible-input rejection (`AttributeError`, no silent
@@ -722,7 +725,7 @@ All notable changes to this project are documented in this file.
   and eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (18 concrete Stage 14 scenarios).
 
-- Sprint 1, Development Stage 15: added `CampaignTestAwareStaticDecreaseRoom` (frozen,
+- Sprint 2, Development Stage 15: added `CampaignTestAwareStaticDecreaseRoom` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `test_aware_static_decrease_room:
   Decimal` only) and `resolve_campaign_test_aware_static_decrease_room(static_room:
   CampaignStaticBudgetRoom, test_floor_room: CampaignTestFloorRoom) ->
@@ -763,7 +766,7 @@ All notable changes to this project are documented in this file.
   same Stage 15 result as an otherwise identical unprotected campaign with matching
   Stage 10/13 facts. `src/constants.py`, `src/models.py`, `src/validation.py`,
   `src/metrics.py`, `src/pacing.py`, and `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 15: extended `tests/test_constraints.py` with 39 new
+- Sprint 2, Development Stage 15: extended `tests/test_constraints.py` with 39 new
   tests (all 147 existing Stage 10/11/12/13/14 tests preserved unchanged; 186 tests
   total) covering result-model shape/immutability/field-type confirmation,
   incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
@@ -813,7 +816,7 @@ All notable changes to this project are documented in this file.
   directional intersections, and eligibility explicitly re-confirmed as pending
   later stages), and `docs/TEST_SCENARIOS.md` (23 concrete Stage 15 scenarios).
 
-- Sprint 1, Development Stage 16: added `CampaignRawIncreaseLimit` (frozen,
+- Sprint 2, Development Stage 16: added `CampaignRawIncreaseLimit` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `raw_increase_limit: Decimal` only) and
   `resolve_campaign_raw_increase_limit(static_room: CampaignStaticBudgetRoom,
   raw_cap: CampaignRawPercentageMovementCap) -> CampaignRawIncreaseLimit` to
@@ -851,7 +854,7 @@ All notable changes to this project are documented in this file.
   10/12 facts, and no increase-side protection rule is inferred. `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 16: extended `tests/test_constraints.py` with 40 new
+- Sprint 2, Development Stage 16: extended `tests/test_constraints.py` with 40 new
   tests (all 186 existing Stage 10/11/12/13/14/15 tests preserved unchanged; 226
   tests total) covering result-model shape/immutability/field-type confirmation,
   incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
@@ -902,7 +905,7 @@ All notable changes to this project are documented in this file.
   explicitly re-confirmed as pending later stages), and `docs/TEST_SCENARIOS.md` (24
   concrete Stage 16 scenarios).
 
-- Sprint 1, Development Stage 17: added `CampaignRawDecreaseLimit` (frozen,
+- Sprint 2, Development Stage 17: added `CampaignRawDecreaseLimit` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `raw_decrease_limit: Decimal` only)
   and `resolve_campaign_raw_decrease_limit(decrease_room:
   CampaignTestAwareStaticDecreaseRoom, raw_cap: CampaignRawPercentageMovementCap) ->
@@ -944,7 +947,7 @@ All notable changes to this project are documented in this file.
   Stage 12/15 facts, and the result is never described as usable or permissible
   decrease. `src/constants.py`, `src/models.py`, `src/validation.py`,
   `src/metrics.py`, `src/pacing.py`, and `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 17: extended `tests/test_constraints.py` with 46 new
+- Sprint 2, Development Stage 17: extended `tests/test_constraints.py` with 46 new
   tests (all 226 existing Stage 10/11/12/13/14/15/16 tests preserved unchanged; 272
   tests total) covering result-model shape/immutability/field-type confirmation,
   incompatible-input rejection (`AttributeError`, no silent coercion), campaign-ID
@@ -1002,7 +1005,7 @@ All notable changes to this project are documented in this file.
   eligibility explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (26 concrete Stage 17 scenarios).
 
-- Sprint 1, Development Stage 18: added `CampaignEffectiveDecreaseLimit` (frozen,
+- Sprint 2, Development Stage 18: added `CampaignEffectiveDecreaseLimit` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `effective_decrease_limit: Decimal`
   only) and `resolve_campaign_effective_decrease_limit(raw_decrease:
   CampaignRawDecreaseLimit, protection: CampaignProtectionConstraint) ->
@@ -1052,7 +1055,7 @@ All notable changes to this project are documented in this file.
   increase-side constraint. `src/constants.py`, `src/models.py`,
   `src/validation.py`, `src/metrics.py`, `src/pacing.py`, and
   `src/classification.py` are unchanged.
-- Sprint 1, Development Stage 18: extended `tests/test_constraints.py` with 50 new
+- Sprint 2, Development Stage 18: extended `tests/test_constraints.py` with 50 new
   tests (all 272 existing Stage 10/11/12/13/14/15/16/17 tests preserved unchanged;
   322 tests total) covering result-model shape/immutability/field-type
   confirmation (no `raw_decrease_limit`/`decrease_blocked`/`raw_increase_limit`/
@@ -1118,7 +1121,7 @@ All notable changes to this project are documented in this file.
   assessment explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (26 concrete Stage 18 scenarios).
 
-- Sprint 1, Development Stage 19: added a new dedicated module,
+- Sprint 2, Development Stage 19: added a new dedicated module,
   `src/availability.py`, containing `CampaignActionAvailability` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `increase_available: bool`,
   `maintain_available: bool`, `reduce_available: bool` only) and
@@ -1173,7 +1176,7 @@ All notable changes to this project are documented in this file.
   score. `src/constraints.py`, `src/classification.py`, `src/constants.py`,
   `src/models.py`, `src/validation.py`, `src/metrics.py`, and `src/pacing.py`
   are unchanged.
-- Sprint 1, Development Stage 19: added a new dedicated test file,
+- Sprint 2, Development Stage 19: added a new dedicated test file,
   `tests/test_availability.py` (61 tests, all passing;
   `tests/test_constraints.py` unchanged at 322 tests) covering result-model
   shape/immutability/field-type confirmation (no `hold_available`/eligibility/
@@ -1244,7 +1247,7 @@ All notable changes to this project are documented in this file.
   dedicated-module decision, and the corrected cross-campaign-boundary note),
   and `docs/TEST_SCENARIOS.md` (40 concrete Stage 19 scenarios).
 
-- Sprint 1, Development Stage 20: added a new dedicated module,
+- Sprint 2, Development Stage 20: added a new dedicated module,
   `src/suitability.py`, containing `Suitability` (`str, Enum`: `SUITABLE =
   "Suitable"`, `NEUTRAL = "Neutral"`, `UNSUITABLE = "Unsuitable"`,
   `NOT_APPLICABLE = "Not Applicable"` — purely categorical, no numeric value,
@@ -1315,7 +1318,7 @@ All notable changes to this project are documented in this file.
   `src/classification.py`, `src/constraints.py`, `src/availability.py`,
   `src/constants.py`, `src/models.py`, `src/validation.py`, `src/metrics.py`,
   and `src/pacing.py` are unchanged.
-- Sprint 1, Development Stage 20: added a new dedicated test file,
+- Sprint 2, Development Stage 20: added a new dedicated test file,
   `tests/test_suitability.py` (67 tests, all passing;
   `tests/test_availability.py` unchanged at 61 tests,
   `tests/test_constraints.py` unchanged at 322 tests) covering the
@@ -1387,7 +1390,7 @@ All notable changes to this project are documented in this file.
   later stages), and `docs/TEST_SCENARIOS.md` (39 concrete Stage 20
   scenarios).
 
-- Sprint 1, Development Stage 21: added a new dedicated module,
+- Sprint 2, Development Stage 21: added a new dedicated module,
   `src/recommendation.py`, containing `CampaignRecommendation` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `recommendation_action:
   RecommendationAction` only, reusing the existing `RecommendationAction`
@@ -1451,7 +1454,7 @@ All notable changes to this project are documented in this file.
   `src/scoring.py`, `src/classification.py`, `src/constraints.py`,
   `src/constants.py`, `src/models.py`, `src/validation.py`,
   `src/metrics.py`, and `src/pacing.py` are unchanged.
-- Sprint 1, Development Stage 21: added a new dedicated test file,
+- Sprint 2, Development Stage 21: added a new dedicated test file,
   `tests/test_recommendation.py` (84 tests, all passing;
   `tests/test_suitability.py` unchanged at 67 tests,
   `tests/test_availability.py` unchanged at 61 tests,
@@ -1535,7 +1538,7 @@ All notable changes to this project are documented in this file.
   `ReasonCode` explicitly re-confirmed as pending later stages), and
   `docs/TEST_SCENARIOS.md` (58 concrete Stage 21 scenarios).
 
-- Sprint 1, Development Stage 22: added a new dedicated module,
+- Sprint 2, Development Stage 22: added a new dedicated module,
   `src/reasons.py`, containing `CampaignRecommendationReason` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `reason_codes:
   tuple[ReasonCode, ...]` only — does not duplicate `recommendation_action`)
@@ -1608,7 +1611,7 @@ All notable changes to this project are documented in this file.
   `src/constraints.py`, `src/constants.py` (including the existing
   `ReasonCode` enum, unmodified), `src/models.py`, `src/validation.py`,
   `src/metrics.py`, and `src/pacing.py` are unchanged.
-- Sprint 1, Development Stage 22: added a new dedicated test file,
+- Sprint 2, Development Stage 22: added a new dedicated test file,
   `tests/test_reasons.py` (69 tests, all passing;
   `tests/test_recommendation.py` unchanged at 84 tests,
   `tests/test_suitability.py` unchanged at 67 tests,
@@ -1675,7 +1678,7 @@ All notable changes to this project are documented in this file.
   `ReasonCode` trigger conditions and the twelve still-pending), and
   `docs/TEST_SCENARIOS.md` (53 concrete Stage 22 scenarios).
 
-- Sprint 1, Development Stage 23: filled in the Sprint 1 placeholder pair
+- Sprint 2, Development Stage 23: filled in the Sprint 1 placeholder pair
   `src/scoring.py`/`tests/test_scoring.py` for the first time — no new
   module was created, unlike Stages 19–22, since the master plan already
   reserved this exact module for "campaign prioritization scoring."
@@ -1746,7 +1749,7 @@ All notable changes to this project are documented in this file.
   `src/reasons.py`, `src/suitability.py`, `src/availability.py`,
   `src/constraints.py`, `src/classification.py`, `src/constants.py`, and
   `src/models.py` are unchanged.
-- Sprint 1, Development Stage 23: added 81 new tests to
+- Sprint 2, Development Stage 23: added 81 new tests to
   `tests/test_scoring.py` (Sprint 1 placeholder filled in for the first
   time; all passing), covering result-model shape/immutability/range-and-
   total-consistency validation/serialization (no `recommendation_action`,
@@ -1807,7 +1810,7 @@ All notable changes to this project are documented in this file.
   allocation, and conservation remain pending), and `docs/TEST_SCENARIOS.md`
   (42 concrete Stage 23 scenarios).
 
-- Sprint 1, Development Stage 24: added a new dedicated module,
+- Sprint 2, Development Stage 24: added a new dedicated module,
   `src/ranking.py` — the first genuinely cross-campaign responsibility in
   this repository — containing `RankedCampaignPriority` (frozen,
   immutable, `extra="forbid"`: `campaign_id`, `rank: int` `>= 1`,
@@ -1884,7 +1887,7 @@ All notable changes to this project are documented in this file.
   monetary allocation decision. `src/scoring.py`, `src/recommendation.py`,
   `src/reasons.py`, `src/allocation.py`, `src/conservation.py`, and
   `src/constants.py` are unchanged.
-- Sprint 1, Development Stage 24: added 69 new tests to
+- Sprint 2, Development Stage 24: added 69 new tests to
   `tests/test_ranking.py` (new dedicated test file; all passing),
   covering result-model shape/immutability/range validation/serialization
   (no `recommendation_action`, `direction`, `confidence_component`,
@@ -1954,7 +1957,7 @@ All notable changes to this project are documented in this file.
   conservation remain pending), and `docs/TEST_SCENARIOS.md` (47 concrete
   Stage 24 scenarios).
 
-- Sprint 1, Development Stage 25: filled in the Sprint 1 placeholder pair
+- Sprint 2, Development Stage 25: filled in the Sprint 1 placeholder pair
   `src/allocation.py`/`tests/test_allocation.py` for the first time — no
   new module was created and no separate monetary recommendation-amount
   stage exists, per the accepted post-Stage-24 boundary decision.
@@ -2037,7 +2040,7 @@ All notable changes to this project are documented in this file.
   `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
   `src/conservation.py`, `src/constants.py`, and `src/models.py` are
   unchanged.
-- Sprint 1, Development Stage 25: added 79 new tests to
+- Sprint 2, Development Stage 25: added 79 new tests to
   `tests/test_allocation.py` (Sprint 1 placeholder filled in for the first
   time; all passing), covering result-model shape/immutability/
   non-negative-currency validation/quantisation/serialization (no
@@ -2111,7 +2114,7 @@ All notable changes to this project are documented in this file.
   Stage 25 scenarios, superseding the earlier placeholder "Allocation
   Scenarios" heading).
 
-- Sprint 1, Development Stage 26: filled in the Sprint 1 placeholder pair
+- Sprint 2, Development Stage 26: filled in the Sprint 1 placeholder pair
   `src/conservation.py`/`tests/test_conservation.py` for the first time —
   no new module was created. Added `CampaignReallocationConservation`
   (frozen, immutable, `extra="forbid"`: `total_increase_allocated:
@@ -2169,7 +2172,7 @@ All notable changes to this project are documented in this file.
   `src/allocation.py`, `src/ranking.py`, `src/scoring.py`,
   `src/recommendation.py`, `src/reasons.py`, `src/constraints.py`,
   `src/constants.py`, and `src/models.py` are unchanged.
-- Sprint 1, Development Stage 26: added 50 new tests to
+- Sprint 2, Development Stage 26: added 50 new tests to
   `tests/test_conservation.py` (Sprint 1 placeholder filled in for the
   first time; all passing), covering result-model shape/immutability/
   non-negative-total validation/serialization (no `campaign_count`,
@@ -2238,7 +2241,7 @@ All notable changes to this project are documented in this file.
   downstream stage), and `docs/TEST_SCENARIOS.md` (37 concrete Stage 26
   scenarios).
 
-- Sprint 1, Development Stage 27: added a new dedicated module,
+- Sprint 2, Development Stage 27: added a new dedicated module,
   `src/pipeline.py` — the final deterministic responsibility, completing
   the master plan's Sprint 2 "Deterministic Core Engine" goal in full —
   containing `CampaignBudgetRecommendationResult` (frozen, immutable,
@@ -2300,7 +2303,7 @@ All notable changes to this project are documented in this file.
   retry, no partial result, no campaign ever silently dropped, no input
   or upstream result object ever mutated. No enum was added or changed.
   No existing Stage 1–26 production or test module was modified.
-- Sprint 1, Development Stage 27: added 35 new tests to
+- Sprint 2, Development Stage 27: added 35 new tests to
   `tests/test_pipeline.py` (new dedicated test file, deliberately distinct
   from `tests/test_integration.py`, which remains reserved for the later,
   materially larger AI/UI-inclusive end-to-end flow and was not modified;
@@ -2368,3 +2371,18 @@ All notable changes to this project are documented in this file.
   approval, audit persistence, exports, and Sprint 4 hardening remain
   pending separate, later sprints), and `docs/TEST_SCENARIOS.md` (28
   concrete Stage 27 scenarios).
+
+## [Unreleased] — 2026-08-18 — Sprint-label documentation correction
+
+### Fixed
+- A consistency audit against the frozen `MASTER_PROJECT_PLAN.md` found that Development
+  Stages 1–27 throughout this changelog had been incorrectly labelled "Sprint 1" — the
+  master plan's Sprint 1 is the pre-development repository-foundation/scaffolding phase
+  only, and its Sprint 2 ("Deterministic Core Engine") planned scope explicitly names the
+  modules Stages 1–27 implemented (`src/models.py`, `src/validation.py`, `src/metrics.py`,
+  `src/pacing.py`, `src/classification.py`, `src/constraints.py`, `src/scoring.py`,
+  `src/allocation.py`, `src/conservation.py`, culminating in Stage 27's
+  `src/pipeline.py`). Every "Sprint 1, Development Stage N" label for Stages 1–27 was
+  corrected to "Sprint 2, Development Stage N", including the Stage 1 fix note above. No
+  stage number, implementation behaviour, test result, or code changed as part of this
+  correction; Sprint 1 remains, unchanged, the pre-development foundation phase.

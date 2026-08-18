@@ -43,6 +43,9 @@ A human-in-the-loop application that:
 
 ## Current Status
 
-**Sprint 1 — Foundation.** Repository structure and project-management documentation only;
-no business logic, calculation engine, Streamlit interface, or Gemini integration has been
-implemented yet.
+**Sprint 2 — Deterministic Core Engine complete.** Sprint 1 (Foundation) and Sprint 2
+(Development Stages 1–27: validation, metrics, pacing, classification, constraints,
+scoring, allocation, conservation, and final pipeline integration) are both complete, with
+a verified deterministic baseline of `1258 passed`. No Streamlit interface, Gemini
+integration, approval workflow, or audit/export logic exists yet — that is Sprint 3
+(Explanation, Approval, and Interface), which is next.

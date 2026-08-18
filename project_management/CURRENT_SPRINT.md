@@ -1,7 +1,9 @@
 # Current Sprint
 
-**Active sprint:** Sprint 1 — Development
-**Status:** Active (Development Stages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, and 21 complete)
+**Active sprint:** Sprint 3 — Explanation, Approval, and Interface (not yet started)
+**Status:** Sprint 2 — Deterministic Core Engine is complete. Development Stages 1–27 are
+complete; Stage 27 completed the deterministic core engine. Verified baseline:
+`1258 passed`. Sprint 3 is next; no Sprint 3 implementation has yet been completed.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
