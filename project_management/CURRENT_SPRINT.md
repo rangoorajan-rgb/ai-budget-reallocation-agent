@@ -2,10 +2,10 @@
 
 **Active sprint:** Sprint 3 — Explanation, Approval, and Interface (in progress)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
-Sprint 3, Development Stage 28 (deterministic Streamlit review shell) is complete.
-Verified baseline: `1289 passed` (1258 Stage 1–27 regression + 31 Stage 28). Sprint 3 is
-not yet complete — Gemini explanation, human approval, audit recording, exports, and
-configuration wiring remain unimplemented.
+Sprint 3, Development Stage 28 (deterministic Streamlit review shell) and Development
+Stage 29 (Gemini configuration foundation) are complete. Verified baseline: `1334 passed`
+(1258 Stage 1–27 regression + 31 Stage 28 + 45 Stage 29). Sprint 3 is not yet complete —
+Gemini explanation, human approval, audit recording, and exports remain unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -1646,21 +1646,95 @@ and initial project-management documentation) is complete and is not re-tracked 
 - Approval granularity, rejection-comment requirement, and audit-record
   content — open questions reserved for their own later stages.
 
+## Development Stage 29 — Gemini Configuration Foundation (complete)
+
+- [x] `config.py` (placeholder filled in for the first time — the Sprint 1
+      placeholder configuration module) — a narrow, explicit,
+      side-effect-controlled configuration boundary for Gemini API-key
+      availability only: `GeminiConfig` (frozen, `extra="forbid"`, exactly
+      one field, `api_key: SecretStr | None`),
+      `load_gemini_config(dotenv_path: str | Path | None = None) ->
+      GeminiConfig`, and `is_gemini_available(config: GeminiConfig) ->
+      bool`. No Gemini SDK is imported; no prompt construction, API call,
+      or UI wiring is implemented. `app.py` is untouched and does not
+      import `config` (AST-verified).
+- [x] **Source precedence**: the process environment variable
+      `GEMINI_API_KEY` (checked for presence in `os.environ`, not
+      truthiness) is authoritative whenever it exists — including when
+      explicitly blank, in which case it does not fall back to `.env`.
+      Only when the variable is entirely absent is a local `.env` file
+      consulted. Neither source yielding a non-blank value resolves to
+      `GeminiConfig(api_key=None)`, a normal, valid, non-raising state.
+- [x] **`.env` behavior**: read via `dotenv_values(...)`, never
+      `load_dotenv(...)`, so `os.environ` is never mutated. Default path
+      (used only when `dotenv_path` is not supplied):
+      `Path(__file__).resolve().parent / ".env"` — deterministic,
+      independent of the current working directory, never searched in
+      parent directories. A missing `.env`, a `.env` without
+      `GEMINI_API_KEY`, and a blank/whitespace-only `.env` value all
+      resolve the same as the equivalent environment-variable cases.
+- [x] **Normalization**: whitespace-trimming only — no case
+      transformation, no format/prefix validation, no live API check, no
+      logging, never included in an exception message.
+- [x] **Secret protection**: `SecretStr` redacts the value in `repr`,
+      `str`, `model_dump()`, and `model_dump_json()`; retrievable only via
+      the existing `config.api_key.get_secret_value()` — no alternative
+      accessor added. `is_gemini_available` never calls
+      `get_secret_value()`; availability is derived
+      (`api_key is not None`), never a stored field.
+- [x] **Import and side-effect policy**: importing `config` performs no
+      filesystem read, loads no `.env`, reads no environment variable,
+      imports no Streamlit, imports no Gemini SDK, and creates no
+      module-level configuration singleton. Configuration is loaded only
+      through an explicit call to `load_gemini_config()`.
+- [x] **Deterministic independence**: every Stage 28 capability — CSV
+      validation, deterministic pipeline execution, locked-result
+      rendering — remains fully functional with no Gemini key present. No
+      missing-key warning is added to the Stage 28 UI yet.
+- [x] **SDK mismatch recorded, not resolved**: `requirements.txt` declares
+      `google-generativeai`, not installed in this environment;
+      `google-genai` is installed instead. Stage 29 imports no Gemini SDK
+      at all; resolving the mismatch is deferred to the future Gemini
+      API-integration stage.
+- [x] `tests/test_config.py` (new dedicated test file) — 45 new Stage 29
+      tests, all passing, using only synthetic fake keys — no real secret
+      is ever read, printed, or asserted against. `tests/test_app.py`
+      (Stage 28, 31 tests) and `tests/test_integration.py` (untouched
+      placeholder) confirmed unmodified. Stage 1–27 regression re-run and
+      confirmed passing unchanged at 1258 tests; full Stage 1–28 suite
+      confirmed unchanged at 1289 tests. Full suite: 1334 tests passing
+      (1289 + 45).
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 29 (and not yet started)
+
+- Gemini SDK import or any live API call.
+- Explanation payload/prompt construction (`src/explanations.py`).
+- Gemini API integration (`src/gemini_analyzer.py`), including resolving
+  the `google-generativeai`/`google-genai` dependency mismatch.
+- Any missing-key warning or other UI wiring in `app.py`.
+- Human approval/rejection workflow (`src/approval.py`).
+- Immutable JSON audit recording (`src/audit.py`).
+- CSV export generation (`src/exports.py`).
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+
 ## Next Stage
 
-**Sprint 3 is underway; only Stage 28 is complete — Sprint 3 as a whole
-is not.** Stage 28 delivered the first Sprint 3 increment: a
-deterministic-only Streamlit shell with no forward dependency on
-configuration, Gemini, approval, audit, or exports.
+**Sprint 3 is underway; Stages 28 and 29 are complete — Sprint 3 as a
+whole is not.** Stage 29 delivered the Gemini API-key configuration
+boundary with no forward dependency on Gemini, approval, audit, or
+exports, and no change to `app.py`.
 
-The smallest dependency-ordered remaining Sprint 3 work, per the Stage 28
-read-only inspection, in provisional order (each still requires its own
-dependency/decision-readiness inspection before being frozen):
-configuration foundation (`config.py` — env-var loading, Gemini-
-availability flag, secret-redaction discipline); the Gemini explanation
-service (`src/explanations.py` + `src/gemini_analyzer.py`); wiring
-explanation display into the shell; human approval
-(`src/approval.py`); audit persistence (`src/audit.py`); exports
+The smallest dependency-ordered remaining Sprint 3 work, in provisional
+order (each still requires its own dependency/decision-readiness
+inspection before being frozen): explanation payload/prompt construction
+(`src/explanations.py` — defining exactly which locked fields Gemini may
+see); Gemini API integration (`src/gemini_analyzer.py` — must first
+resolve the `google-generativeai`/`google-genai` dependency mismatch
+recorded above); wiring explanation display into the shell; human
+approval (`src/approval.py`); audit persistence (`src/audit.py`); exports
 (`src/exports.py`); and finally the full end-to-end integration test
 (`tests/test_integration.py`). The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)

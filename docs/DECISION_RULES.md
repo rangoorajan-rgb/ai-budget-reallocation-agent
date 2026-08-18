@@ -2151,6 +2151,55 @@ plainly that the allocation is not conserved, and continues to display the full 
 result for inspection — never concealed, repaired, rebalanced, or rerun. Stage 28 has no
 approval controls at all, regardless of conservation status.
 
+## Stage 29 — Gemini Configuration Foundation
+
+**Rule.** `config.py` (Sprint 3, Development Stage 29) implements a narrow, explicit,
+side-effect-controlled configuration boundary for Gemini API-key availability only —
+`GeminiConfig` (frozen, `extra="forbid"`, exactly one field: `api_key: SecretStr | None`),
+`load_gemini_config(dotenv_path: str | Path | None = None) -> GeminiConfig`, and
+`is_gemini_available(config: GeminiConfig) -> bool`. No Gemini SDK is imported; no prompt
+construction, API call, or UI wiring is implemented.
+
+**Source precedence.** Exactly two sources, in order: the process environment variable
+`GEMINI_API_KEY` (checked for *presence*, not truthiness) is authoritative whenever it
+exists — including when explicitly blank, in which case it does **not** fall back to
+`.env`. Only when the variable is entirely absent from `os.environ` is a local `.env`
+file consulted. If neither source yields a non-blank value, the result is
+`GeminiConfig(api_key=None)` — a normal, valid, non-raising state.
+
+**`.env` behavior.** Read via `dotenv_values(...)`, never `load_dotenv(...)`, so
+`os.environ` is never mutated merely to read configuration. The default path — used only
+when `dotenv_path` is not supplied — is `Path(__file__).resolve().parent / ".env"`,
+derived deterministically from `config.py`'s own location, independent of the process's
+current working directory and never searched in parent directories. A missing `.env`
+file, a `.env` without `GEMINI_API_KEY`, and a blank/whitespace-only `.env` value all
+resolve to the same unavailable state as the equivalent environment-variable cases.
+
+**Normalization.** Whitespace-trimming only — no case transformation, no format/prefix
+validation, no live API check. A key is never logged or included in an exception message.
+
+**Secret protection.** `SecretStr` masks the value in `repr`, `str`, `model_dump()`, and
+`model_dump_json()`; the raw value is retrievable only via the existing
+`config.api_key.get_secret_value()` — no alternative accessor is added.
+`is_gemini_available` never calls `get_secret_value()`; availability is derived from
+`api_key is not None`, never stored as a separate field, so the two can never disagree.
+
+**Import and side-effect policy.** Importing `config` performs no filesystem read, loads
+no `.env`, reads no environment variable, imports no Streamlit, imports no Gemini SDK,
+and creates no module-level configuration singleton (no `CONFIG = load_gemini_config()`).
+Configuration is loaded only through an explicit call to `load_gemini_config()`.
+
+**Deterministic independence.** `app.py` is not modified and does not import `config`
+(AST-verified). Every Stage 28 capability — importing `app.py`, review-setup inputs, CSV
+validation, deterministic pipeline execution, locked-result rendering — remains fully
+functional with no Gemini key present. No missing-key warning is added to the Stage 28 UI
+yet; that is reserved for a later Sprint 3 stage.
+
+**SDK mismatch deferred.** `requirements.txt` declares `google-generativeai`, which is not
+installed in this environment; `google-genai` is installed instead. Stage 29 does not
+resolve this — it imports no Gemini SDK at all. Resolving the mismatch (choosing and
+declaring the correct dependency) is deferred to the future Gemini API-integration stage.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
@@ -2237,3 +2286,12 @@ approval controls at all, regardless of conservation status.
   pending later, separate stages/sprints — none is implemented by Stage
   28. Approval granularity, rejection-comment requirement, and audit-record
   content also remain open, reserved for their own later stages.
+- Stage 29 resolved the Gemini API-key configuration boundary (see above):
+  source precedence, blank-value normalization, `.env` behavior,
+  `SecretStr` redaction, and import-time side-effect freedom. It does not
+  resolve the `google-generativeai`/`google-genai` dependency mismatch,
+  does not construct any Gemini request, and does not wire anything into
+  `app.py`. Explanation payload/prompt construction, Gemini API
+  integration (including the deferred SDK choice), explanation UI wiring,
+  human approval, audit persistence, exports, and Sprint 4 hardening all
+  remain pending later, separate stages/sprints.

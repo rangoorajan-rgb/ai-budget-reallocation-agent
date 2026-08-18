@@ -1457,6 +1457,21 @@ Decimal formatted via `format(value, "f")`.
 **Excluded from Stage 28 entirely**: `config.py`, any Gemini input/output model, any
 approval-decision model, any audit-record model, any export format — none exists yet.
 
+## Gemini Configuration Fields (Stage 29, `config.py`)
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `api_key` | `SecretStr \| None` | The trimmed `GEMINI_API_KEY` value, sourced from the process environment or a local `.env` (never both — see Decision Rules); `None` is a normal, valid "Gemini unavailable" state, never an error. Redacted by `SecretStr` in `repr`/`str`/`model_dump`/`model_dump_json`; retrievable only via `.get_secret_value()`. |
+
+`GeminiConfig` (frozen, `extra="forbid"`) has exactly this one field. Availability is a
+derived function, `is_gemini_available(config) -> bool`, never a stored field — so a
+result can never claim availability that disagrees with `api_key`.
+
+**Excluded from Stage 29 entirely** (unjustified by any current evidence, or a future-stage
+concern): Gemini model name, request timeout, temperature, token/output limit, retry
+count, environment name, debug flag, audit/export directories, application title,
+deterministic feature flags. No Gemini SDK model or request/response type exists yet.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

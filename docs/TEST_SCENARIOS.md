@@ -1174,6 +1174,30 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 19 | Module imports/references | Never imports or references `config`, Gemini/`google-generativeai`, `src.explanations`, `src.approval`, `src.audit`, `src.exports` (AST-verified). |
 | 20 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
 
+## Gemini Configuration Foundation Scenarios (Stage 29, `config.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `GeminiConfig` schema | Exactly one field, `api_key`; `extra="forbid"`; frozen (assignment raises); `api_key=None` and the no-argument default both valid. |
+| 2 | Direct construction | `SecretStr` value round-trips via `.get_secret_value()`; a non-`str`/`SecretStr` value uses normal Pydantic validation (raises). |
+| 3 | `GEMINI_API_KEY` absent from `os.environ` and `.env` missing/absent | `load_gemini_config(...)` returns `GeminiConfig(api_key=None)`; `is_gemini_available(...)` is `False`. |
+| 4 | `GEMINI_API_KEY` present in the environment | Authoritative; trimmed; available — regardless of any `.env` content. |
+| 5 | `GEMINI_API_KEY` present but blank/whitespace-only in the environment | Unavailable; does **not** fall back to a populated `.env`. |
+| 6 | `GEMINI_API_KEY` absent from the environment, present (non-blank) in `.env` | Trimmed value used; available. |
+| 7 | `.env` present without `GEMINI_API_KEY`, or with a blank/whitespace-only value | Unavailable — same as the equivalent environment-variable cases. |
+| 8 | Explicit `dotenv_path` (`str` or `Path`) | Honored exactly; no other file is consulted. |
+| 9 | `dotenv_path=None` | Resolves to `Path(__file__).resolve().parent / ".env"`, deterministically — independent of current working directory, never a parent-directory search. |
+| 10 | `os.environ` before and after any `load_gemini_config(...)` call, with and without a real environment key set | Byte-for-byte unchanged — `dotenv_values` is used, never `load_dotenv`. |
+| 11 | Module source | Never references `load_dotenv`; no `try`/`except` inside `load_gemini_config` (AST-verified). |
+| 12 | Importing `config` | No environment read, no file read, no exception, works identically with or without a real key present; no module-level `CONFIG`/`config` singleton exists. |
+| 13 | Module imports | Never imports `streamlit` or any Gemini SDK (`google.generativeai`, `google.genai`) (AST-verified). |
+| 14 | `is_gemini_available` source | Never calls `get_secret_value()` (source-inspected). |
+| 15 | A synthetic fake key, once loaded | Absent from `repr(config)`, `str(config)`, `repr(config.model_dump())`, and `config.model_dump_json()`; retrievable only via `config.api_key.get_secret_value()`; no alternative accessor exists on the module. |
+| 16 | Absent/blank key loading | Raises nothing. |
+| 17 | `app.py` | Does not import `config` (AST-verified); still renders and runs correctly via `AppTest` with no `GEMINI_API_KEY` set. |
+| 18 | `tests/test_integration.py` | Contains no function or class definitions — still the untouched Sprint 3 placeholder. |
+| 19 | Real repository `.env` | Never created, read, or modified by any test — confirmed absent both before and after the suite runs. |
+
 ## Approval / Audit Scenarios
 
 > Pending a later Sprint 3 stage.

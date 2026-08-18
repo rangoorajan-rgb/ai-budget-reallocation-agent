@@ -2616,3 +2616,79 @@ for every successful-path test; the sole deliberate mock replaces
 verify the UI's failure handling for a scenario no legitimately valid
 input can trigger through the real chain.
 **Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 29: narrow Gemini configuration boundary
+
+**Decision:** `config.py` implements exactly one concern — Gemini
+API-key availability — via `GeminiConfig` (frozen, `extra="forbid"`,
+exactly one field: `api_key: SecretStr | None`), `load_gemini_config()`,
+and `is_gemini_available()`. No Gemini model name, timeout, temperature,
+token limit, retry count, environment name, debug flag, audit/export
+directory, application title, or feature flag is added — none is
+justified by any current evidence in this repository, and each is either
+a future-stage concern (owned by whichever stage actually needs it) or
+unjustified speculation. Availability is derived
+(`api_key is not None`), never a stored field, so it can never disagree
+with the actual key state. No Gemini SDK is imported and no prompt
+construction or API call is implemented — those remain reserved for a
+later stage.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 29: source precedence and `.env` policy
+
+**Decision:** Exactly two sources, in order: the process environment
+variable `GEMINI_API_KEY` — checked for *presence* in `os.environ`, not
+truthiness — is authoritative whenever it exists, including when
+explicitly blank, in which case it does not fall back to `.env`. Only
+when the variable is entirely absent is a local `.env` file consulted,
+read via `dotenv_values(...)` rather than `load_dotenv(...)` specifically
+so that `os.environ` is never mutated merely to read configuration. The
+default `.env` path — used only when `dotenv_path` is not supplied — is
+`Path(__file__).resolve().parent / ".env"`, derived deterministically
+from `config.py`'s own location, independent of the process's current
+working directory, and never searched in parent directories. Streamlit
+`st.secrets` is not supported: no `.streamlit/secrets.toml` or
+`.streamlit/` directory exists anywhere in this repository, and
+`config.py` does not import `streamlit`, keeping it fully testable and
+usable independent of any running Streamlit session.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 29: normalization and secret-protection policy
+
+**Decision:** Normalization is whitespace-trimming only — no case
+transformation, no format/prefix validation against a guessed key shape,
+no live API check, and a key is never logged or included in an exception
+message. Missing, blank, and whitespace-only keys are all normal, valid
+"Gemini unavailable" states (`GeminiConfig(api_key=None)`) and never
+raise. `pydantic.SecretStr` is used (already available in installed
+`pydantic==2.13.4`; no new dependency such as `pydantic-settings` was
+added, since the scope — one variable — does not justify it) so the value
+is redacted in `repr`, `str`, `model_dump()`, and `model_dump_json()`;
+the raw value is retrievable only through the existing
+`config.api_key.get_secret_value()`, with no alternative accessor added.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 29: no import-time side effects
+
+**Decision:** Importing `config` performs no filesystem read, loads no
+`.env`, reads no environment variable, imports no Streamlit, imports no
+Gemini SDK, makes no network call, and creates no module-level
+configuration singleton (no `CONFIG = load_gemini_config()`).
+Configuration is loaded only through an explicit call to
+`load_gemini_config()`. `app.py` is not modified and does not import
+`config` (AST-verified); every Stage 28 capability — importing `app.py`,
+review-setup inputs, CSV validation, deterministic pipeline execution,
+locked-result rendering — remains fully functional with no Gemini key
+present. No missing-key warning is added to the Stage 28 UI yet; that is
+reserved for a later Sprint 3 stage.
+**Status:** Frozen.
+
+## 2026-08-18 — Sprint 3, Development Stage 29: Gemini SDK mismatch recorded, not resolved
+
+**Decision:** `requirements.txt` declares `google-generativeai`, which is
+not installed in the current environment; `google-genai` is installed
+instead. Stage 29 imports no Gemini SDK at all, so this mismatch does not
+affect it. Changing the dependency declaration, choosing between the two
+SDKs, and importing either one are explicitly deferred to the future
+Gemini API-integration stage — Stage 29 must not resolve this.
+**Status:** Frozen.

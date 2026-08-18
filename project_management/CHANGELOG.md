@@ -2448,3 +2448,57 @@ All notable changes to this project are documented in this file.
 - Updated `docs/DATA_DICTIONARY.md` (Stage 28's consumed-model mapping and session-state
   key), `docs/DECISION_RULES.md` (frozen Stage 28 execution-gating, submission/session-state,
   exception, and rendering policies), and `docs/TEST_SCENARIOS.md` (Stage 28 scenarios).
+
+## [Unreleased] — 2026-08-18 — Sprint 3, Development Stage 29
+
+### Added
+- Sprint 3, Development Stage 29: filled in the Sprint 1 placeholder `config.py` as a
+  narrow, explicit, side-effect-controlled configuration boundary for Gemini API-key
+  availability only — `GeminiConfig` (frozen, `extra="forbid"`, exactly one field:
+  `api_key: SecretStr | None`), `load_gemini_config(dotenv_path: str | Path | None = None)
+  -> GeminiConfig`, and `is_gemini_available(config: GeminiConfig) -> bool`. No Gemini
+  model name, timeout, temperature, token limit, retry count, environment name, debug
+  flag, audit/export directory, application title, or feature flag was added — none is
+  justified by current repository evidence. No Gemini SDK is imported; no prompt
+  construction, API call, or UI wiring is implemented. `app.py` is untouched and does not
+  import `config` (AST-verified).
+- Sprint 3, Development Stage 29: exact two-source precedence — the process environment
+  variable `GEMINI_API_KEY` (checked for presence in `os.environ`, not truthiness) is
+  authoritative whenever it exists, including when explicitly blank, in which case it does
+  not fall back to `.env`; only when the variable is entirely absent is a local `.env` file
+  consulted, read via `dotenv_values(...)` (never `load_dotenv(...)`, so `os.environ` is
+  never mutated). Default `.env` path — used only when `dotenv_path` is not supplied — is
+  `Path(__file__).resolve().parent / ".env"`, deterministic and independent of the current
+  working directory, never searched in parent directories. Normalization is
+  whitespace-trimming only; missing, blank, and whitespace-only keys are all normal, valid
+  `GeminiConfig(api_key=None)` states and never raise.
+- Sprint 3, Development Stage 29: `pydantic.SecretStr` redacts the key in `repr`, `str`,
+  `model_dump()`, and `model_dump_json()`; retrievable only via the existing
+  `config.api_key.get_secret_value()`, with no alternative accessor added.
+  `is_gemini_available` never calls `get_secret_value()`; availability is derived
+  (`api_key is not None`), never a stored field. Importing `config` performs no
+  filesystem read, loads no `.env`, reads no environment variable, imports no Streamlit,
+  imports no Gemini SDK, and creates no module-level configuration singleton.
+- Sprint 3, Development Stage 29: recorded (not resolved) the `google-generativeai`
+  (declared in `requirements.txt`, not installed) versus `google-genai` (installed
+  instead) SDK mismatch — deferred to the future Gemini API-integration stage; Stage 29
+  imports no Gemini SDK at all.
+- Sprint 3, Development Stage 29: added a new dedicated test file, `tests/test_config.py`
+  — 45 new tests, all passing, using only synthetic fake keys (no real secret is ever
+  read, printed, or asserted against). Covers: the `GeminiConfig` schema, `extra="forbid"`,
+  frozen behavior, and valid/invalid direct construction; every combination of
+  present/absent/blank/whitespace-only environment and `.env` values and the exact
+  precedence between them; explicit-`dotenv_path` and deterministic-default-path
+  behavior with no parent/cwd search; zero `os.environ` mutation; zero import-time side
+  effects and no module-level singleton; no `streamlit`/Gemini-SDK import; secret
+  non-disclosure across `repr`/`str`/`model_dump()`/`model_dump_json()`; no exception on
+  absent/blank loading; `app.py` independence (AST-verified no `config` import, and a real
+  `AppTest` run with no `GEMINI_API_KEY` set); and confirmation that no real `.env` is ever
+  created or modified. `tests/test_app.py` (Stage 28, 31 tests) and
+  `tests/test_integration.py` (untouched placeholder) confirmed unmodified. Stage 1–27
+  regression re-confirmed unchanged at 1258 tests; full Stage 1–28 suite re-confirmed
+  unchanged at 1289 tests. Full suite: 1334 tests passing (1289 + 45).
+- Updated `docs/DATA_DICTIONARY.md` (the `GeminiConfig` field and Stage 29's excluded
+  values), `docs/DECISION_RULES.md` (frozen Stage 29 source-precedence, normalization,
+  secret-protection, import/side-effect, deterministic-independence, and deferred-SDK
+  policies), and `docs/TEST_SCENARIOS.md` (Stage 29 scenarios).
