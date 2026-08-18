@@ -1,6 +1,6 @@
 # Test Scenarios
 
-> Sprint 1, Development Stage 21 populates the Campaign Recommendation
+> Sprint 2, Development Stage 21 populates the Campaign Recommendation
 > Scenarios section below, backed by the new `tests/test_recommendation.py`
 > (84 tests, a dedicated file for the new `src/recommendation.py` module —
 > Stage 21 does not extend `tests/test_suitability.py`, which remains

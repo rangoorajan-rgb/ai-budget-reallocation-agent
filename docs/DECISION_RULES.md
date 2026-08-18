@@ -1,6 +1,6 @@
 # Decision Rules
 
-> Sprint 1, Development Stage 21. Records the frozen enumerations, frozen numerical
+> Sprint 2, Development Stage 21. Records the frozen enumerations, frozen numerical
 > constants, the frozen deterministic validation rules, the frozen deterministic
 > metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
 > neutral performance-, trend-, conversion-volume-confidence-, and
@@ -15,7 +15,7 @@
 > suitability rule, and the frozen ordered campaign recommendation-action
 > selection rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
 > `ReasonCode`, numeric prioritisation scoring, ranking, and allocation rules are
-> pending later Sprint 1 stages.
+> pending later Sprint 2 stages.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -57,7 +57,7 @@ thresholds — a symmetric ±10% on-pace tolerance band around `1.00`, applied t
 `CampaignPacing.pacing_ratio` only (see the Stage 9 rules below). The remaining
 constants are reserved names and values only; no classification, constraint, scoring,
 allocation, or conservation logic reads or applies them yet — that is pending later
-Sprint 1 stages.
+Sprint 2 stages.
 
 ## Validation Codes (`src/constants.py`)
 
@@ -75,7 +75,7 @@ Sprint 1 stages.
 problems found before any recommendation logic runs; `ReasonCode` (pending) will describe
 *recommendation/allocation* outcomes. They are never reused for each other's purpose.
 
-## Deterministic Validation Rules (Sprint 1, Development Stage 2)
+## Deterministic Validation Rules (Sprint 2, Development Stage 2)
 
 These rules govern `src/validation.py`, which validates raw `ReviewSetup` input and
 campaign CSV data. `ReviewSetup` and `CampaignInput` (`src/models.py`) remain the sole
@@ -134,7 +134,7 @@ re-implements a rule they already enforce.
   `INVALID_CAMPAIGN_FIELD`) instead of leaking the internal exception. No other exception
   types are broadly suppressed.
 
-## Deterministic Metric Calculation Rules (Sprint 1, Development Stage 3)
+## Deterministic Metric Calculation Rules (Sprint 2, Development Stage 3)
 
 These rules govern `src/metrics.py`, which calculates performance-ratio **facts** for an
 already-validated `CampaignInput`. Stage 3 calculates facts only — it never classifies,
@@ -178,7 +178,7 @@ sole authoritative source of the input guarantees these formulas rely on (`kpi_t
   three are present — `src/metrics.py` performs no zero-guard, exception handling, or
   sentinel-value logic, and duplicates none of these validators.
 
-## Deterministic Pacing Calculation Rules (Sprint 1, Development Stage 4)
+## Deterministic Pacing Calculation Rules (Sprint 2, Development Stage 4)
 
 These rules govern `src/pacing.py`, which calculates calendar and linear spend-pacing
 **facts** for one already-validated `ReviewSetup` and one already-validated
@@ -241,7 +241,7 @@ conversion-volume constant.
   `review_date`/`period_start`/`period_end` and `current_budget`/`spend_to_date` — never
   on `platform` or `kpi_type`, and never on any Stage 3 `CampaignMetrics` output.
 
-## Deterministic Performance Classification Rules (Sprint 1, Development Stage 5)
+## Deterministic Performance Classification Rules (Sprint 2, Development Stage 5)
 
 These rules govern `src/classification.py`, which classifies one already-calculated
 `CampaignMetrics` instance into a neutral `PerformanceBand`. Stage 5 is a **descriptive
@@ -282,7 +282,7 @@ recalculates it.
   Stage 5 creates no precedence or override rule for those later considerations; it
   simply does not consider them.
 
-## Deterministic Trend Classification Rules (Sprint 1, Development Stage 6)
+## Deterministic Trend Classification Rules (Sprint 2, Development Stage 6)
 
 These rules govern the trend-classification additions to `src/classification.py`, which
 classify one already-calculated `CampaignMetrics` instance's `trend_delta` into a neutral
@@ -336,7 +336,7 @@ independent of `PerformanceBand`/`CampaignPerformanceClass` (Stage 5). `Campaign
   trend direction regardless of its conversion volume, tracking reliability, or pacing —
   Stage 6 creates no precedence or override rule for those later considerations.
 
-## Deterministic Conversion-Volume Confidence Classification Rules (Sprint 1, Development Stage 7)
+## Deterministic Conversion-Volume Confidence Classification Rules (Sprint 2, Development Stage 7)
 
 These rules govern the confidence-classification addition to `src/classification.py`,
 which classifies one already-validated `CampaignInput` instance's `conversions_28d`
@@ -389,7 +389,7 @@ never re-validates or recalculates it.
   not read `tracking_status` or any `CampaignPacing` fact. `CampaignPerformanceClass`
   and `CampaignTrendClass` are unmodified by Stage 7.
 
-## Deterministic Tracking-Based Assessability Rules (Sprint 1, Development Stage 8)
+## Deterministic Tracking-Based Assessability Rules (Sprint 2, Development Stage 8)
 
 These rules govern the tracking-assessability addition to `src/classification.py`,
 which determines one already-validated `CampaignInput` instance's assessability from
@@ -434,7 +434,7 @@ decision, a score, a recommendation, a reason code, or an allocation. `CampaignI
   relates to it is deferred to a later combined-assessment stage, which must preserve
   the independent Stage 7 conversion-volume result rather than overwriting it.
 
-## Deterministic Pacing Interpretation Rules (Sprint 1, Development Stage 9)
+## Deterministic Pacing Interpretation Rules (Sprint 2, Development Stage 9)
 
 These rules govern the pacing-interpretation addition to `src/pacing.py`, which
 classifies one already-calculated `CampaignPacing` instance's `pacing_ratio` into a
@@ -496,7 +496,7 @@ constraint, eligibility decision, score, recommendation, reason code, or allocat
   across pacing, performance, trend, confidence, and tracking assessability, remain
   pending a later combined-assessment stage.
 
-## Deterministic Static Budget-Bound Calculation Rules (Sprint 1, Development Stage 10)
+## Deterministic Static Budget-Bound Calculation Rules (Sprint 2, Development Stage 10)
 
 These rules govern `src/constraints.py`, which calculates one already-validated
 `CampaignInput` instance's static distance to its validated `maximum_budget` and
@@ -575,7 +575,7 @@ authoritative source of `current_budget`/`minimum_budget`/`maximum_budget`;
   `ReasonCode`, no score, and no allocation field — it is strictly a pair of static
   distance facts, consumed by a later, still-undesigned effective-constraint stage.
 
-## Deterministic Applicable Change-Percentage Resolution Rules (Sprint 1, Development Stage 11)
+## Deterministic Applicable Change-Percentage Resolution Rules (Sprint 2, Development Stage 11)
 
 These rules govern the addition to `src/constraints.py` that resolves, for one
 already-validated `ReviewSetup` and one already-validated `CampaignInput`, which
@@ -636,7 +636,7 @@ the sole authoritative source of `campaign_max_change_percentage`/
   increase/decrease, and full precedence among static bounds, percentage caps,
   protection, and test floors are all still undecided.
 
-## Deterministic Raw Percentage-Based Monetary Movement-Cap Calculation Rules (Sprint 1, Development Stage 12)
+## Deterministic Raw Percentage-Based Monetary Movement-Cap Calculation Rules (Sprint 2, Development Stage 12)
 
 These rules govern the addition to `src/constraints.py` that calculates, for one
 already-validated `CampaignInput` and its already-resolved Stage 11
@@ -727,7 +727,7 @@ re-validates or re-resolves them.
   allocation field — it is strictly a raw, informational monetary fact, consumed by a
   later, still-undesigned effective-constraint stage.
 
-## Deterministic Test-Floor Distance Calculation Rules (Sprint 1, Development Stage 13)
+## Deterministic Test-Floor Distance Calculation Rules (Sprint 2, Development Stage 13)
 
 These rules govern the addition to `src/constraints.py` that calculates, for one
 already-validated `CampaignInput`, a raw test-floor distance fact. Stage 13 is a
@@ -785,7 +785,7 @@ source of `is_test_campaign`/`current_budget`/`test_budget_floor`;
   raw-cap intersection, and protected-campaign handling all remain pending later
   stages.
 
-## Deterministic Protection Constraint Rules (Sprint 1, Development Stage 14)
+## Deterministic Protection Constraint Rules (Sprint 2, Development Stage 14)
 
 These rules govern the addition to `src/constraints.py` that states, for one
 already-validated `CampaignInput`, a neutral, decrease-specific protection
@@ -831,7 +831,7 @@ Stages 10–13. `CampaignInput` remains the sole authoritative source of
   `decrease_blocked` will eventually combine with Stage 10's static room, Stage 12's
   raw cap, or Stage 13's test-floor room into any effective decrease limit.
 
-## Deterministic Test-Aware Static Decrease Room Rules (Sprint 1, Development Stage 15)
+## Deterministic Test-Aware Static Decrease Room Rules (Sprint 2, Development Stage 15)
 
 These rules govern the addition to `src/constraints.py` that combines one
 already-calculated `CampaignStaticBudgetRoom` (Stage 10) and one already-calculated
@@ -899,7 +899,7 @@ never recalculates either.
   directional intersections (with Stage 12's percentage cap) and effective
   constraints (applying Stage 14's protection) both remain pending later stages.
 
-## Deterministic Raw Increase Limit Rules (Sprint 1, Development Stage 16)
+## Deterministic Raw Increase Limit Rules (Sprint 2, Development Stage 16)
 
 These rules govern the addition to `src/constraints.py` that combines one
 already-calculated `CampaignStaticBudgetRoom` (Stage 10) and one already-calculated
@@ -966,7 +966,7 @@ authoritative sources of `room_to_static_maximum` and `raw_percentage_movement_c
   Stage 14's protection and Stage 15's test-aware decrease room) both remain pending
   later stages.
 
-## Deterministic Raw Decrease Limit Rules (Sprint 1, Development Stage 17)
+## Deterministic Raw Decrease Limit Rules (Sprint 2, Development Stage 17)
 
 These rules govern the addition to `src/constraints.py` that combines one
 already-calculated `CampaignTestAwareStaticDecreaseRoom` (Stage 15) and one
@@ -1046,7 +1046,7 @@ combine with Stage 16's raw increase limit. `CampaignTestAwareStaticDecreaseRoom
   (combining Stage 16's raw increase limit, this Stage 17 raw decrease limit, and
   Stage 14's protection constraint) both remain pending later stages.
 
-## Deterministic Protection-Adjusted Effective Decrease Limit Rules (Sprint 1, Development Stage 18)
+## Deterministic Protection-Adjusted Effective Decrease Limit Rules (Sprint 2, Development Stage 18)
 
 These rules govern the addition to `src/constraints.py` that applies one
 already-calculated `CampaignProtectionConstraint` (Stage 14) to one already-
@@ -1135,7 +1135,7 @@ either.
   assessment question (performance, trend, confidence, tracking, pacing) both
   remain deferred to later stages.
 
-## Deterministic Campaign Action Availability Rules (Sprint 1, Development Stage 19)
+## Deterministic Campaign Action Availability Rules (Sprint 2, Development Stage 19)
 
 These rules govern `src/availability.py`, a new dedicated module, which determines
 for one already-validated `CampaignInput` and its already-approved Stage 8, Stage
@@ -1239,7 +1239,7 @@ mechanically possible, never a recommendation.
   assessability, and both directional monetary constraints simultaneously, and
   is not purely a monetary constraint, a descriptive classification, or a score.
 
-## Deterministic Conservative Diagonal-Only Campaign Action Suitability Rules (Sprint 1, Development Stage 20)
+## Deterministic Conservative Diagonal-Only Campaign Action Suitability Rules (Sprint 2, Development Stage 20)
 
 These rules govern `src/suitability.py`, a new dedicated module, which
 determines for one already-calculated `CampaignPerformanceClass` (Stage 5), one
@@ -1346,7 +1346,7 @@ Stage 20 must not select `RecommendationAction`, select `HOLD`, produce
   monetary constraint, availability, or numeric scoring. `src/scoring.py`
   remains unchanged, reserved for later numeric prioritisation-scoring work.
 
-## Deterministic Ordered Campaign Recommendation-Action Selection Rules (Sprint 1, Development Stage 21)
+## Deterministic Ordered Campaign Recommendation-Action Selection Rules (Sprint 2, Development Stage 21)
 
 These rules govern `src/recommendation.py`, a new dedicated module, which
 selects for one already-validated `CampaignInput`, one already-calculated

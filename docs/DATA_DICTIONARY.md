@@ -1459,10 +1459,10 @@ approval-decision model, any audit-record model, any export format — none exis
 
 ## Derived Fields
 
-> Pending a later Sprint 1 stage (combined confidence/tracking/pacing assessment,
+> Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
 > conditions).
 
 ## Export Fields
 
-> Pending a later Sprint 1 stage (`src/exports.py`).
+> Pending a later Sprint 3 stage (`src/exports.py`).
