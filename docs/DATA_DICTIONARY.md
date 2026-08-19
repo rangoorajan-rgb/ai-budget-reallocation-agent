@@ -1603,6 +1603,52 @@ fingerprint; normal operation (the submission-time clearing above) never reaches
 **Excluded from Stage 33 entirely**: any confirmation checkbox, radio selector, or
 change-decision control; any audit, export, or platform-execution state.
 
+## Audit Record Fields (Stage 34, `src/audit.py`)
+
+**`CampaignReallocationAudit`** (frozen, `extra="forbid"`) — the durable, structured record
+of exactly one complete locked review and its finalized decision. Embeds the existing
+frozen Stage 27/33 models directly — no copied result, campaign, conservation, or approval
+schema exists:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `audit_id` | `str` | `f"audit_{sha256(canonical_bytes).hexdigest()}"` over the canonical JSON of `{"result": result, "approval": approval}`, excluding `recorded_at`. Also the filename stem: `audit_records/{audit_id}.json`. |
+| `review_id` | `str` | Always `result.review_id`. |
+| `result` | `BudgetReallocationReviewResult` | The complete locked Stage 27 result, embedded unchanged. |
+| `approval` | `CampaignReallocationApproval` | The complete finalized Stage 33 decision, embedded unchanged. |
+| `recorded_at` | `datetime` | Timezone-aware; a naive value is rejected by a `@field_validator`, and any aware value is normalized to UTC. The first successful write's value is authoritative — a later idempotent retry never replaces it. |
+
+**Functions**: `build_campaign_reallocation_audit(result, approval, recorded_at)` — pure, no
+file/environment/clock/network/SDK access — and `record_campaign_reallocation_audit(audit,
+*, directory=None)`. `build_...` raises exactly `ValueError("Approval review_id does not
+match the locked result's review_id.")` when the two disagree, and exactly
+`ValueError("An unconserved allocation cannot be recorded as approved.")` when
+`decision is ReviewStatus.APPROVED` but `result.conservation.is_conserved` is `False`; a
+rejected unconserved result is always valid. No public read, list, delete, repair,
+overwrite, or retry function exists — reserved for a later Stage 35 export stage.
+
+**Excluded from Stage 34 entirely**: any schema version, source filename, input/result
+hash, application version, export status, or Gemini explanation text/status/model
+name/error — no field exists merely because audit systems often have one; every included
+field has a named consumer. Any `config`, `src.explanations`, `src.gemini_analyzer`,
+`src.exports`, `streamlit`, Gemini SDK, or network/database reference — structurally
+guaranteed via AST-based isolation tests.
+
+## Audit UI Session State (Stage 34, `app.py`)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `audit_record_path` (`AUDIT_RECORD_PATH_STATE_KEY`) | `str \| None` | The successfully persisted record's path (as `str`), or `None` before any attempt, after a failure, or after a new deterministic submission. Only ever set from an actual `record_campaign_reallocation_audit` return value — never fabricated. |
+| `audit_record_error` (`AUDIT_RECORD_ERROR_STATE_KEY`) | `str \| None` | The one fixed sanitized failure message, or `None` on success / before any attempt / after a new submission. Never a raw exception, stack trace, or filesystem detail. |
+
+Both keys are cleared at the start of every new deterministic-review submission, alongside
+the existing locked-result, explanation, and approval state. The UI renders only the audit
+ID (the filename stem) on success — the full local filesystem path is never displayed.
+
+**Excluded from Stage 34 entirely**: any confirmation checkbox, radio selector, or
+change-decision control on the audit outcome itself; any automatic retry; any export or
+platform-execution state.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

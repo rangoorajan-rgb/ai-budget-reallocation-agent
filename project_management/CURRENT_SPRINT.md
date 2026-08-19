@@ -4,11 +4,10 @@
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 Sprint 3, Development Stages 28 (deterministic Streamlit review shell), 29 (Gemini
 configuration foundation), 30 (explanation payload and prompt construction), 31 (Gemini
-explanation transport), 32 (explanation UI wiring), and 33 (human approval workflow) are
-complete. Verified baseline: `1588 passed` (1523 Stage 1–32 regression + 31 Stage 33
-domain tests in `tests/test_approval.py` + 34 Stage 33 UI tests in
-`tests/test_app_approval.py`). Sprint 3 is not yet complete — audit recording and exports
-remain unimplemented.
+explanation transport), 32 (explanation UI wiring), 33 (human approval workflow), and 34
+(audit persistence) are complete. Verified baseline: `1647 passed` (1588 Stage 1–33
+regression + 38 Stage 34 domain tests in `tests/test_audit.py` + 21 Stage 34 UI tests in
+`tests/test_app_audit.py`). Sprint 3 is not yet complete — exports remain unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -2131,18 +2130,197 @@ and initial project-management documentation) is complete and is not re-tracked 
   (`tests/test_integration.py`, reserved, untouched).
 - Persisting, overwriting, or reconsidering a finalized decision.
 
+## Development Stage 34 — Audit Persistence (complete)
+
+- [x] `src/audit.py` (populated for the first time — placeholder
+      replaced) — the durable, structured record of exactly one complete
+      locked `BudgetReallocationReviewResult` and its finalized
+      `CampaignReallocationApproval`. The only component in the project
+      that persists anything to disk.
+- [x] **Exact model**: `CampaignReallocationAudit` (frozen,
+      `extra="forbid"`: `audit_id: str`, `review_id: str`, `result:
+      BudgetReallocationReviewResult`, `approval:
+      CampaignReallocationApproval`, `recorded_at: datetime`). Embeds the
+      existing frozen Stage 27/33 models directly — no parallel result,
+      campaign, conservation, or approval schema is created. A
+      `@field_validator` rejects a naive `recorded_at` and normalizes any
+      timezone-aware value to UTC.
+- [x] **Exact functions**: `build_campaign_reallocation_audit(result,
+      approval, recorded_at)` — pure, no file/environment/clock/network/SDK
+      access — and `record_campaign_reallocation_audit(audit, *,
+      directory=None)`. No public read, list, delete, repair, overwrite,
+      or retry function exists; enumeration/export is reserved for Stage
+      35.
+- [x] **Consistency checks**, checked in order before construction:
+      `approval.review_id == result.review_id`, else exactly
+      `ValueError("Approval review_id does not match the locked result's
+      review_id.")`; if `decision is ReviewStatus.APPROVED`,
+      `result.conservation.is_conserved` must be `True`, else exactly
+      `ValueError("An unconserved allocation cannot be recorded as
+      approved.")`. A rejected unconserved result is always recordable.
+      Neither input is ever repaired, rebalanced, rerun, reinterpreted, or
+      mutated.
+- [x] **No wall-clock call in `src/audit.py`**: `recorded_at` is always
+      supplied by the caller. The one production call to
+      `datetime.now(timezone.utc)` lives in `app.py`'s
+      `_attempt_audit_recording`, the single Stage 34 audit-action
+      boundary, and is passed straight into
+      `build_campaign_reallocation_audit`.
+- [x] **Deterministic, content-derived audit ID**: `audit_id =
+      f"audit_{sha256(canonical_bytes).hexdigest()}"`, where
+      `canonical_bytes` is the canonical JSON of exactly `{"result":
+      result, "approval": approval}` — excluding `recorded_at` entirely.
+      No UUID, no `hash()`, no raw `review_id` path component, no
+      timestamp contributes to the ID. Canonical serialization matches
+      `src/explanations.py`'s existing policy: model declaration field
+      order, `ensure_ascii=False`, compact separators, `Decimal` as
+      fixed-point strings via `format(value, "f")`, enums via `.value`,
+      tuples as arrays, `recorded_at` as ISO-8601 with an explicit UTC
+      offset.
+- [x] **Persistence**: one UTF-8 JSON file per record at
+      `audit_records/{audit_id}.json` (default directory resolved from
+      `src/audit.py`'s own location, never the current working
+      directory; overridable via `directory=`), written to a temporary
+      file in the same directory, flushed and closed, then finalized via
+      atomic `os.replace`; a failure during serialization or finalization
+      leaves no temporary or final file behind.
+- [x] **Idempotency**: a pre-existing file with the same `audit_id` and
+      the same substantive content (`review_id`, `result`, `approval` —
+      `recorded_at` excluded, since the first successful write's
+      timestamp is authoritative) is a no-op success returning the
+      original path unchanged. A pre-existing file with different
+      content raises exactly `ValueError("An audit record with this
+      audit_id already exists with different content.")`. A pre-existing
+      file that cannot be parsed and validated raises without being
+      overwritten. This makes a Streamlit rerun or a manual retry safe.
+- [x] **No Gemini, configuration, export, network, or database coupling**:
+      `src/audit.py` never imports `config`, `src.explanations`,
+      `src.gemini_analyzer`, `src.exports`, `streamlit`, a Gemini SDK, or
+      any network/database client — structurally guaranteed via
+      AST-based isolation tests. An audit record contains only the
+      locked deterministic result, the human decision, an audit
+      identifier, and a timestamp.
+- [x] `app.py` (extended, not replaced) — audit persistence happens
+      automatically from the same approve/reject click, not a separate
+      confirmation action: create the decision → store it in
+      `APPROVAL_DECISION_STATE_KEY` (finalized regardless of what happens
+      next) → build the audit with the current UTC timestamp → persist it
+      → store the outcome → rerun. A disk failure never reopens, erases,
+      or allows replacement of the already-finalized decision.
+- [x] **Exact session-state keys**: `AUDIT_RECORD_PATH_STATE_KEY =
+      "audit_record_path"`, `AUDIT_RECORD_ERROR_STATE_KEY =
+      "audit_record_error"`, both cleared at the start of every new
+      deterministic-review submission alongside the existing
+      locked-result, explanation, and approval state.
+- [x] **Exact success rendering**: `st.success("Audit record written.")`
+      plus a caption `Audit ID: {audit_id}` (the filename stem) — the
+      full local filesystem path is never displayed anywhere.
+- [x] **Exact failure rendering**: the finalized approval/rejection
+      remains fully visible; `st.error("The decision was finalized, but
+      its audit record could not be written.")` — no raw exception, stack
+      trace, temporary filename, directory, or other filesystem detail is
+      ever shown; exactly one `st.button("Retry audit recording",
+      key="retry_audit_recording")`. Retry performs no new
+      approval/rejection, reuses the already-finalized approval and
+      locked result, builds with a new current UTC timestamp, relies on
+      domain idempotency if the first write actually succeeded before the
+      UI observed failure, and only runs when clicked — no automatic
+      retry loop, and ordinary reruns never write again.
+- [x] **One approved exception, narrower than Stage 32/33 — plus one
+      additional authorized test-harness change**: `tests/test_app.py`'s
+      `test_module_does_not_import_forbidden_modules` and
+      `test_module_does_not_reference_forbidden_names`,
+      `tests/test_app_explanation.py`'s `test_no_audit_or_export_imports`,
+      and `tests/test_app_approval.py`'s
+      `test_no_audit_export_or_platform_imports_in_app` were narrowed to
+      permit `src.audit` only (`src.exports` remains forbidden and
+      enforced everywhere). Separately, `tests/test_app_approval.py`'s
+      `_fresh_app()` and `_unconserved_app()` helpers were converted from
+      `AppTest.from_file` to `AppTest.from_string` with
+      `app.record_campaign_reallocation_audit` redirected to an isolated
+      OS temp directory embedded directly in the executed script — the
+      only mechanism that reliably intercepts a real approve/reject
+      click's now-automatic audit write, since `AppTest.from_file`
+      executes in a namespace that does not honor an external
+      monkeypatch of this function (confirmed empirically). All 34
+      pre-existing Stage 33 UI tests and assertions are unchanged; only
+      the harness plumbing changed, and no test in that file writes a
+      real file under the repository's `audit_records/`.
+- [x] `tests/test_audit.py` (populated for the first time — placeholder
+      replaced) — 38 new Stage 34 domain tests, all passing. Covers exact
+      model fields, `extra="forbid"`, frozen, aware-UTC timestamp
+      acceptance, naive-timestamp rejection, non-UTC-aware normalization,
+      the exact ID-mismatch and unconserved-approval error messages,
+      rejected-unconserved acceptance, deterministic audit-ID
+      construction (excluding `recorded_at`; changing with reviewer/note/
+      result content), fixed-point `Decimal` preservation including
+      trailing zeros and extreme values, enum/tuple/datetime
+      preservation, byte-for-byte canonical-JSON determinism,
+      missing-directory creation, successful `tmp_path` writes, identical
+      and different-timestamp idempotent retries, conflicting- and
+      malformed-existing-record rejection without overwrite,
+      serialization/finalization-failure cleanup leaving no partial file,
+      non-mutation of `result`/`approval`, isolation from Gemini/config/
+      exports/network/database, and the absence of any public read/list/
+      delete/export function.
+- [x] `tests/test_app_audit.py` (new dedicated test file) — 21 new Stage
+      34 UI tests, all passing, using `AppTest.from_string` with the
+      audit-directory redirect embedded directly in each script and zero
+      real network/filesystem/Gemini calls. Covers: an approved or
+      rejected decision automatically creating exactly one record; the
+      correct locked result and finalized approval reaching the builder;
+      one click causing one persistence call; zero additional writes on
+      ordinary and repeated reruns; the exact success message and audit
+      ID (never the full path); a failed write leaving the decision fully
+      finalized with the exact sanitized message, no raw exception, and
+      exactly one retry control; retry performing no second approval
+      call and clearing the error on success; no automatic retry on
+      ordinary reruns; audit-state clearing on both a new valid and a
+      new invalid submission; independence from Gemini explanation
+      actions; and full deterministic-result visibility and non-mutation
+      throughout. A file-scoped autouse fixture restores
+      `app.build_campaign_reallocation_audit`,
+      `app.record_campaign_reallocation_audit`, and the Stage 27/31/33
+      functions to their real implementations before every test,
+      mirroring the established defensive pattern against `AppTest`'s
+      shared `sys.modules["app"]` singleton.
+- [x] Stage 1–33 regression re-run and confirmed passing unchanged at
+      `1588 passed`. Full suite: `1647 passed` (1588 + 38 + 21).
+      Confirmed zero test-created files under the repository's real
+      `audit_records/` directory (only the pre-existing `.gitkeep`
+      remains) across every verification pass.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 34 (and not yet started)
+
+- CSV export generation (`src/exports.py`).
+- Any public function to read, list, or enumerate audit records — Stage
+  35's own responsibility, built on this stage's frozen schema and
+  filename convention.
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched).
+- A database, cloud storage, user authentication, or electronic
+  signature of any kind — audit storage remains local JSON on disk, per
+  the frozen `DECISIONS.md` entry.
+- Any guarantee of durability under ephemeral or multi-instance hosting
+  — local-file persistence is correct for the project's current
+  single-user, desktop-oriented scope, but does not survive a
+  stateless/ephemeral cloud filesystem being wiped on redeploy, and
+  remains a named Sprint 4 limitation, not a Stage 34 defect.
+
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28 through 33 are complete — Sprint 3 as a
-whole is not.** Stage 33 delivered the one-decision-per-portfolio human
-approval workflow, reusing the existing `ReviewStatus` enum, with the
-locked deterministic result remaining fully visible and authoritative in
-every state and no audit/export/persistence behavior anywhere in scope.
+**Sprint 3 is underway; Stages 28 through 34 are complete — Sprint 3 as a
+whole is not.** Stage 34 delivered automatic, same-click, idempotent
+audit persistence for every finalized human decision, embedding the
+existing frozen Stage 27/33 models directly rather than copying them,
+with a deterministic content-derived audit ID, no Gemini coupling, and a
+UI that never claims a record was written unless it actually was.
 
-The smallest dependency-ordered remaining Sprint 3 work, in provisional
-order (each still requires its own dependency/decision-readiness
-inspection before being frozen): audit persistence (`src/audit.py`);
-exports (`src/exports.py`); and finally the full end-to-end integration
-test (`tests/test_integration.py`). The remaining `ReasonCode` members'
+The smallest dependency-ordered remaining Sprint 3 work: exports
+(`src/exports.py`), building on Stage 34's frozen schema and filename
+convention; and finally the full end-to-end integration test
+(`tests/test_integration.py`). The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
 remain open and independent of this sequence. Sprint 4 remains deferred.

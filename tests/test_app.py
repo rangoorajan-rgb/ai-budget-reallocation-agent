@@ -91,9 +91,13 @@ def test_module_does_not_import_forbidden_modules():
     # was removed at Sprint 3, Development Stage 33 because app.py now
     # legitimately imports it for the human approval workflow
     # (`approve_campaign_reallocation_review`/
-    # `reject_campaign_reallocation_review`). Every other forbidden import
-    # below — audit/export modules and any Gemini SDK module — is
-    # unchanged and still enforced.
+    # `reject_campaign_reallocation_review`). `src.audit` was removed at
+    # Sprint 3, Development Stage 34 because app.py now legitimately
+    # imports it for automatic audit-record persistence
+    # (`build_campaign_reallocation_audit`/
+    # `record_campaign_reallocation_audit`). Every other forbidden import
+    # below — the export module and any Gemini SDK module — is unchanged
+    # and still enforced.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
     for node in ast.walk(tree):
@@ -104,7 +108,6 @@ def test_module_does_not_import_forbidden_modules():
                 imported_modules.add(alias.name)
 
     forbidden_modules = {
-        "src.audit",
         "src.exports",
         "google.generativeai",
         "genai",
@@ -120,7 +123,11 @@ def test_module_does_not_reference_forbidden_names():
     # guarantee that app.py never references `config.api_key`,
     # `SecretStr`, or `get_secret_value()`. `approval` was removed at
     # Sprint 3, Development Stage 33 because app.py now legitimately calls
-    # the human-approval domain functions directly by name. Every other
+    # the human-approval domain functions directly by name. `audit` was
+    # removed at Sprint 3, Development Stage 34 because app.py now
+    # legitimately binds a local `audit = build_campaign_reallocation_audit(...)`
+    # variable inside its one audit-action boundary — see
+    # tests/test_app_audit.py for that stage's own coverage. Every other
     # forbidden name below is unchanged and still enforced.
     tree = ast.parse(inspect.getsource(app))
     referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
@@ -130,7 +137,6 @@ def test_module_does_not_reference_forbidden_names():
         "genai",
         "generativeai",
         "gemini",
-        "audit",
         "exports",
         "explanations",
     }

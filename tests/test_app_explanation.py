@@ -680,8 +680,11 @@ def test_no_audit_or_export_imports():
     # Approved exception (Sprint 3, Development Stage 33): `src.approval`
     # was removed from this forbidden set because app.py now legitimately
     # imports it for the human approval workflow — see
-    # tests/test_app_approval.py for that stage's own coverage.
-    # `src.audit`/`src.exports` remain forbidden and unchanged.
+    # tests/test_app_approval.py for that stage's own coverage. Approved
+    # exception (Sprint 3, Development Stage 34): `src.audit` was removed
+    # because app.py now legitimately imports it for automatic
+    # audit-record persistence — see tests/test_app_audit.py for that
+    # stage's own coverage. `src.exports` remains forbidden and unchanged.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
     for node in ast.walk(tree):
@@ -690,7 +693,7 @@ def test_no_audit_or_export_imports():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported_modules.add(alias.name)
-    assert imported_modules.isdisjoint({"src.audit", "src.exports"})
+    assert imported_modules.isdisjoint({"src.exports"})
 
 
 # ---------------------------------------------------------------------------

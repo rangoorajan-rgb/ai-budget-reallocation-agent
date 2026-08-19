@@ -17,6 +17,7 @@ made.
 
 import ast
 import inspect
+import tempfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -33,6 +34,37 @@ from src.gemini_analyzer import generate_explanation
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 APP_PATH = Path(__file__).resolve().parent.parent / "app.py"
+
+
+def _audit_redirect_snippet() -> str:
+    """Build a script snippet that redirects `app.record_campaign_reallocation_audit`
+    to a fresh, isolated OS temp directory (never the repository's real
+    `audit_records/`).
+
+    Authorized addition (Sprint 3, Development Stage 34): every real
+    approve/reject click in this file now also attempts automatic audit
+    persistence, since that is part of the same click `app.py` already
+    exercises here. Every `AppTest` construction site below embeds this
+    snippet before `app.main()` runs, so none of this file's pre-existing
+    Stage 33 tests ever write a real file into the tracked repository
+    directory. This does not change what any test verifies -- only the
+    harness plumbing.
+    """
+    audit_dir = tempfile.mkdtemp(prefix="stage33_test_audit_")
+    return f'''
+import src.audit as audit_module
+from pathlib import Path as _AuditPath
+
+_real_record_campaign_reallocation_audit = audit_module.record_campaign_reallocation_audit
+_STAGE33_AUDIT_DIR = _AuditPath({audit_dir!r})
+
+
+def _stage33_redirected_record(audit, *, directory=None):
+    return _real_record_campaign_reallocation_audit(audit, directory=_STAGE33_AUDIT_DIR)
+
+
+app.record_campaign_reallocation_audit = _stage33_redirected_record
+'''
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +100,14 @@ VALID_REVIEW = {
 
 
 def _fresh_app() -> AppTest:
-    at = AppTest.from_file(str(APP_PATH))
+    # AppTest.from_file executes app.py in an isolated namespace that does
+    # not honor an external monkeypatch of a real approve/reject click's
+    # automatic Stage 34 audit write (confirmed empirically), so this
+    # helper uses AppTest.from_string with the redirect embedded directly
+    # in the executed script instead -- the only mechanism that reliably
+    # takes effect.
+    script = "import app\n" + _audit_redirect_snippet() + "\napp.main()\n"
+    at = AppTest.from_string(script)
     at.run(timeout=10)
     assert not at.exception
     return at
@@ -156,12 +195,12 @@ def _unconserved_run(review, campaigns):
     )
 
 app.run_budget_reallocation_review = _unconserved_run
-app.main()
 """
 
 
 def _unconserved_app() -> AppTest:
-    at = AppTest.from_string(_UNCONSERVED_SCRIPT_HEADER)
+    script = _UNCONSERVED_SCRIPT_HEADER + _audit_redirect_snippet() + "\napp.main()\n"
+    at = AppTest.from_string(script)
     at.run(timeout=10)
     return at
 
@@ -187,7 +226,12 @@ def _app_test_with_fake_approve(body: str) -> AppTest:
     itself, mirroring the pattern already established in
     `tests/test_app_explanation.py`.
     """
-    script = _APPROVAL_FAKE_HEADER + body + "\napp.approve_campaign_reallocation_review = _fake_approve\napp.main()\n"
+    script = (
+        _APPROVAL_FAKE_HEADER
+        + _audit_redirect_snippet()
+        + body
+        + "\napp.approve_campaign_reallocation_review = _fake_approve\napp.main()\n"
+    )
     at = AppTest.from_string(script)
     at.run(timeout=10)
     return at
@@ -488,7 +532,12 @@ def _fake_generate_explanation(prompt, config):
         error_message="The request timed out.",
     )
 """
-    script = "import app\n" + body + "\napp.generate_explanation = _fake_generate_explanation\napp.main()\n"
+    script = (
+        "import app\n"
+        + body
+        + _audit_redirect_snippet()
+        + "\napp.generate_explanation = _fake_generate_explanation\napp.main()\n"
+    )
     at = AppTest.from_string(script)
     at.run(timeout=10)
     _submit_valid_sample(at)
@@ -582,6 +631,11 @@ def _fake_approve(result, reviewer_name, *, note=None):
 
 
 def test_no_audit_export_or_platform_imports_in_app():
+    # Approved exception (Sprint 3, Development Stage 34): `src.audit` was
+    # removed from this forbidden set because app.py now legitimately
+    # imports it for automatic audit-record persistence — see
+    # tests/test_app_audit.py for that stage's own coverage. `src.exports`
+    # remains forbidden and unchanged.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
     for node in ast.walk(tree):
@@ -590,7 +644,7 @@ def test_no_audit_export_or_platform_imports_in_app():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported_modules.add(alias.name)
-    assert imported_modules.isdisjoint({"src.audit", "src.exports"})
+    assert imported_modules.isdisjoint({"src.exports"})
 
 
 def test_no_filesystem_or_network_calls_in_approval_section():

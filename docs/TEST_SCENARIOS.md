@@ -1323,3 +1323,43 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 32 | An unexpected exception raised by the domain function | Contained at the single decision-action boundary: a concise generic error shown, no raw exception/provider detail exposed, no decision stored, the locked result remains visible. |
 | 33 | Module source (AST-verified) | No `src.audit`/`src.exports` import; no filesystem/network reference in the approval section or click handler. |
 | 34 | `_handle_submission` source | Clears `APPROVAL_DECISION_STATE_KEY`, `approval_reviewer_name`, and `approval_note` at the start of every submission. |
+
+## Audit Persistence Scenarios (Stage 34, `src/audit.py` and `app.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `CampaignReallocationAudit` model fields | Exactly `audit_id`, `review_id`, `result`, `approval`, `recorded_at`; `extra="forbid"`; frozen; `result`/`approval` are the embedded Stage 27/33 model instances, not copies. |
+| 2 | A timezone-aware `recorded_at` (UTC or otherwise) | Accepted; a non-UTC aware value is normalized to the equivalent UTC instant. |
+| 3 | A naive `recorded_at` | Rejected by Pydantic validation. |
+| 4 | `approval.review_id != result.review_id` | `build_campaign_reallocation_audit` raises exactly `ValueError("Approval review_id does not match the locked result's review_id.")`. |
+| 5 | An `APPROVED` decision on an unconserved result | Raises exactly `ValueError("An unconserved allocation cannot be recorded as approved.")`. |
+| 6 | A `REJECTED` decision on an unconserved result | Builds successfully. |
+| 7 | The same `(result, approval)` pair, built twice | Identical `audit_id` both times. |
+| 8 | The same `(result, approval)` pair with two different `recorded_at` values | Identical `audit_id` — the timestamp never contributes to it. |
+| 9 | A different `reviewer_name`, `note`, or any locked-result field | A different `audit_id`. |
+| 10 | `Decimal` values with trailing zeros or at the extreme size `Currency` can hold | Serialized as an exact fixed-point string via `format(value, "f")` — never scientific notation, never a JSON number. |
+| 11 | Enum and tuple fields in the embedded result | Serialized as `.value` and as a JSON array, respectively. |
+| 12 | The same audit record serialized into two different directories | Byte-for-byte identical file contents. |
+| 13 | A missing target directory | Created via `parents=True, exist_ok=True` before the write. |
+| 14 | A successful write | Returns a `Path` named `{audit_id}.json`; the file exists and is valid JSON. |
+| 15 | An identical retry (same `audit_id` and substantive content, same or different `recorded_at`) | Idempotent no-op: returns the original path, leaves the original file's bytes and `recorded_at` unchanged. |
+| 16 | A pre-existing file under the same `audit_id` with genuinely different content | Raises exactly `ValueError("An audit record with this audit_id already exists with different content.")`; the existing file is left untouched. |
+| 17 | A pre-existing file that is not valid JSON, or fails `CampaignReallocationAudit` validation | Raises without overwriting the existing file. |
+| 18 | A simulated failure during serialization or finalization (e.g. `os.replace` raising) | No temporary or final file is left behind. |
+| 19 | `result`/`approval` before and after `build_...`/`record_...` | `model_dump()` unchanged — never mutated. |
+| 20 | Module source (AST-verified) | No `config`/`src.explanations`/`src.gemini_analyzer`/`src.exports`/`streamlit`/Gemini-SDK/network/database import or reference; no `datetime.now`/`utcnow` call anywhere in the module; no public top-level function name starting with `read_`/`list_`/`delete_`/`export_`/`repair_`/`retry_`/`overwrite_` — the only public names are `build_campaign_reallocation_audit` and `record_campaign_reallocation_audit`. |
+| 21 | A successful approve or reject click | Automatically builds and persists exactly one audit record from that same click — no separate confirmation action exists. |
+| 22 | The audit builder's actual call arguments | The correct locked result and the correct finalized approval (matching reviewer name and decision) reach it. |
+| 23 | One decision click | Exactly one call to `record_campaign_reallocation_audit`. |
+| 24 | An ordinary rerun, or several, after a successful audit write | Zero additional persistence calls. |
+| 25 | A successful audit write | Renders `st.success("Audit record written.")` and a caption `Audit ID: {audit_id}` (the filename stem); the full local filesystem path never appears in any rendered element or session-state value read by the UI. |
+| 26 | A failed audit write | The finalized decision (`Decision: APPROVED`/`REJECTED`, approver, note) remains fully visible and unchanged. |
+| 27 | A failed audit write | Renders exactly `st.error("The decision was finalized, but its audit record could not be written.")`; no raw exception type, message, traceback, or filesystem path appears anywhere. |
+| 28 | A failed audit write | Exactly one `st.button("Retry audit recording", key="retry_audit_recording")` is present; no approve/reject button is present. |
+| 29 | A retry click | Calls no approval/rejection function again; only re-attempts audit persistence. |
+| 30 | A retry click that succeeds | Clears the error state, stores the successful path, and renders the same success message/audit ID as a first-attempt success. |
+| 31 | Ordinary reruns after a failed audit write, without clicking retry | Zero additional persistence calls — no automatic retry loop. |
+| 32 | A new successful *and* a new invalid deterministic submission, after a prior audit outcome | Both clear `audit_record_path` and `audit_record_error`. |
+| 33 | An explanation-generation click, or the campaign selector | Neither affects audit state; audit success/failure state also never affects explanation state. |
+| 34 | The locked result's `model_dump()` and rendered campaign table, before and after a successful or failed audit write | Unchanged. |
+| 35 | Every UI test in `tests/test_app_audit.py` and every real approve/reject click in `tests/test_app_approval.py` | Writes only under a `tmp_path`-derived or isolated OS temp directory; the repository's real `audit_records/` directory contains no test-created file after any run. |

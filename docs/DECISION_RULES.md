@@ -2534,6 +2534,128 @@ explicit pre-approval, because `app.py` now legitimately imports `src.approval` 
 approval UI. Every other forbidden entry in all three tests (`src.audit`, `src.exports`,
 any Gemini SDK module or name) is unchanged and still enforced.
 
+## Stage 34 — Audit Persistence
+
+**Rule.** `src/audit.py` (Sprint 3, Development Stage 34) implements the durable, structured
+record of exactly one complete locked `BudgetReallocationReviewResult` and its finalized
+`CampaignReallocationApproval`. This is the only component in the project that persists
+anything to disk. **Embeds, never copies** — `CampaignReallocationAudit.result` and
+`.approval` embed the existing frozen Stage 27/33 models directly; no parallel result,
+campaign, conservation, or approval schema exists, eliminating any drift risk between an
+audit copy and what was actually locked and decided. This is a deliberate departure from
+Stage 30's narrower-payload precedent, which exists specifically to minimize what crosses
+an external, adversarial-facing Gemini boundary — an audit record's purpose is the
+opposite: total internal fidelity.
+
+**Exact model.** `CampaignReallocationAudit` (frozen, `extra="forbid"`): `audit_id: str`,
+`review_id: str`, `result: BudgetReallocationReviewResult`, `approval:
+CampaignReallocationApproval`, `recorded_at: datetime`. A `@field_validator` rejects a
+naive `recorded_at` and normalizes any timezone-aware value to UTC.
+
+**Exact functions.** `build_campaign_reallocation_audit(result, approval, recorded_at) ->
+CampaignReallocationAudit` — pure, no file/environment/clock/network/SDK access — and
+`record_campaign_reallocation_audit(audit, *, directory=None) -> Path`. No public read,
+list, delete, repair, overwrite, or retry function exists anywhere in this module —
+enumeration/export is explicitly reserved for a later Stage 35, which can build on this
+stage's frozen schema and filename convention without this module growing a repository
+abstraction it does not yet need.
+
+**Consistency checks, not re-decision.** `build_campaign_reallocation_audit` re-asserts, at
+the one place a bad record would become permanent, the same invariants
+`src/approval.py` already enforces at decision time, checked in this exact order: (1)
+`approval.review_id == result.review_id`, else exactly `ValueError("Approval review_id does
+not match the locked result's review_id.")`; (2) only when `decision is
+ReviewStatus.APPROVED`, `result.conservation.is_conserved` must be `True`, else exactly
+`ValueError("An unconserved allocation cannot be recorded as approved.")`. A rejected
+unconserved result is always recordable. Neither input is ever repaired, rebalanced,
+rerun, reinterpreted, or mutated.
+
+**No wall-clock call in `src/audit.py`.** `recorded_at` is always supplied by the caller.
+The one production call to `datetime.now(timezone.utc)` lives in `app.py`'s
+`_attempt_audit_recording`, the single Stage 34 audit-action boundary, mirroring the "no
+hidden non-determinism in a domain module" discipline enforced everywhere else in this
+project and keeping the audit layer deterministically testable with injected timestamps.
+
+**Deterministic, content-derived audit ID.** `audit_id = f"audit_{sha256(canonical_bytes)
+.hexdigest()}"`, where `canonical_bytes` is the canonical JSON of exactly `{"result":
+result, "approval": approval}` — `recorded_at` is excluded entirely, so a retried write of
+the *same* decision always resolves to the same file regardless of when the retry happens.
+No UUID, no Python's unstable `hash()`, no raw `review_id` used as a path component, and no
+timestamp ever contributes to the ID. Canonical serialization matches the policy already
+established in `src/explanations.py`: model declaration field order (never alphabetical),
+`ensure_ascii=False`, compact separators `(",", ":")`, no indentation; `Decimal` values as
+fixed-point strings via `format(value, "f")`; enums via `.value`; tuples as JSON arrays;
+nested frozen models serialized recursively in their own declared field order;
+`recorded_at` as an ISO-8601 string with an explicit UTC offset.
+
+**Persistence: one file per record, atomic, idempotent.** One UTF-8 JSON file per record at
+`audit_records/{audit_id}.json` — default directory resolved from `src/audit.py`'s own
+location, never the current working directory, overridable via `directory=`. Written to a
+temporary file in the same directory, flushed and closed, then finalized via `os.replace`
+(atomic on both POSIX and Windows) — no reader can ever observe a partially written file,
+and a failure during serialization or finalization leaves no temporary or final file
+behind. A pre-existing file with the same `audit_id` and the same substantive content
+(`review_id`, `result`, `approval` — `recorded_at` excluded, since the first successful
+write's timestamp is authoritative) is an idempotent no-op, returning the original path
+unchanged. A pre-existing file with genuinely different content raises exactly
+`ValueError("An audit record with this audit_id already exists with different content.")`;
+one that cannot be parsed and validated back into `CampaignReallocationAudit` raises
+without being overwritten or repaired.
+
+**No Gemini, configuration, export, network, or database coupling.** `src/audit.py` never
+imports `config`, `src.explanations`, `src.gemini_analyzer`, `src.exports`, `streamlit`, a
+Gemini SDK, or any network/database client — structurally guaranteed via AST-based
+isolation tests. An audit record contains only the locked deterministic result, the human
+decision, an audit identifier, and a timestamp; no Gemini explanation text, status, model
+name, or error — including no placeholder noting an explanation was unavailable — can ever
+enter it, since a durable, permanent record must never preserve supplementary,
+non-authoritative, potentially provider- or adversarially-influenced text with no
+mechanism to ever correct it.
+
+**Automatic same-click persistence; failure never reopens the decision.** `app.py` attempts
+audit persistence automatically from the same approve/reject click that finalizes the
+human decision — there is no separate "Record audit" confirmation action. The decision
+(`APPROVAL_DECISION_STATE_KEY`) is stored and finalized before the audit attempt runs, and
+remains finalized regardless of whether that attempt succeeds. New session-state keys
+`AUDIT_RECORD_PATH_STATE_KEY = "audit_record_path"` and `AUDIT_RECORD_ERROR_STATE_KEY =
+"audit_record_error"` are cleared at the start of every new deterministic submission,
+alongside the existing locked-result, explanation, and approval state. On success:
+`st.success("Audit record written.")` plus a caption `Audit ID: {audit_id}` (the filename
+stem) — the full local filesystem path is never displayed anywhere. On failure: the
+finalized decision remains fully visible and unchanged; `st.error("The decision was
+finalized, but its audit record could not be written.")` with no raw exception, stack
+trace, temporary filename, directory, or other filesystem detail ever exposed; exactly one
+`st.button("Retry audit recording", key="retry_audit_recording")` that performs no new
+approval/rejection, reuses the already-finalized approval and locked result, builds with a
+fresh current UTC timestamp, relies on the stage's own idempotency if the first write
+actually succeeded before the UI observed failure, only runs when clicked, and never fires
+automatically on an ordinary rerun. The UI never claims a record was written unless
+`record_campaign_reallocation_audit` actually returned a path.
+
+**Deployment limitation, stated honestly.** Local-file persistence under `audit_records/`
+is correct for this project's current single-user, desktop-oriented scope — it does not
+survive a stateless/ephemeral cloud filesystem being wiped on redeploy, and has no
+cross-process lock beyond what atomic single-file replacement buys per write. This remains
+a named Sprint 4 hardening/deployment concern, not a Stage 34 defect, and is not solved
+with a database here per the frozen `DECISIONS.md` "Audit storage is JSON on local disk"
+entry.
+
+**One approved test exception, plus one additional authorized test-harness change.** Four
+pre-existing AST-based isolation assertions — `tests/test_app.py`'s
+`test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, `tests/test_app_explanation.py`'s
+`test_no_audit_or_export_imports`, and `tests/test_app_approval.py`'s
+`test_no_audit_export_or_platform_imports_in_app` — were narrowed to permit `src.audit`
+only; `src.exports` remains forbidden and enforced in all four. Separately,
+`tests/test_app_approval.py`'s `_fresh_app()`/`_unconserved_app()` helpers were converted
+from `AppTest.from_file` to `AppTest.from_string`, with
+`app.record_campaign_reallocation_audit` redirected to an isolated OS temp directory
+embedded directly in the executed script — required because Stage 34 made every real
+approve/reject click also attempt automatic audit persistence, and `AppTest.from_file`
+executes app.py in a namespace that does not honor an external `monkeypatch` of this
+function (confirmed empirically). All 34 pre-existing Stage 33 tests and their assertions
+are unchanged; only the harness plumbing changed.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/

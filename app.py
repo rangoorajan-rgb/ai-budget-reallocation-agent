@@ -30,15 +30,27 @@ failed, or generated). This module never accesses `config.api_key`,
 never references `SecretStr`, never calls `get_secret_value()`, never
 reads an environment variable or `.env` file directly, and never stores
 a `GeminiConfig` or API key in session state — only the resulting,
-already-redacted `ExplanationResult` is ever kept. Human approval, audit
-recording, exports, and full integration testing remain out of scope and
-are not imported, called, or stubbed here — they remain reserved for
-later Sprint 3 stages.
+already-redacted `ExplanationResult` is ever kept.
+
+**Stage 34 — automatic audit recording.** The moment an approve/reject
+click successfully finalizes a decision, this module builds and persists
+one Stage 34 audit record for it — the same click, not a separate
+confirmation action. A failed audit write never reopens, erases, or
+allows replacement of the already-finalized decision; it only leaves the
+audit outcome visibly unrecorded, with one manual retry control that
+performs no new approval/rejection. This module never claims a record
+was written unless `record_campaign_reallocation_audit` actually
+returned a path, never displays a raw exception or filesystem detail,
+and never displays the full local audit-file path — only the audit ID
+(the filename stem). Exports and full integration testing remain out of
+scope and are not imported, called, or stubbed here — they remain
+reserved for later Sprint 3 stages.
 """
 
 import io
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import streamlit as st
 
@@ -48,6 +60,7 @@ from src.approval import (
     approve_campaign_reallocation_review,
     reject_campaign_reallocation_review,
 )
+from src.audit import build_campaign_reallocation_audit, record_campaign_reallocation_audit
 from src.constants import DEFAULT_MAX_CHANGE_PERCENTAGE, ReviewStatus
 from src.explanations import (
     build_campaign_explanation_payload,
@@ -69,6 +82,12 @@ PORTFOLIO_EXPLANATION_STATE_KEY = "portfolio_explanation_result"
 CAMPAIGN_EXPLANATION_STATE_KEY = "campaign_explanation_result"
 CAMPAIGN_EXPLANATION_ID_STATE_KEY = "campaign_explanation_campaign_id"
 APPROVAL_DECISION_STATE_KEY = "approval_decision_result"
+AUDIT_RECORD_PATH_STATE_KEY = "audit_record_path"
+AUDIT_RECORD_ERROR_STATE_KEY = "audit_record_error"
+
+_AUDIT_FAILURE_MESSAGE = (
+    "The decision was finalized, but its audit record could not be written."
+)
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -354,20 +373,75 @@ def _render_finalized_approval(approval: CampaignReallocationApproval) -> None:
         st.write(f"Decision note: {approval.note}")
 
 
+def _attempt_audit_recording(
+    result: BudgetReallocationReviewResult, approval: CampaignReallocationApproval
+) -> None:
+    """Build and persist one Stage 34 audit record for an already-finalized
+    decision, storing either the successful path or a sanitized failure
+    message in session state.
+
+    The one production wall-clock call in this entire module happens
+    here, and only here: `datetime.now(timezone.utc)` is passed straight
+    into `build_campaign_reallocation_audit`, never called inside
+    `src/audit.py` itself. Never re-decides, reopens, or replaces the
+    already-finalized `approval` — a failure here only affects the audit
+    session-state keys, never `APPROVAL_DECISION_STATE_KEY`. No raw
+    exception, filesystem detail, or path is ever stored or shown; only
+    a `Path` (on success) or the one fixed sanitized message (on
+    failure).
+    """
+    try:
+        audit = build_campaign_reallocation_audit(result, approval, datetime.now(timezone.utc))
+        path = record_campaign_reallocation_audit(audit)
+    except Exception:  # noqa: BLE001 -- deliberate single audit-action boundary catch
+        st.session_state[AUDIT_RECORD_PATH_STATE_KEY] = None
+        st.session_state[AUDIT_RECORD_ERROR_STATE_KEY] = _AUDIT_FAILURE_MESSAGE
+        return
+    st.session_state[AUDIT_RECORD_PATH_STATE_KEY] = str(path)
+    st.session_state[AUDIT_RECORD_ERROR_STATE_KEY] = None
+
+
+def _render_audit_status(
+    result: BudgetReallocationReviewResult, approval: CampaignReallocationApproval
+) -> None:
+    """Render the Stage 34 audit-recording outcome for the current
+    finalized decision. Never claims a record was written unless
+    `record_campaign_reallocation_audit` actually returned a path; never
+    displays the full local filesystem path — only the audit ID (the
+    filename stem).
+    """
+    path = st.session_state.get(AUDIT_RECORD_PATH_STATE_KEY)
+    if path is not None:
+        st.success("Audit record written.")
+        st.caption(f"Audit ID: {Path(path).stem}")
+        return
+
+    error = st.session_state.get(AUDIT_RECORD_ERROR_STATE_KEY)
+    if error is not None:
+        st.error(error)
+        if st.button("Retry audit recording", key="retry_audit_recording"):
+            _attempt_audit_recording(result, approval)
+            st.rerun()
+
+
 def _handle_approval_decision_click(
     result: BudgetReallocationReviewResult,
     reviewer_name: str,
     note: str,
     decision_function,
 ) -> None:
-    """Call one domain decision function exactly once and store its result.
+    """Call one domain decision function exactly once, store its result,
+    and — only once it succeeds — automatically attempt to record its
+    Stage 34 audit entry.
 
     A `ValueError` from the domain function (blank reviewer name, or an
     unconserved result on the approval path) is shown verbatim and stores
-    no decision. Any other unexpected error is contained at this single
-    decision-action boundary with a concise generic message — no raw
-    exception, secret, or provider object is ever exposed, and no
-    fabricated decision is stored.
+    no decision, and no audit is attempted. Any other unexpected error is
+    contained at this single decision-action boundary with a concise
+    generic message — no raw exception, secret, or provider object is
+    ever exposed, and no fabricated decision is stored. Once the decision
+    itself is stored, it is finalized regardless of whether the
+    subsequent audit-recording attempt succeeds.
     """
     normalized_note = note if note.strip() else None
     try:
@@ -379,6 +453,7 @@ def _handle_approval_decision_click(
         st.error("The approval decision could not be recorded due to an unexpected error.")
         return
     st.session_state[APPROVAL_DECISION_STATE_KEY] = approval
+    _attempt_audit_recording(result, approval)
 
 
 def _render_approval_section(result: BudgetReallocationReviewResult) -> None:
@@ -430,18 +505,20 @@ def _render_approval_section(result: BudgetReallocationReviewResult) -> None:
                 st.rerun()
     else:
         _render_finalized_approval(stored_approval)
+        _render_audit_status(result, stored_approval)
 
 
 def _handle_submission(raw_review_data: dict, uploaded_file) -> None:
     """Validate a newly submitted form, then run the pipeline only if permitted.
 
     Always clears any previously stored result first, so a failed
-    resubmission never leaves a stale result — a stale explanation, or a
-    stale approval decision, of a previous result — visible as though it
-    belonged to the new submission. This runs before the approval
-    section's own widgets are ever instantiated in the current script run,
-    so clearing their session-state values here is safe under Streamlit's
-    widget-state rules.
+    resubmission never leaves a stale result — a stale explanation, a
+    stale approval decision, or a stale audit-recording outcome, of a
+    previous result — visible as though it belonged to the new
+    submission. This runs before the approval section's own widgets are
+    ever instantiated in the current script run, so clearing their
+    session-state values here is safe under Streamlit's widget-state
+    rules.
     """
     st.session_state[RESULT_STATE_KEY] = None
     st.session_state[PORTFOLIO_EXPLANATION_STATE_KEY] = None
@@ -450,6 +527,8 @@ def _handle_submission(raw_review_data: dict, uploaded_file) -> None:
     st.session_state[APPROVAL_DECISION_STATE_KEY] = None
     st.session_state["approval_reviewer_name"] = ""
     st.session_state["approval_note"] = ""
+    st.session_state[AUDIT_RECORD_PATH_STATE_KEY] = None
+    st.session_state[AUDIT_RECORD_ERROR_STATE_KEY] = None
 
     review, review_report = validate_review_setup(raw_review_data)
     _render_validation_report("Review setup validation", review_report)

@@ -2972,3 +2972,105 @@ confirmation question this time), each test's forbidden set was narrowed to remo
 Gemini SDK module or name) is unchanged and still enforced. This mirrors the identical "one
 approved exception" pattern already used at Stages 7, 8, 11, and 32.
 **Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: embed, never copy the frozen result/approval
+
+**Decision:** `CampaignReallocationAudit` embeds the existing frozen `BudgetReallocationReviewResult`
+(Stage 27) and `CampaignReallocationApproval` (Stage 33) directly as nested fields, rather
+than building a third parallel schema that copies their fields. No copied result, campaign,
+conservation, or approval schema exists anywhere in `src/audit.py`. This is a deliberate
+departure from Stage 30's own narrower-payload precedent (`src/explanations.py` builds
+hand-copied payload models instead of embedding the locked result directly) — that
+precedent exists specifically to minimize what leaves the system across an external,
+adversarial-facing Gemini boundary. An audit record's entire purpose is the opposite: total
+internal fidelity, sufficient to reconstruct exactly what a human approved or rejected
+without rerunning any deterministic calculation. Embedding avoids the drift risk a copied
+schema would introduce.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: deterministic, content-derived audit ID
+
+**Decision:** `audit_id` is `f"audit_{sha256(canonical_bytes).hexdigest()}"`, where
+`canonical_bytes` is the canonical JSON of exactly `{"result": result, "approval": approval}`
+— `recorded_at` is excluded entirely. No UUID, no Python's unstable `hash()`, no raw
+`review_id` used as a path component, and no timestamp ever contributes to the ID. A retried
+write of the *same* substantive decision — whatever wall-clock moment it happens to retry
+at — always resolves to the same file, making a Streamlit rerun or a manual retry safe by
+construction rather than by an added UI confirmation step.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: idempotent persistence, first-write timestamp is authoritative
+
+**Decision:** `record_campaign_reallocation_audit` treats a pre-existing file with the same
+`audit_id` and the same substantive content (`review_id`, `result`, `approval` —
+`recorded_at` excluded) as a no-op success, returning the original path unchanged; the
+first successful write's `recorded_at` is authoritative and is never replaced by a later
+retry's timestamp. A pre-existing file with genuinely different content under the same
+`audit_id`, or one that cannot be parsed and validated back into `CampaignReallocationAudit`,
+is never silently overwritten or repaired — both raise. Persistence is atomic: a temporary
+file is written, flushed, and closed in the same directory, then finalized via `os.replace`;
+a failure during serialization or finalization leaves no temporary or final file behind.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: no wall-clock call inside `src/audit.py`
+
+**Decision:** `src/audit.py` never calls the clock itself — `recorded_at` is always supplied
+by the caller, and `build_campaign_reallocation_audit` is pure (no file, environment,
+clock, network, or SDK access). The one production call to `datetime.now(timezone.utc)`
+lives in `app.py`'s `_attempt_audit_recording`, the single Stage 34 audit-action boundary,
+mirroring the "no hidden non-determinism in a domain module" discipline already enforced
+everywhere else in this project and keeping the audit layer deterministically testable with
+injected timestamps.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: automatic same-click persistence; failure never reopens the decision
+
+**Decision:** Audit persistence happens automatically from the same approve/reject click
+that finalizes the human decision — there is no separate "Record audit" confirmation
+action. The decision itself (`APPROVAL_DECISION_STATE_KEY`) is stored and finalized before
+the audit-recording attempt runs, and remains finalized regardless of whether that
+attempt succeeds — a disk failure never reopens, erases, or allows replacement of an
+already-finalized decision. On failure, the UI shows the finalized decision plus exactly one
+sanitized error message and one retry button; the retry performs no new approval/rejection,
+only a new audit-build-and-persist attempt with a fresh timestamp, relying on the stage's
+own content-derived idempotency if the first write actually succeeded before the UI
+observed failure. The UI never claims a record was written unless
+`record_campaign_reallocation_audit` actually returned a path, and never displays the full
+local filesystem path — only the audit ID (the filename stem).
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: no Gemini data in an audit record
+
+**Decision:** An audit record contains only the locked deterministic result, the human
+decision, an audit identifier, and a timestamp — no explanation text, status, model name, or
+any other Gemini-derived data, even a placeholder noting an explanation was unavailable.
+`src/audit.py` never imports `config`, `src.explanations`, `src.gemini_analyzer`,
+`src.exports`, `streamlit`, a Gemini SDK, or any network/database client, enforced via
+AST-based isolation tests. Reasoning: an audit record is immutable and permanent, while a
+Gemini explanation is supplementary, non-authoritative, and may contain provider-generated
+or adversarially-influenced text; durably preserving such text forever, with no mechanism
+to ever correct it, would be a stronger and permanent version of the same risk Stage 32's UI
+already fences off with sanitized, non-`unsafe_allow_html` rendering.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 34: one approved exception, plus one authorized test-harness change
+
+**Decision:** `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+`test_module_does_not_reference_forbidden_names`, `tests/test_app_explanation.py`'s
+`test_no_audit_or_export_imports`, and `tests/test_app_approval.py`'s
+`test_no_audit_export_or_platform_imports_in_app` were narrowed to permit `src.audit` only
+— `src.exports` remains forbidden and enforced in all four. Separately, and confirmed
+necessary only after empirical investigation during implementation: `tests/test_app_approval.py`'s
+`_fresh_app()` and `_unconserved_app()` helpers were converted from `AppTest.from_file` to
+`AppTest.from_string` with `app.record_campaign_reallocation_audit` redirected to an
+isolated OS temp directory embedded directly in the executed script. This was required
+because Stage 34 made every real approve/reject click also attempt automatic audit
+persistence — without this change, all 34 pre-existing Stage 33 UI tests would write real
+files into the repository's tracked `audit_records/` directory on every run, since
+`AppTest.from_file` executes app.py in a namespace that does not honor an external
+`monkeypatch` of this function (confirmed empirically: even a direct module-attribute
+reassignment had no effect on `AppTest.from_file`-executed code). All 34 existing tests and
+their assertions are unchanged; only the harness plumbing changed, and this was explicitly
+approved as a bounded exception beyond the assertion-only narrowing after presenting the
+concrete evidence.
+**Status:** Frozen.

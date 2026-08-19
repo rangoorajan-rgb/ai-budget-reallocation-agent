@@ -2808,3 +2808,94 @@ All notable changes to this project are documented in this file.
   model fields), `docs/DECISION_RULES.md` (frozen Stage 33 model, function, conservation,
   UI, lifecycle, and approved-test-exception policies), and `docs/TEST_SCENARIOS.md` (Stage
   33 scenarios).
+
+### Changed
+- Sprint 3, Development Stage 34: one approved, narrow exception to four pre-existing
+  tests. `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules` and
+  `test_module_does_not_reference_forbidden_names`, `tests/test_app_explanation.py`'s
+  `test_no_audit_or_export_imports`, and `tests/test_app_approval.py`'s
+  `test_no_audit_export_or_platform_imports_in_app` were narrowed to permit `src.audit`
+  only; `src.exports` remains forbidden and enforced in all four — mirroring the identical
+  pattern already used at Stages 7, 8, 11, 32, and 33.
+- Sprint 3, Development Stage 34: one additional authorized test-harness change in
+  `tests/test_app_approval.py`. Its `_fresh_app()` and `_unconserved_app()` helpers were
+  converted from `AppTest.from_file` to `AppTest.from_string`, with
+  `app.record_campaign_reallocation_audit` redirected to an isolated OS temp directory
+  embedded directly in the executed script. Required because Stage 34 made every real
+  approve/reject click also attempt automatic audit persistence; without this change all 34
+  pre-existing Stage 33 UI tests would write real files into the repository's tracked
+  `audit_records/` directory on every run, since `AppTest.from_file` executes app.py in a
+  namespace that does not honor an external `monkeypatch` of this function (confirmed
+  empirically). All 34 existing tests and their assertions are unchanged; only the harness
+  plumbing changed.
+
+### Added
+- Sprint 3, Development Stage 34: implemented `src/audit.py` (placeholder replaced) — the
+  durable, structured JSON record of exactly one complete locked
+  `BudgetReallocationReviewResult` and its finalized `CampaignReallocationApproval`, the
+  only component in the project that persists anything to disk. `CampaignReallocationAudit`
+  (frozen, `extra="forbid"`: `audit_id`, `review_id`, `result`, `approval`, `recorded_at`)
+  embeds the existing frozen Stage 27/33 models directly rather than copying their fields.
+  A `@field_validator` rejects a naive `recorded_at` and normalizes any aware timestamp to
+  UTC. `build_campaign_reallocation_audit(result, approval, recorded_at)` is pure and
+  enforces `approval.review_id == result.review_id` (else exactly `ValueError("Approval
+  review_id does not match the locked result's review_id.")`) and, only for an `APPROVED`
+  decision, `result.conservation.is_conserved` (else exactly `ValueError("An unconserved
+  allocation cannot be recorded as approved.")`); a rejected unconserved result is always
+  recordable. `audit_id` is a SHA-256 digest of the canonical JSON of `{"result": result,
+  "approval": approval}`, excluding `recorded_at`, prefixed `audit_`. No wall-clock call
+  exists anywhere in this module. `record_campaign_reallocation_audit(audit, *,
+  directory=None)` writes one UTF-8 JSON file per record at `audit_records/{audit_id}.json`
+  (default directory resolved from the module's own location), atomically via a temporary
+  file plus `os.replace`; a pre-existing file with matching substantive content is an
+  idempotent no-op returning the original path, a pre-existing file with different content
+  raises exactly `ValueError("An audit record with this audit_id already exists with
+  different content.")`, and a malformed existing file raises without being overwritten. No
+  public read, list, delete, repair, overwrite, or retry function exists — reserved for
+  Stage 35. No Gemini, configuration, export, network, or database coupling anywhere.
+- Sprint 3, Development Stage 34: extended `app.py` so audit persistence happens
+  automatically from the same approve/reject click, not a separate confirmation action.
+  New session-state keys `AUDIT_RECORD_PATH_STATE_KEY = "audit_record_path"` and
+  `AUDIT_RECORD_ERROR_STATE_KEY = "audit_record_error"`, cleared at the start of every new
+  deterministic submission. The one production `datetime.now(timezone.utc)` call lives in
+  the new `_attempt_audit_recording` helper, the single Stage 34 audit-action boundary. On
+  success: `st.success("Audit record written.")` plus a caption `Audit ID: {audit_id}` (the
+  filename stem — the full local filesystem path is never displayed). On failure: the
+  finalized decision remains fully visible and unchanged; `st.error("The decision was
+  finalized, but its audit record could not be written.")` with no raw exception, stack
+  trace, or filesystem detail exposed, and exactly one `st.button("Retry audit recording",
+  key="retry_audit_recording")` that performs no new approval/rejection, relies on the
+  stage's own idempotency, and never fires automatically.
+- Sprint 3, Development Stage 34: added `tests/test_audit.py` (placeholder replaced) — 38
+  new tests, all passing. Covers exact model fields, `extra="forbid"`, frozen, aware-UTC
+  timestamp acceptance, naive-timestamp rejection, non-UTC-aware normalization, the exact
+  ID-mismatch and unconserved-approval error messages, rejected-unconserved acceptance,
+  deterministic content-derived audit-ID construction (excluding `recorded_at`; changing
+  with reviewer/note/result content), fixed-point `Decimal` preservation including trailing
+  zeros and extreme values, enum/tuple/datetime preservation, byte-for-byte canonical-JSON
+  determinism, missing-directory creation, successful `tmp_path` writes, identical- and
+  different-timestamp idempotent retries, conflicting- and malformed-existing-record
+  rejection without overwrite, serialization/finalization-failure cleanup leaving no
+  partial file, non-mutation of `result`/`approval`, isolation from Gemini/config/exports/
+  network/database, and the absence of any public read/list/delete/export function.
+- Sprint 3, Development Stage 34: added a new dedicated test file, `tests/test_app_audit.py`
+  — 21 new tests, all passing, using `AppTest.from_string` with the audit-directory redirect
+  embedded directly in each script and zero real network/filesystem/Gemini calls. Covers an
+  approved or rejected decision automatically creating exactly one record; the correct
+  locked result and finalized approval reaching the builder; one click causing one
+  persistence call; zero additional writes on ordinary and repeated reruns; the exact
+  success message and audit ID (never the full path); a failed write leaving the decision
+  fully finalized with the exact sanitized message, no raw exception, and exactly one retry
+  control; retry performing no second approval call and clearing the error on success; no
+  automatic retry on ordinary reruns; audit-state clearing on both a new valid and a new
+  invalid submission; independence from Gemini explanation actions; and full
+  deterministic-result visibility and non-mutation throughout. A file-scoped autouse
+  fixture restores `app.build_campaign_reallocation_audit`,
+  `app.record_campaign_reallocation_audit`, and the Stage 27/31/33 functions to their real
+  implementations before every test. Stage 1–33 regression re-confirmed unchanged at 1588
+  tests. Full suite: 1647 tests passing (1588 + 38 + 21). Zero test-created files under the
+  repository's real `audit_records/` directory across every verification pass.
+- Updated `docs/DATA_DICTIONARY.md` (the `CampaignReallocationAudit` model fields and the
+  Stage 34 audit session-state keys), `docs/DECISION_RULES.md` (frozen Stage 34 model,
+  function, consistency-check, ID/idempotency, persistence, UI, and approved-test-exception
+  policies), and `docs/TEST_SCENARIOS.md` (Stage 34 scenarios).
