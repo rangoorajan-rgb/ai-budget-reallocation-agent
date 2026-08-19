@@ -1649,12 +1649,81 @@ ID (the filename stem) on success — the full local filesystem path is never di
 change-decision control on the audit outcome itself; any automatic retry; any export or
 platform-execution state.
 
+## Export Fields (Stage 35, `src/exports.py`)
+
+**`CampaignReallocationExportRow`** (frozen, `extra="forbid"`) — one self-contained, flat
+CSV row: one campaign's locked recommendation plus the shared audit/approval/portfolio
+context it was reviewed and decided under. Built solely from an already-persisted
+`CampaignReallocationAudit` — never a copied or recomputed fact:
+
+| Field | Type | Source |
+|-------|------|--------|
+| `audit_id` | `str` | `audit.audit_id` |
+| `review_id` | `str` | `audit.review_id` (formula-injection neutralized) |
+| `recorded_at` | `str` | `audit.recorded_at.isoformat()` |
+| `decision` | `str` | `audit.approval.decision.value` |
+| `reviewer_name` | `str` | `audit.approval.reviewer_name` (formula-injection neutralized) |
+| `decision_note` | `str` | `audit.approval.note` (formula-injection neutralized), or `""` when `None` |
+| `total_current_budget` | `str` | `audit.result.total_current_budget`, `format(value, "f")` |
+| `total_recommended_budget` | `str` | `audit.result.total_recommended_budget`, `format(value, "f")` |
+| `total_increase_allocated` | `str` | `audit.result.conservation.total_increase_allocated`, `format(value, "f")` |
+| `total_decrease_allocated` | `str` | `audit.result.conservation.total_decrease_allocated`, `format(value, "f")` |
+| `net_change` | `str` | `audit.result.conservation.net_change`, `format(value, "f")` |
+| `is_conserved` | `bool` | `audit.result.conservation.is_conserved`, written raw (`csv.writer` renders `True`/`False`) |
+| `campaign_id` | `str` | one `CampaignBudgetRecommendationResult.campaign_id` (formula-injection neutralized) |
+| `campaign_name` | `str` | `.campaign_name` (formula-injection neutralized) |
+| `platform` | `str` | `.platform.value` |
+| `current_budget` | `str` | `.current_budget`, `format(value, "f")` |
+| `recommendation_action` | `str` | `.recommendation_action.value` |
+| `allocated_amount` | `str` | `.allocated_amount`, `format(value, "f")` |
+| `recommended_budget` | `str` | `.recommended_budget`, `format(value, "f")` |
+| `reason_codes` | `str` | `.reason_codes`, comma-joined `.value`s in original tuple order |
+| `performance_band` | `str` | `.performance_band.value` |
+| `trend_direction` | `str` | `.trend_direction.value` |
+| `confidence` | `str` | `.confidence.value` |
+| `pacing_status` | `str` | `.pacing_status.value` |
+| `reallocation_priority_score` | `int` | `.reallocation_priority_score` |
+| `rank` | `str` | `str(rank)`, or the literal `"Not ranked"` when `None` |
+
+**Functions**: `build_campaign_reallocation_export_rows(audit) ->
+tuple[CampaignReallocationExportRow, ...]` — one row per campaign, in `campaign_results`'
+own original order; an audit with no campaigns returns an empty tuple. Both `APPROVED` and
+`REJECTED` audits are accepted identically. `serialize_campaign_reallocation_export_csv(rows)
+-> str` — one flat CSV using the frozen 26-column order (below), independent of Pydantic
+field-declaration order; `serialize_campaign_reallocation_export_csv(())` returns a valid
+header-only CSV.
+
+**Exact column order**: `audit_id, review_id, recorded_at, decision, reviewer_name,
+decision_note, total_current_budget, total_recommended_budget, total_increase_allocated,
+total_decrease_allocated, net_change, is_conserved, campaign_id, campaign_name, platform,
+current_budget, recommendation_action, allocated_amount, recommended_budget, reason_codes,
+performance_band, trend_direction, confidence, pacing_status, reallocation_priority_score,
+rank`.
+
+**CSV formula-injection mitigation**: one private helper applied to `review_id`,
+`reviewer_name`, `decision_note`, `campaign_id`, and `campaign_name` — a value whose first
+non-whitespace character is `=`, `+`, `-`, or `@` is prefixed with a single apostrophe,
+preserving all original text; idempotent, since an apostrophe is never itself a trigger
+character. Never applied to trusted enum/boolean/integer/hash/timestamp/Decimal-string
+fields.
+
+**Excluded from Stage 35 entirely**: a JSON export (the Stage 34 audit record remains the
+sole JSON artifact); PDF/Excel/Google Sheets/database export; a summary row, multiple
+files, or a `record_type` column; any local export-file persistence, `exports/` directory,
+or `.gitignore` change; any Gemini explanation text/status/model name, API key,
+configuration value, environment variable, or audit filesystem path.
+
+## Export UI Session State (Stage 35, `app.py`)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `audit_record` (`AUDIT_RECORD_STATE_KEY`) | `CampaignReallocationAudit \| None` | The exact, successfully persisted audit object — populated only after `record_campaign_reallocation_audit` returns successfully inside `_attempt_audit_recording`; cleared to `None` at the start of every audit-recording attempt and every new deterministic submission. The export section consumes exactly this object and never rebuilds it. |
+
+The export section renders only when both `audit_record_path` (Stage 34) and `audit_record`
+are non-`None` — a built-but-unpersisted audit is never exportable.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,
 > `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode` trigger
 > conditions).
-
-## Export Fields
-
-> Pending a later Sprint 3 stage (`src/exports.py`).

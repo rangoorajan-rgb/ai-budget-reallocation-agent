@@ -4,10 +4,11 @@
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 Sprint 3, Development Stages 28 (deterministic Streamlit review shell), 29 (Gemini
 configuration foundation), 30 (explanation payload and prompt construction), 31 (Gemini
-explanation transport), 32 (explanation UI wiring), 33 (human approval workflow), and 34
-(audit persistence) are complete. Verified baseline: `1647 passed` (1588 Stage 1–33
-regression + 38 Stage 34 domain tests in `tests/test_audit.py` + 21 Stage 34 UI tests in
-`tests/test_app_audit.py`). Sprint 3 is not yet complete — exports remain unimplemented.
+explanation transport), 32 (explanation UI wiring), 33 (human approval workflow), 34
+(audit persistence), and 35 (CSV exports) are complete. Verified baseline: `1707 passed`
+(1647 Stage 1–34 regression + 40 Stage 35 domain tests in `tests/test_exports.py` + 20
+Stage 35 UI tests in `tests/test_app_exports.py`). Sprint 3 is not yet complete — the final
+end-to-end integration test remains unimplemented.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -2309,18 +2310,185 @@ and initial project-management documentation) is complete and is not re-tracked 
   stateless/ephemeral cloud filesystem being wiped on redeploy, and
   remains a named Sprint 4 limitation, not a Stage 34 defect.
 
+## Development Stage 35 — CSV Exports (complete)
+
+- [x] `src/exports.py` (populated for the first time — placeholder
+      replaced) — the CSV export of a successfully persisted
+      `CampaignReallocationAudit`. Never rebuilds, rereads from disk, or
+      recomputes anything; never accepts separate `result`/`approval`
+      arguments; never calls any Stage 1–34 production function.
+- [x] **Exact model**: `CampaignReallocationExportRow` (frozen,
+      `extra="forbid"`, 26 fields — audit/approval/portfolio/conservation
+      context plus one campaign's locked recommendation, all as `str`
+      except `is_conserved: bool` and `reallocation_priority_score: int`).
+- [x] **Exact functions**: `build_campaign_reallocation_export_rows(audit)
+      -> tuple[CampaignReallocationExportRow, ...]` and
+      `serialize_campaign_reallocation_export_csv(rows) -> str`. No
+      other public model or function exists — no read/list/export-to-disk
+      surface.
+- [x] **One flat CSV, one row per campaign**, in `campaign_results`' own
+      original order — never re-sorted by score, rank, ID, or name.
+      Shared audit/approval/portfolio-total/conservation values are
+      deliberately repeated on every row so each row is self-contained.
+      No summary row, no multiple files, no `record_type` column. An
+      audit with no campaigns produces a valid header-only CSV with the
+      frozen 26-column header and zero data rows.
+- [x] **Both `APPROVED` and `REJECTED` audits are exportable, identically.**
+      For a rejected review, the CSV remains a factual record of the
+      deterministic recommendations that were reviewed, together with the
+      final rejection decision — rejection never deletes, relabels, or
+      reinterprets them. A rejected, *unconserved* audit is also
+      exportable (rejection has no conservation restriction, per Stage
+      33's own frozen policy, unchanged here).
+- [x] **Exact column order** (independent of Pydantic field-declaration
+      order or dict ordering — the serializer uses one frozen
+      `_EXPORT_COLUMNS` tuple): `audit_id, review_id, recorded_at,
+      decision, reviewer_name, decision_note, total_current_budget,
+      total_recommended_budget, total_increase_allocated,
+      total_decrease_allocated, net_change, is_conserved, campaign_id,
+      campaign_name, platform, current_budget, recommendation_action,
+      allocated_amount, recommended_budget, reason_codes,
+      performance_band, trend_direction, confidence, pacing_status,
+      reallocation_priority_score, rank`.
+- [x] **Exact serialization policy**: every `Decimal` via `format(value,
+      "f")` — exact, fixed-point, never scientific notation, never routed
+      through `float`; enums via `.value`; `recorded_at` (already
+      UTC-normalized by the Stage 34 model) via `.isoformat()`;
+      `rank=None` → `"Not ranked"`; `note=None` → `""`; `is_conserved`
+      written as the raw Python `bool`, which `csv.writer` renders as the
+      literal text `True`/`False`. Quoting/escaping of commas, quotes,
+      embedded newlines, and Unicode is delegated entirely to Python's
+      standard `csv` module.
+- [x] **CSV formula-injection mitigation**: one private helper
+      (`_neutralize_formula`) applied to `review_id`, `reviewer_name`,
+      `decision_note`, `campaign_id`, and `campaign_name` — if a value's
+      first non-whitespace character is `=`, `+`, `-`, or `@`, the
+      complete original value is prefixed with a single apostrophe,
+      preserving all original text and whitespace; idempotent, since an
+      apostrophe is never itself a trigger character. Never applied to
+      trusted enum/boolean/integer/hash/timestamp/Decimal-string values.
+- [x] **No JSON export, no PDF, no Excel, no Google Sheets, no database
+      export, no advertising-platform upload, no API submission, no ZIP/
+      multi-file bundle.** The existing immutable JSON audit record
+      (Stage 34) remains the sole JSON artifact — never duplicated as a
+      second JSON "export."
+- [x] **No local export persistence.** The CSV is generated entirely in
+      memory and delivered via `st.download_button` — no `exports/`
+      directory was created, `.gitignore` is unchanged, and no atomic
+      export-file write exists, since there is no file to atomically
+      write.
+- [x] `app.py` (extended, not replaced) — a new "CSV export" section,
+      rendered only once an audit record has actually been *persisted*
+      (never merely built or merely approved), immediately after the
+      human-approval section. One new session-state key,
+      `AUDIT_RECORD_STATE_KEY = "audit_record"`, holds the exact,
+      successfully-persisted `CampaignReallocationAudit` object itself —
+      populated only after `record_campaign_reallocation_audit` actually
+      succeeds inside `_attempt_audit_recording`, cleared to `None` at
+      the start of every audit-recording attempt and at the start of
+      every new deterministic submission. The export section consumes
+      exactly this stored object; it is never rebuilt from a separate
+      result/approval pair and never re-read from disk.
+- [x] **Exact download button**: label `"Download audited recommendations
+      CSV"`, `file_name=f"{audit.audit_id}.csv"`, `mime="text/csv"`. No
+      separate "Generate export" button and no retry control — generation
+      is fully in-memory and deterministic, so there is nothing to retry.
+- [x] **Exact failure message**: `"The CSV export could not be prepared.
+      The finalized review and audit record remain unchanged."` — no raw
+      exception, traceback, or absolute path is ever shown; a failure
+      never mutates the locked result, the approval, or the audit object,
+      never rewrites the audit record, never calls Gemini, and never
+      reruns the deterministic pipeline.
+- [x] **One approved exception, narrower than every prior stage — one of
+      the three narrowed assertions is now vacuous.**
+      `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules`
+      was narrowed to remove only `src.exports`. `tests/test_app_explanation.py`'s
+      `test_no_audit_or_export_imports` and `tests/test_app_approval.py`'s
+      `test_no_audit_export_or_platform_imports_in_app` were also narrowed
+      to remove `src.exports` — the sole remaining member of each of
+      their forbidden sets — so both assertions are now `isdisjoint(set())`,
+      a faithful record that every module they originally guarded against
+      (`src.approval`, `src.audit`, `src.exports`) is now a legitimate,
+      separately-covered import of `app.py`. The bare-name
+      `test_module_does_not_reference_forbidden_names` narrowing was
+      **not** needed — no bare `exports` identifier exists anywhere in
+      `app.py`'s AST. Every Gemini, network, database, secret, and
+      deterministic-engine isolation assertion in all three files is
+      unchanged and still enforced.
+- [x] `tests/test_exports.py` (new — no placeholder existed) — 40 new
+      Stage 35 domain tests, all passing. Covers exact model fields,
+      `extra="forbid"`, frozen, exact function signatures, exact column
+      order, header-only CSV for an empty campaign tuple, approved and
+      rejected audits (including a rejected, unconserved audit), exact
+      audit/approval/portfolio field copying, exact campaign field
+      copying, preserved campaign and reason-code order, `rank=None` →
+      `"Not ranked"`, `note=None` → `""`, exact `Decimal` fixed-point
+      formatting (trailing zeros, extreme precision, no scientific
+      notation), exact UTC ISO timestamp, deterministic repeated builds/
+      serialization, special characters (commas, quotes, embedded
+      newlines, backslashes, Markdown-like content, Unicode) round-tripped
+      through `csv.DictReader`, CSV formula-injection neutralization for
+      all four trigger characters (including after leading whitespace,
+      safe text unchanged, empty text unchanged, and no double-
+      neutralization), exact `is_conserved` Boolean text, non-mutation of
+      the input audit, and isolation from `float`, the filesystem, the
+      network, Gemini/config/secrets, and every Stage 1–34 production
+      function.
+- [x] `tests/test_app_exports.py` (new dedicated test file) — 20 new
+      Stage 35 UI tests, all passing, using `AppTest.from_string` with the
+      established Stage 34 audit-directory redirect embedded directly in
+      each script and zero real network/filesystem/Gemini calls. Covers:
+      the export section absent without a locked result, before a
+      decision, and while audit recording has failed; present only once
+      persistence actually succeeds, identically for approved and
+      rejected audits; the exact download-button label; the exact literal
+      `file_name`/`mime` arguments (verified via AST source inspection,
+      since `AppTest` exposes no stable public accessor for a download
+      button's underlying bytes/filename/MIME in this Streamlit version);
+      the exact CSV content built from the exact stored audit object
+      (verified via a capturing wrapper around the real Stage 35
+      functions); deterministic, non-duplicated generation across
+      reruns; a successful audit retry making the export appear;
+      session-state clearing on both a new valid and a new invalid
+      submission; sanitized failure rendering with no raw exception; no
+      Gemini invocation and no pipeline rerun triggered by the export
+      section; and no real audit/export file left behind.
+- [x] Stage 1–34 regression re-run and confirmed passing unchanged at
+      `1647 passed`. Full suite: `1707 passed` (1647 + 40 + 20). Confirmed
+      zero test-created files under the repository's real `audit_records/`
+      directory (only the pre-existing `.gitkeep` remains), and no
+      `exports/` directory was ever created, across every verification
+      pass.
+- [x] `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+      `docs/TEST_SCENARIOS.md` updated.
+
+## Explicitly Out of Scope for Stage 35 (and not yet started)
+
+- The full AI/UI-inclusive end-to-end integration test
+  (`tests/test_integration.py`, reserved, untouched) — the final
+  remaining Sprint 3 stage.
+- A JSON export, PDF, Excel/XLSX, Google Sheets, database export,
+  advertising-platform upload, or API submission of any kind.
+- Reading, listing, or enumerating persisted audit records from
+  `audit_records/` — no evidenced need in the current session-based UI
+  flow; would be a future Stage 35-adjacent convenience, not implemented
+  here.
+- Any local export-file persistence, `exports/` directory, or
+  `.gitignore` change — the CSV is generated entirely in memory and
+  delivered via `st.download_button`.
+
 ## Next Stage
 
-**Sprint 3 is underway; Stages 28 through 34 are complete — Sprint 3 as a
-whole is not.** Stage 34 delivered automatic, same-click, idempotent
-audit persistence for every finalized human decision, embedding the
-existing frozen Stage 27/33 models directly rather than copying them,
-with a deterministic content-derived audit ID, no Gemini coupling, and a
-UI that never claims a record was written unless it actually was.
+**Sprint 3 is underway; Stages 28 through 35 are complete — Sprint 3 as a
+whole is not.** Stage 35 delivered the CSV export of every successfully
+audited review, built solely from the exact persisted
+`CampaignReallocationAudit` object, available identically for approved
+and rejected outcomes, generated entirely in memory with no new local
+persistence.
 
-The smallest dependency-ordered remaining Sprint 3 work: exports
-(`src/exports.py`), building on Stage 34's frozen schema and filename
-convention; and finally the full end-to-end integration test
-(`tests/test_integration.py`). The remaining `ReasonCode` members'
+The only remaining Sprint 3 work is the full end-to-end integration test
+(`tests/test_integration.py`), exercising the complete upload → validate
+→ assess → recommend → lock → explain → approve/reject → audit → export
+flow together for the first time. The remaining `ReasonCode` members'
 trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above)
 remain open and independent of this sequence. Sprint 4 remains deferred.

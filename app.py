@@ -42,9 +42,17 @@ performs no new approval/rejection. This module never claims a record
 was written unless `record_campaign_reallocation_audit` actually
 returned a path, never displays a raw exception or filesystem detail,
 and never displays the full local audit-file path — only the audit ID
-(the filename stem). Exports and full integration testing remain out of
-scope and are not imported, called, or stubbed here — they remain
-reserved for later Sprint 3 stages.
+(the filename stem).
+
+**Stage 35 — CSV export.** Once, and only once, an audit record has
+actually been persisted, a small "CSV export" section renders a single
+`st.download_button` offering the complete audited recommendations and
+decision as one flat CSV — generated entirely in memory from the exact
+`CampaignReallocationAudit` object Stage 34 already built and persisted,
+never rebuilt, reread from disk, or recomputed. Both `APPROVED` and
+`REJECTED` audits receive this control. Full integration testing remains
+out of scope and is not imported, called, or stubbed here — it remains
+reserved for the final Sprint 3 stage.
 """
 
 import io
@@ -60,13 +68,21 @@ from src.approval import (
     approve_campaign_reallocation_review,
     reject_campaign_reallocation_review,
 )
-from src.audit import build_campaign_reallocation_audit, record_campaign_reallocation_audit
+from src.audit import (
+    CampaignReallocationAudit,
+    build_campaign_reallocation_audit,
+    record_campaign_reallocation_audit,
+)
 from src.constants import DEFAULT_MAX_CHANGE_PERCENTAGE, ReviewStatus
 from src.explanations import (
     build_campaign_explanation_payload,
     build_campaign_explanation_prompt,
     build_portfolio_explanation_payload,
     build_portfolio_explanation_prompt,
+)
+from src.exports import (
+    build_campaign_reallocation_export_rows,
+    serialize_campaign_reallocation_export_csv,
 )
 from src.gemini_analyzer import ExplanationResult, ExplanationStatus, generate_explanation
 from src.models import ReviewSetup
@@ -84,9 +100,14 @@ CAMPAIGN_EXPLANATION_ID_STATE_KEY = "campaign_explanation_campaign_id"
 APPROVAL_DECISION_STATE_KEY = "approval_decision_result"
 AUDIT_RECORD_PATH_STATE_KEY = "audit_record_path"
 AUDIT_RECORD_ERROR_STATE_KEY = "audit_record_error"
+AUDIT_RECORD_STATE_KEY = "audit_record"
 
 _AUDIT_FAILURE_MESSAGE = (
     "The decision was finalized, but its audit record could not be written."
+)
+_EXPORT_FAILURE_MESSAGE = (
+    "The CSV export could not be prepared. The finalized review and audit "
+    "record remain unchanged."
 )
 
 
@@ -377,8 +398,8 @@ def _attempt_audit_recording(
     result: BudgetReallocationReviewResult, approval: CampaignReallocationApproval
 ) -> None:
     """Build and persist one Stage 34 audit record for an already-finalized
-    decision, storing either the successful path or a sanitized failure
-    message in session state.
+    decision, storing either the successful path and audit object, or a
+    sanitized failure message, in session state.
 
     The one production wall-clock call in this entire module happens
     here, and only here: `datetime.now(timezone.utc)` is passed straight
@@ -387,9 +408,14 @@ def _attempt_audit_recording(
     already-finalized `approval` — a failure here only affects the audit
     session-state keys, never `APPROVAL_DECISION_STATE_KEY`. No raw
     exception, filesystem detail, or path is ever stored or shown; only
-    a `Path` (on success) or the one fixed sanitized message (on
-    failure).
+    a `Path` and the built `CampaignReallocationAudit` (on success), or
+    the one fixed sanitized message (on failure). `AUDIT_RECORD_STATE_KEY`
+    is cleared to `None` before each attempt and is populated only after
+    `record_campaign_reallocation_audit` actually succeeds — the Stage 35
+    export section consumes exactly this stored object and never rebuilds
+    it.
     """
+    st.session_state[AUDIT_RECORD_STATE_KEY] = None
     try:
         audit = build_campaign_reallocation_audit(result, approval, datetime.now(timezone.utc))
         path = record_campaign_reallocation_audit(audit)
@@ -399,6 +425,7 @@ def _attempt_audit_recording(
         return
     st.session_state[AUDIT_RECORD_PATH_STATE_KEY] = str(path)
     st.session_state[AUDIT_RECORD_ERROR_STATE_KEY] = None
+    st.session_state[AUDIT_RECORD_STATE_KEY] = audit
 
 
 def _render_audit_status(
@@ -422,6 +449,45 @@ def _render_audit_status(
         if st.button("Retry audit recording", key="retry_audit_recording"):
             _attempt_audit_recording(result, approval)
             st.rerun()
+
+
+def _render_export_section() -> None:
+    """The Stage 35 CSV export section.
+
+    Renders only once an audit record has actually been persisted —
+    gated on both `AUDIT_RECORD_PATH_STATE_KEY` and
+    `AUDIT_RECORD_STATE_KEY` being present, never on the approval or a
+    built-but-unpersisted audit alone. Consumes exactly the stored
+    `CampaignReallocationAudit` object; never rebuilds, rereads from
+    disk, or recomputes anything. Present identically for `APPROVED` and
+    `REJECTED` audits. Generation is fully in-memory and deterministic —
+    no separate "Generate export" or retry control exists.
+    """
+    audit_path = st.session_state.get(AUDIT_RECORD_PATH_STATE_KEY)
+    audit: CampaignReallocationAudit | None = st.session_state.get(AUDIT_RECORD_STATE_KEY)
+    if audit_path is None or audit is None:
+        return
+
+    st.subheader("CSV export")
+    st.caption(
+        "Download the finalized, audited recommendations and decision as "
+        "one CSV file."
+    )
+
+    try:
+        rows = build_campaign_reallocation_export_rows(audit)
+        csv_text = serialize_campaign_reallocation_export_csv(rows)
+    except Exception:  # noqa: BLE001 -- deliberate single export-action boundary catch
+        st.error(_EXPORT_FAILURE_MESSAGE)
+        return
+
+    st.download_button(
+        "Download audited recommendations CSV",
+        data=csv_text,
+        file_name=f"{audit.audit_id}.csv",
+        mime="text/csv",
+        key="download_export_csv",
+    )
 
 
 def _handle_approval_decision_click(
@@ -513,12 +579,12 @@ def _handle_submission(raw_review_data: dict, uploaded_file) -> None:
 
     Always clears any previously stored result first, so a failed
     resubmission never leaves a stale result — a stale explanation, a
-    stale approval decision, or a stale audit-recording outcome, of a
-    previous result — visible as though it belonged to the new
-    submission. This runs before the approval section's own widgets are
-    ever instantiated in the current script run, so clearing their
-    session-state values here is safe under Streamlit's widget-state
-    rules.
+    stale approval decision, a stale audit-recording outcome, or a stale
+    exportable audit object, of a previous result — visible as though it
+    belonged to the new submission. This runs before the approval
+    section's own widgets are ever instantiated in the current script run,
+    so clearing their session-state values here is safe under Streamlit's
+    widget-state rules.
     """
     st.session_state[RESULT_STATE_KEY] = None
     st.session_state[PORTFOLIO_EXPLANATION_STATE_KEY] = None
@@ -529,6 +595,7 @@ def _handle_submission(raw_review_data: dict, uploaded_file) -> None:
     st.session_state["approval_note"] = ""
     st.session_state[AUDIT_RECORD_PATH_STATE_KEY] = None
     st.session_state[AUDIT_RECORD_ERROR_STATE_KEY] = None
+    st.session_state[AUDIT_RECORD_STATE_KEY] = None
 
     review, review_report = validate_review_setup(raw_review_data)
     _render_validation_report("Review setup validation", review_report)
@@ -623,6 +690,7 @@ def main() -> None:
         _render_locked_result(result)
         _render_explanation_section(result)
         _render_approval_section(result)
+        _render_export_section()
 
 
 if __name__ == "__main__":

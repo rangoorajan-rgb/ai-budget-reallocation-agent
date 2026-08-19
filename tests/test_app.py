@@ -95,9 +95,13 @@ def test_module_does_not_import_forbidden_modules():
     # Sprint 3, Development Stage 34 because app.py now legitimately
     # imports it for automatic audit-record persistence
     # (`build_campaign_reallocation_audit`/
-    # `record_campaign_reallocation_audit`). Every other forbidden import
-    # below — the export module and any Gemini SDK module — is unchanged
-    # and still enforced.
+    # `record_campaign_reallocation_audit`). `src.exports` was removed at
+    # Sprint 3, Development Stage 35 because app.py now legitimately
+    # imports it for the CSV export section
+    # (`build_campaign_reallocation_export_rows`/
+    # `serialize_campaign_reallocation_export_csv`). Every other forbidden
+    # import below — any Gemini SDK module — is unchanged and still
+    # enforced.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
     for node in ast.walk(tree):
@@ -108,7 +112,6 @@ def test_module_does_not_import_forbidden_modules():
                 imported_modules.add(alias.name)
 
     forbidden_modules = {
-        "src.exports",
         "google.generativeai",
         "genai",
     }

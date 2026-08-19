@@ -3074,3 +3074,90 @@ their assertions are unchanged; only the harness plumbing changed, and this was 
 approved as a bounded exception beyond the assertion-only narrowing after presenting the
 concrete evidence.
 **Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 35: CSV only, sole source is the persisted audit
+
+**Decision:** `src/exports.py` implements CSV export only — no JSON export, PDF, Excel/
+XLSX, Google Sheets, database export, advertising-platform upload, API submission, or ZIP/
+multi-file bundle. The existing immutable JSON audit record (Stage 34) remains the sole
+JSON artifact; it is never duplicated as a second JSON "export." The only authoritative
+export input is an already-built, validated `CampaignReallocationAudit` (Stage 34) —
+`build_campaign_reallocation_export_rows` accepts this one object directly, never separate
+`result`/`approval` arguments, never rebuilds or rereads an audit from disk, never scans
+`audit_records/`, and never calls any Stage 1–34 production function. Both `APPROVED` and
+`REJECTED` audited reviews are exportable, identically; for a rejected review the CSV
+remains a factual record of the deterministic recommendations that were reviewed, together
+with the final rejection decision — rejection never deletes, relabels, or reinterprets them.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 35: persistence-success gating and in-memory audit state
+
+**Decision:** The CSV export section in `app.py` becomes available only after all of: a
+locked deterministic result exists, a human decision is finalized, a
+`CampaignReallocationAudit` has been built, and `record_campaign_reallocation_audit(...)`
+has actually succeeded — a built audit whose persistence failed is never exportable. A new
+session-state key, `AUDIT_RECORD_STATE_KEY = "audit_record"`, holds the exact successfully
+persisted `CampaignReallocationAudit` object; it is cleared to `None` at the start of every
+audit-recording attempt and at the start of every new deterministic submission, and is
+populated only after persistence succeeds. The export section consumes exactly this stored
+object and never rebuilds it from a separate result/approval pair.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 35: one flat CSV, in-memory delivery, no local persistence
+
+**Decision:** Exactly one flat CSV, one row per campaign, in `campaign_results`' own
+original order — never re-sorted by score, rank, ID, or name. Shared audit/approval/
+portfolio-total/conservation values are deliberately repeated on every campaign row so each
+row is self-contained and independently usable; no summary row, no multiple files, no
+`record_type` column, no separate portfolio section. An audit with no campaigns produces a
+valid header-only CSV. The exact frozen column order is: `audit_id, review_id, recorded_at,
+decision, reviewer_name, decision_note, total_current_budget, total_recommended_budget,
+total_increase_allocated, total_decrease_allocated, net_change, is_conserved, campaign_id,
+campaign_name, platform, current_budget, recommendation_action, allocated_amount,
+recommended_budget, reason_codes, performance_band, trend_direction, confidence,
+pacing_status, reallocation_priority_score, rank`. The CSV is generated entirely in memory
+and delivered via `st.download_button` — no `exports/` directory was created, `.gitignore`
+is unchanged, and no export-file persistence, atomic-write policy, or overwrite/idempotency
+policy exists, since there is no file on disk to have those properties. Filename:
+`f"{audit.audit_id}.csv"`; MIME type: `"text/csv"`.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 35: Decimal/enum/timestamp policy and CSV formula-injection mitigation
+
+**Decision:** Every `Decimal` value already embedded in the audit renders via
+`format(value, "f")` — exact, fixed-point, never scientific notation, never routed through
+`float`. Enums render via `.value`. `recorded_at` (already normalized to UTC by the Stage 34
+model) renders via `.isoformat()`. `rank=None` renders as the literal string `"Not ranked"`;
+a `None` decision note renders as an empty string. `is_conserved` is written as the raw
+Python `bool`, which `csv.writer` renders as the literal text `True`/`False`. No
+calculation, rounding, quantization, recalculation, normalization, repair, rebalancing,
+reranking, or recommendation reinterpretation occurs anywhere in `src/exports.py`. The
+private normalization helpers in `src/audit.py`/`src/explanations.py` were **not** extracted
+or refactored into a shared utility — Stage 35's small CSV-specific conversions remain
+local to `src/exports.py`, and neither protected module was modified. Every textual cell
+that can carry user-controlled or uploaded text (`review_id`, `reviewer_name`,
+`decision_note`, `campaign_id`, `campaign_name`) is passed through one private
+neutralization helper: if its first non-whitespace character is `=`, `+`, `-`, or `@`, the
+complete original value is prefixed with a single apostrophe — applied exactly once
+(idempotent, since an apostrophe is never itself a trigger character), and never applied to
+trusted enum/boolean/integer/hash/timestamp/Decimal-string values. Quoting/escaping of
+commas, quotes, embedded newlines, and Unicode is delegated entirely to Python's standard
+`csv` module.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 35: one approved exception, one assertion now vacuous
+
+**Decision:** `tests/test_app.py`'s `test_module_does_not_import_forbidden_modules`,
+`tests/test_app_explanation.py`'s `test_no_audit_or_export_imports`, and
+`tests/test_app_approval.py`'s `test_no_audit_export_or_platform_imports_in_app` were
+narrowed to remove only `src.exports`, per explicit pre-approval, because `app.py` now
+legitimately imports it for the CSV export section. For the latter two, `src.exports` was
+the sole remaining member of their forbidden sets (both had already been narrowed to just
+that one entry at Stage 34), so both assertions are now `isdisjoint(set())` — a faithful,
+narrow record that every module they originally guarded against is now a legitimate,
+separately-covered import, rather than an invented restructuring of either test. The
+bare-name `test_module_does_not_reference_forbidden_names` narrowing anticipated as
+possibly-needed was confirmed **not** required — no bare `exports` identifier exists
+anywhere in `app.py`'s AST. Every Gemini, network, database, secret, approval, audit, and
+deterministic-engine isolation assertion in all three files is unchanged and still enforced.
+**Status:** Frozen.

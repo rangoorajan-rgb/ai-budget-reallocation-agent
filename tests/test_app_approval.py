@@ -634,8 +634,13 @@ def test_no_audit_export_or_platform_imports_in_app():
     # Approved exception (Sprint 3, Development Stage 34): `src.audit` was
     # removed from this forbidden set because app.py now legitimately
     # imports it for automatic audit-record persistence — see
-    # tests/test_app_audit.py for that stage's own coverage. `src.exports`
-    # remains forbidden and unchanged.
+    # tests/test_app_audit.py for that stage's own coverage. Approved
+    # exception (Sprint 3, Development Stage 35): `src.exports` was
+    # removed because app.py now legitimately imports it for the CSV
+    # export section — see tests/test_app_exports.py for that stage's own
+    # coverage. This test now has no remaining forbidden modules of its
+    # own to assert, since every module it originally guarded against is
+    # now a legitimate, separately-covered import.
     tree = ast.parse(inspect.getsource(app))
     imported_modules = set()
     for node in ast.walk(tree):
@@ -644,7 +649,7 @@ def test_no_audit_export_or_platform_imports_in_app():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported_modules.add(alias.name)
-    assert imported_modules.isdisjoint({"src.exports"})
+    assert imported_modules.isdisjoint(set())
 
 
 def test_no_filesystem_or_network_calls_in_approval_section():

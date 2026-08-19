@@ -1363,3 +1363,46 @@ Stage 1–26 formula, or touches Streamlit/Gemini/approval/audit/exports.
 | 33 | An explanation-generation click, or the campaign selector | Neither affects audit state; audit success/failure state also never affects explanation state. |
 | 34 | The locked result's `model_dump()` and rendered campaign table, before and after a successful or failed audit write | Unchanged. |
 | 35 | Every UI test in `tests/test_app_audit.py` and every real approve/reject click in `tests/test_app_approval.py` | Writes only under a `tmp_path`-derived or isolated OS temp directory; the repository's real `audit_records/` directory contains no test-created file after any run. |
+
+## CSV Export Scenarios (Stage 35, `src/exports.py` and `app.py`)
+
+| # | Scenario | Expected outcome |
+|---|---|---|
+| 1 | `CampaignReallocationExportRow` model fields | Exactly the 26 fields in the frozen column order; `extra="forbid"`; frozen. |
+| 2 | `build_campaign_reallocation_export_rows`/`serialize_campaign_reallocation_export_csv` signatures | Exactly `(audit)` and `(rows)`, verified via `inspect.signature`. |
+| 3 | `serialize_campaign_reallocation_export_csv(())` | Returns a valid header-only CSV with exactly the frozen 26-column header and zero data rows. |
+| 4 | An audit with an empty `campaign_results` tuple | `build_campaign_reallocation_export_rows` returns an empty tuple — no fabricated row. |
+| 5 | An `APPROVED`, conserved audit | Builds rows with `decision="APPROVED"`. |
+| 6 | A `REJECTED`, conserved audit | Builds rows with `decision="REJECTED"`. |
+| 7 | A `REJECTED`, *unconserved* audit | Builds rows successfully; `is_conserved=False`; the campaign recommendations are copied unchanged — rejection never deletes, relabels, or reinterprets them. |
+| 8 | Every shared audit/approval/portfolio/conservation field | Copied exactly from the supplied audit — never recomputed. |
+| 9 | Every campaign field | Copied exactly from each `CampaignBudgetRecommendationResult` — never recomputed, reranked, or reinterpreted. |
+| 10 | Campaign row order | Preserves `campaign_results`' own original order — never sorted by ID, rank, score, name, platform, or action. |
+| 11 | `reason_codes` | Comma-joined `.value`s in original tuple order. |
+| 12 | `rank=None` | Renders as the literal string `"Not ranked"`. |
+| 13 | `approval.note=None` | Renders as an empty string. |
+| 14 | A `Decimal` with trailing zeros, or at the extreme size `Currency` can hold | Rendered as an exact fixed-point string via `format(value, "f")` — never scientific notation, never a JSON/Python `float`. |
+| 15 | `recorded_at` | Rendered via `.isoformat()`, preserving the UTC offset the Stage 34 model already normalized it to. |
+| 16 | The same audit built and serialized twice | Byte-for-byte identical rows and CSV text. |
+| 17 | `campaign_name`/`reviewer_name`/`decision_note` containing commas, quotes, embedded newlines, backslashes, Markdown-like content, or Unicode | Round-trips correctly through `csv.DictReader` — quoting/escaping delegated entirely to Python's standard `csv` module. |
+| 18 | `review_id`, `reviewer_name`, `decision_note`, `campaign_id`, or `campaign_name` beginning with `=`, `+`, `-`, or `@` | Prefixed with a single apostrophe, preserving the rest of the original text. |
+| 19 | A dangerous prefix appearing after leading whitespace | Still neutralized; original whitespace preserved. |
+| 20 | Safe text (e.g. a hyphen not in the leading position) | Left byte-for-byte unchanged. |
+| 21 | An empty string, or a value already beginning with an apostrophe | Left unchanged — neutralization is idempotent and never double-applied. |
+| 22 | `is_conserved` in the serialized CSV | Emitted as the exact literal text `True`/`False`. |
+| 23 | The input `CampaignReallocationAudit` before and after `build_...`/`serialize_...` | `model_dump()` unchanged — never mutated. |
+| 24 | Module source (AST-verified) | No `float` reference; no `config`/`src.explanations`/`src.gemini_analyzer`/Gemini-SDK/`streamlit`/`os`/`pathlib`/network/database import; no `api_key`/`get_secret_value`/`SecretStr`/Gemini name reference; no call to any Stage 1–34 production function; only `CampaignReallocationExportRow`, `build_campaign_reallocation_export_rows`, and `serialize_campaign_reallocation_export_csv` are public top-level names. |
+| 25 | No locked result yet | The "CSV export" section and its download button are both absent. |
+| 26 | A locked result with no finalized decision yet | Still absent. |
+| 27 | A finalized decision whose audit-recording attempt failed | Still absent — `audit_record`/`audit_record_path` are both `None`. |
+| 28 | A finalized decision whose audit-recording attempt succeeded | The section and exactly one download button appear — identically for `APPROVED` and `REJECTED` audits. |
+| 29 | The download button | Exact label `"Download audited recommendations CSV"`. |
+| 30 | `app._render_export_section` source (AST-verified) | The literal `st.download_button(..., file_name=f"{audit.audit_id}.csv", mime="text/csv")` construction is present exactly as specified. |
+| 31 | The CSV actually built during a real approve/reject flow | Built from the exact `CampaignReallocationAudit` object stored in `audit_record` — verified via a capturing wrapper around the real Stage 35 functions, matching `serialize_campaign_reallocation_export_csv(build_campaign_reallocation_export_rows(stored_audit))` exactly. |
+| 32 | Repeated ordinary reruns after a successful audit write | Identical CSV content each time; zero additional audit-persistence calls; zero additional audit files written. |
+| 33 | A failed audit-recording attempt followed by a successful retry | The export section appears only after the retry succeeds. |
+| 34 | A new successful *and* a new invalid deterministic submission, after a prior successful export | Both clear `audit_record` to `None`; the export section and its download button both disappear. |
+| 35 | An injected export-construction failure | Renders exactly `st.error("The CSV export could not be prepared. The finalized review and audit record remain unchanged.")` — no raw exception, traceback, or absolute path; the locked result, the finalized approval, and `audit_record`/`audit_record_path` are all left unchanged. |
+| 36 | The export section during a portfolio-explanation click, or vice versa | Neither affects the other — Gemini explanation state and export/audit state remain fully independent. |
+| 37 | The export section's rendering | Never triggers `run_budget_reallocation_review` again — verified via a call-counting wrapper staying at exactly one call throughout. |
+| 38 | Every UI test in `tests/test_app_exports.py` | Writes only under an isolated OS temp directory embedded in the executed script; the repository's real `audit_records/` directory contains no test-created file, and no `exports/` directory is ever created, after any run. |
