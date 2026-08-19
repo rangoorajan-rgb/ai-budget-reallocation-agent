@@ -2758,6 +2758,83 @@ restructuring. The anticipated bare-name narrowing in
 secret, approval, audit, and deterministic-engine isolation assertion in all three files is
 unchanged and still enforced.
 
+## Stage 36 — Final End-to-End Integration and Sprint 3 Completion
+
+**Rule.** `tests/test_integration.py` (Sprint 3, Development Stage 36) proves the complete
+frozen Sprint 3 flow works *together* — CSV upload → review-setup validation → campaign
+validation → deterministic pipeline → locked result → optional Gemini explanation → human
+approval or rejection → immutable audit construction → successful audit persistence →
+audited CSV export availability — through real Streamlit `AppTest` widget interaction. This
+stage adds no production behavior of any kind: no `app.py` change, no `src/` change, no
+existing Stage 1–35 test's behavior changed.
+
+**`AppTest.from_string` exclusively for approve/reject scenarios.** Never `AppTest.from_file`,
+which executes `app.py` in a namespace that does not honor an external `monkeypatch` of a
+real approve/reject click's automatic Stage 34 audit write (confirmed empirically at Stage
+34, reconfirmed here). Every such scenario embeds the established redirect —
+`app.record_campaign_reallocation_audit` pointed at the test's own `tmp_path` — before
+`app.main()` runs, verbatim from the Stage 34/35 pattern.
+
+**Zero real Gemini/network calls.** Exactly two paths are exercised: the genuine,
+network-free `UNAVAILABLE` path (the real `generate_explanation`, with `GEMINI_API_KEY`
+absent) and a deterministic fake `GENERATED` result patched onto `app.generate_explanation`
+from within the embedded script. No real Gemini SDK client is ever constructed; no real
+API key is used, required, or created via a real `.env`. A real-key smoke test remains an
+explicitly separate, manual, post-Sprint acceptance activity — never part of the automated
+suite.
+
+**CSV verified via the real production functions, never mocked.** The established Stage 35
+capture-wrapper pattern wraps the real `build_campaign_reallocation_export_rows`/
+`serialize_campaign_reallocation_export_csv`, storing the actual generated CSV text in
+session state for direct parsing with Python's standard `csv` module — the same limitation
+already documented at Stage 35 (`AppTest` exposes no stable public accessor for a download
+button's underlying bytes/filename/MIME in the installed Streamlit version) applies
+identically here.
+
+**Proves wiring, not component correctness.** Twelve focused scenarios — approved flow
+(upload through export, against the real sample data and pipeline, reusing the exact
+stable sample contract already established by `tests/test_app.py`/`tests/test_app_explanation.py`
+rather than re-deriving it), rejected flow, generated-explanation independence,
+Gemini-unavailable independence, unconserved-result gating (approval blocked, rejection
+permitted, injected via the established pipeline-wrapping test-fixture pattern with no
+production code touched), audit failure-then-retry, invalid-`ReviewSetup` blocking,
+mixed-valid/invalid-CSV blocking, new-submission state reset (valid and invalid), and
+ordinary-rerun stability — plus one cross-cutting security/artifact sweep. No exhaustive
+edge-case matrix already owned by an earlier stage's own focused test file is duplicated.
+
+**One defensive fixture, scoped entirely to the new file.** `tests/test_gemini_analyzer.py`'s
+own `test_import_performs_no_client_construction_environment_or_network` pops
+`src.gemini_analyzer` from `sys.modules` and reimports it fresh to prove import-time
+side-effect freedom, leaving a *different* `ExplanationStatus` class installed under that
+name for the rest of the process — silently breaking `app.py`'s own already-cached `is
+ExplanationStatus.GENERATED` identity check for any fake explanation built afterward, with
+the failure surfacing deep inside rendering rather than at the click boundary's own
+exception handling (confirmed by direct reproduction). An autouse fixture in
+`tests/test_integration.py` restores `sys.modules["src.gemini_analyzer"]` to the original
+module object before and after every test in that file, regardless of order —
+`tests/test_gemini_analyzer.py` itself is not modified.
+
+**One approved exception, retiring four now-obsolete guard assertions.**
+`tests/test_app.py`'s `test_test_integration_remains_untouched`, and
+`tests/test_app_explanation.py`'s, `tests/test_config.py`'s, and
+`tests/test_explanations.py`'s respective `test_test_integration_remains_unchanged`, each
+asserted `tests/test_integration.py` contained zero function/class definitions — a sentinel
+against premature implementation before Stage 36. Since Stage 36 legitimately populates
+that file for the first time, this condition is now permanently false by design; per
+explicit approval (a genuine stop-condition consultation, since none of these four files
+were in Stage 36's originally authorized file list), all four were retired rather than
+replaced with a different check. This is the sole reason the Stage 1–35 regression figure
+for Stage 36 is `1703 passed` rather than the prior `1707` baseline unchanged; the full
+suite is `1715 passed` (1703 + 12).
+
+**Sprint 3 completion.** With Stage 36's suite passing, the Stage 1–35 regression unchanged
+in substance, the full suite passing, and zero real network/secret/artifact leakage, every
+exit criterion in `MASTER_PROJECT_PLAN.md`'s Sprint 3 section is satisfied and demonstrated
+together — not merely by the sum of each stage's separate tests. Sprint 3 is complete.
+Sprint 4 — Hardening and Documentation is next and has not yet started;
+`docs/ARCHITECTURE.md` and `docs/LIMITATIONS.md` remain deliberately untouched
+placeholders, reserved for that sprint.
+
 ## Pending
 
 - **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/

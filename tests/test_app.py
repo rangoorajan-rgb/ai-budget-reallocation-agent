@@ -222,12 +222,13 @@ def test_pipeline_call_is_guarded_by_submitted_check():
     assert calls_inside_if
 
 
-def test_test_integration_remains_untouched():
-    integration_path = Path(__file__).resolve().parent / "test_integration.py"
-    tree = ast.parse(integration_path.read_text(encoding="utf-8"))
-    assert not any(
-        isinstance(node, (ast.FunctionDef, ast.ClassDef)) for node in ast.walk(tree)
-    )
+# Retired (Sprint 3, Development Stage 36): `test_test_integration_remains_untouched`
+# asserted `tests/test_integration.py` contained no function/class
+# definitions, guarding against premature implementation before Stage 36.
+# Stage 36 has now legitimately populated that file with the final
+# end-to-end integration suite -- see `tests/test_integration.py` for
+# that stage's own coverage -- so the guard's condition is permanently
+# false by design and is retired rather than replaced.
 
 
 # ---------------------------------------------------------------------------

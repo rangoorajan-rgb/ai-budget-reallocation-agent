@@ -1722,6 +1722,17 @@ configuration value, environment variable, or audit filesystem path.
 The export section renders only when both `audit_record_path` (Stage 34) and `audit_record`
 are non-`None` — a built-but-unpersisted audit is never exportable.
 
+## Final Integration Coverage (Stage 36, `tests/test_integration.py`)
+
+Stage 36 introduces no new model, field, or session-state key — it is the first stage to
+exercise every field and key documented above *together*, through real Streamlit `AppTest`
+widget interaction, against the real sample data (`data/sample_campaigns.csv`) and the real
+deterministic pipeline. It proves the complete chain — `locked_review_result` →
+`portfolio_explanation_result`/`campaign_explanation_result` → `approval_decision_result` →
+`audit_record_path`/`audit_record` → the exported CSV — is correctly wired end-to-end, and
+that a bare rerun leaves every one of these values byte-identical with no additional
+pipeline, Gemini, or audit-persistence call.
+
 ## Derived Fields
 
 > Pending a later Sprint 2 stage (combined confidence/tracking/pacing assessment,

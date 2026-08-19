@@ -2987,3 +2987,67 @@ All notable changes to this project are documented in this file.
   the exact CSV column order), `docs/DECISION_RULES.md` (frozen Stage 35 format, source-of-
   truth, gating, schema, serialization, formula-injection, and approved-test-exception
   policies), and `docs/TEST_SCENARIOS.md` (Stage 35 scenarios).
+
+### Changed
+- Sprint 3, Development Stage 36: one approved exception, retiring four now-obsolete guard
+  assertions rather than duplicating unit-level coverage. `tests/test_app.py`'s
+  `test_test_integration_remains_untouched`, and `tests/test_app_explanation.py`'s,
+  `tests/test_config.py`'s, and `tests/test_explanations.py`'s respective
+  `test_test_integration_remains_unchanged`, each asserted that `tests/test_integration.py`
+  contained zero function/class definitions, guarding against premature implementation
+  before Stage 36. Since Stage 36 legitimately populates that file for the first time, the
+  guard's condition is now permanently false by design; all four were retired (removed,
+  with an explanatory comment pointing to `tests/test_integration.py`) rather than replaced.
+  No other assertion in any of the four files was touched.
+
+### Added
+- Sprint 3, Development Stage 36: implemented `tests/test_integration.py` (placeholder
+  replaced) — 12 focused end-to-end integration tests, all passing, proving the complete
+  frozen Sprint 3 flow works together through real Streamlit `AppTest` widget interaction:
+  CSV upload → review-setup validation → campaign validation → deterministic pipeline →
+  locked result → optional Gemini explanation → human approval or rejection → immutable
+  audit construction → successful audit persistence → audited CSV export availability.
+  Every scenario that approves or rejects uses `AppTest.from_string` with
+  `app.record_campaign_reallocation_audit` redirected to the test's own `tmp_path`, never
+  `AppTest.from_file`. Zero real Gemini SDK client construction, zero real network calls,
+  zero real API key used or required, zero real `.env` created. Covers: the approved flow
+  from upload through export against the real sample data and the real deterministic
+  pipeline, asserting the exact, independently pre-established stable sample contract
+  (total budgets, conservation, exact campaign outcomes and reason codes) without
+  re-deriving any formula; the rejected flow with unchanged recommendations, a persisted
+  `REJECTED` audit, and every exported CSV row recording `REJECTED`; a fake generated
+  explanation proven supplementary and structurally absent from both the audit JSON and the
+  CSV, with call-count and rerun discipline; the real, network-free Gemini-unavailable path
+  not blocking approval, audit, or export; an injected unconserved result blocking approval
+  with the exact existing error while permitting and finalizing rejection; an audit
+  failure-then-successful-retry cycle leaving exactly one audit JSON and the export control
+  appearing only after success; an invalid `ReviewSetup` and a mixed valid/invalid CSV both
+  blocking the entire portfolio with zero downstream state; new valid and invalid
+  submissions clearing every downstream state key; a bare rerun after a completed cycle
+  leaving every piece of state byte-identical with zero additional pipeline/Gemini/audit
+  calls; and a cross-cutting sweep confirming no synthetic key, fake explanation text, raw
+  exception, or absolute path ever appears in any rendered element, session-state value,
+  the audit JSON, or the CSV, and that the real repository `audit_records/` directory and
+  overall file listing are unchanged before and after the full scenario set. One additional
+  defensive isolation fixture, scoped entirely to this new file, restores
+  `sys.modules["src.gemini_analyzer"]` to its original module object before and after every
+  test — required because `tests/test_gemini_analyzer.py`'s own reimport test otherwise
+  silently breaks `app.py`'s cached `ExplanationStatus` identity check for any fake
+  explanation built afterward; no existing test file was modified for this purpose. Stage
+  1–35 regression re-run and confirmed passing at `1703 passed` (the prior `1707` baseline
+  minus the four retired guard tests above). Full suite: `1715 passed` (1703 + 12). Zero
+  test-created files under the repository's real `audit_records/` directory, no `exports/`
+  directory ever created, and no real `.env` ever created, across every verification pass.
+- Updated `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md` (frozen Stage 36 execution
+  strategy, zero-network-Gemini policy, and approved-test-exception decisions), and
+  `docs/TEST_SCENARIOS.md` (Stage 36 scenarios).
+
+## Sprint 3 — Explanation, Approval, and Interface: Complete
+
+All frozen Sprint 3 exit criteria (`project_management/MASTER_PROJECT_PLAN.md`) are now
+satisfied and demonstrated together by Stage 36's own integration suite: the complete
+upload → validate → assess → recommend → lock → explain (Gemini) → approve/reject → audit
+record written → CSV export available flow works end-to-end; Gemini remains verifiably
+confined to explanation of locked numbers with no path to alter recommendations or touch
+live advertising-platform budgets; and every approval or rejection produces a traceable
+JSON audit record. Sprint 4 — Hardening and Documentation is next and has not yet started.

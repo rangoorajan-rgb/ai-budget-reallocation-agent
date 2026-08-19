@@ -3161,3 +3161,84 @@ possibly-needed was confirmed **not** required — no bare `exports` identifier 
 anywhere in `app.py`'s AST. Every Gemini, network, database, secret, approval, audit, and
 deterministic-engine isolation assertion in all three files is unchanged and still enforced.
 **Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 36: `AppTest.from_string` exclusively; zero real Gemini/network
+
+**Decision:** Every Stage 36 integration scenario that approves or rejects a review uses
+`AppTest.from_string` with `app.record_campaign_reallocation_audit` redirected to the
+test's own `tmp_path`, mirroring the established Stage 34/35 embedded-redirect pattern
+verbatim — never `AppTest.from_file`, which does not honor an external monkeypatch of a
+real approve/reject click's automatic audit write (confirmed empirically at Stage 34,
+reconfirmed at Stage 36). No real Gemini SDK client is ever constructed and no real network
+call is ever made: scenarios exercise either the genuine, network-free `UNAVAILABLE` path
+(real `generate_explanation`, `GEMINI_API_KEY` absent) or a deterministic fake `GENERATED`
+result patched onto `app.generate_explanation` from within the embedded script. No real
+Gemini API key is used, required, or created via a real `.env`; a real-key smoke test
+remains an explicitly separate, manual, post-Sprint acceptance activity, never part of the
+automated suite.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 36: integration tests prove wiring, not component correctness
+
+**Decision:** `tests/test_integration.py` contains exactly 12 focused scenarios proving the
+complete frozen Sprint 3 flow works together — CSV upload through audited CSV export
+availability — through real Streamlit `AppTest` widget interaction. It deliberately does
+not duplicate the exhaustive edge-case matrices already owned by each earlier stage's own
+focused test file (validation rules, deterministic formulas, explanation-payload
+construction, Gemini transport error mapping, approval error messages, audit
+idempotency/conflict handling, CSV formula-injection neutralization, and so on). Known
+stable sample-data outcomes (e.g. `total_current_budget = 11700.00`, G002 `INCREASE`/rank 1
+zero-funded) are asserted as already-established facts, reused directly from
+`tests/test_app.py`'s and `tests/test_app_explanation.py`'s own prior assertions against
+the same untouched `data/sample_campaigns.csv` — never re-derived from the underlying
+formulas.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 36: one defensive fixture scoped to the new file only
+
+**Decision:** `tests/test_integration.py` includes one additional autouse fixture,
+scoped entirely to that one file, restoring `sys.modules["src.gemini_analyzer"]` to its
+original module object before and after every test. This is necessary because
+`tests/test_gemini_analyzer.py`'s own
+`test_import_performs_no_client_construction_environment_or_network` pops
+`src.gemini_analyzer` from `sys.modules` and reimports it fresh (to prove import-time
+side-effect freedom), leaving a *different* `ExplanationStatus` class installed under that
+name for the remainder of the process — which silently breaks `app.py`'s own already-cached
+`is ExplanationStatus.GENERATED` identity check for any fake explanation built afterward,
+with the failure surfacing deep inside rendering rather than at the click boundary's own
+exception handling (confirmed by direct reproduction during implementation). This is a
+defensive addition entirely within the one newly authorized test file — `tests/test_gemini_analyzer.py`
+and every other existing test file remain completely untouched for this purpose.
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3, Development Stage 36: four now-obsolete guard assertions retired
+
+**Decision:** `tests/test_app.py`'s `test_test_integration_remains_untouched`, and
+`tests/test_app_explanation.py`'s, `tests/test_config.py`'s, and
+`tests/test_explanations.py`'s respective `test_test_integration_remains_unchanged`, each
+asserted that `tests/test_integration.py` contained zero function/class definitions — a
+sentinel deliberately left by earlier stages to guard against premature implementation
+before Stage 36. Because Stage 36's entire purpose is to legitimately populate that file
+with the final integration suite, this condition becomes permanently false by design; per
+explicit approval (a genuine stop-condition consultation, since none of these four files
+were in Stage 36's originally authorized seven-file list), all four were retired — removed,
+with an explanatory comment pointing to `tests/test_integration.py` for that stage's own
+coverage — rather than replaced with a different check. No other assertion in any of the
+four files was touched. This is why the Stage 1–35 regression figure recorded for Stage 36
+is `1703 passed` (the prior `1707` baseline minus these four retired tests), not `1707`
+unchanged; the full suite is `1715 passed` (1703 + 12 new Stage 36 tests).
+**Status:** Frozen.
+
+## 2026-08-19 — Sprint 3 is complete
+
+**Decision:** With Stage 36's integration suite passing, the Stage 1–35 regression
+unchanged in substance (only the four explicitly-approved guard retirements above), the
+full suite passing, zero real network/Gemini calls, zero real secrets used or required, and
+zero real audit/export artifacts left in the repository, every exit criterion in
+`MASTER_PROJECT_PLAN.md`'s Sprint 3 section is satisfied and demonstrated together by
+Stage 36's own tests, not merely by the sum of each stage's separate tests. Sprint 3 —
+Explanation, Approval, and Interface is declared complete. Sprint 4 — Hardening and
+Documentation is next and has not yet started; `docs/ARCHITECTURE.md` and
+`docs/LIMITATIONS.md` remain deliberately untouched placeholders, reserved for that sprint
+per the frozen master plan.
+**Status:** Frozen.
