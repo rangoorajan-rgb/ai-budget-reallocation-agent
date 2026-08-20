@@ -1,8 +1,11 @@
 # Architecture
 
-> Sprint 4, Development Stage 37. Reflects the completed Sprint 1–3 implementation
-> (Development Stages 1–36). Every module, model, and function named below exists in the
+> Sprint 4, Development Stage 41 (Human-in-the-Loop, Audit, and Governance Completeness
+> Review). Reflects the completed Sprint 1–3 implementation (Development Stages 1–36) plus
+> Sprint 4's Stages 37–40 (living documentation, README, packaging/dependency hardening,
+> and test-suite hardening). Every module, model, and function named below exists in the
 > repository exactly as described; nothing in this document is speculative or planned.
+> Sprint 4 remains incomplete.
 
 ## Overview
 
@@ -229,9 +232,12 @@ requires `result.conservation.is_conserved is True`
 (`ValueError("An unconserved allocation cannot be approved.")` otherwise) — rejection has
 no such restriction, since a human must remain free to reject a mathematically broken
 allocation. The decision applies to the complete locked portfolio only — there is no
-per-campaign or partial approval. Once rendered as finalized, no control anywhere in the
-UI can overwrite or reconsider a stored decision; only a new deterministic submission
-clears it.
+per-campaign or partial approval. The reviewer's name and optional note are captured
+directly on `CampaignReallocationApproval` (`reviewer_name`, `note`) — they are not a
+separate log entry; both fields travel unchanged into the audit record built in the same
+click (`src/audit.py`), so the human decision record and its accountable identity are one
+and the same object. Once rendered as finalized, no control anywhere in the UI can
+overwrite or reconsider a stored decision; only a new deterministic submission clears it.
 
 ## Immutable Audit Construction and Local JSON Persistence (`src/audit.py`)
 
@@ -242,29 +248,53 @@ clock, or network access of its own); it re-checks `approval.review_id ==
 result.review_id` and, for an `APPROVED` decision only, `result.conservation.is_conserved`,
 raising the same class of exact `ValueError` as `src/approval.py` if either fails.
 `audit_id` is a deterministic SHA-256 digest of the canonical JSON of `{"result":
-result, "approval": approval}` — excluding `recorded_at`, so a retried write of the same
-decision always resolves to the same file regardless of when the retry happens.
-`record_campaign_reallocation_audit` writes exactly one UTF-8 JSON file per record to
-`audit_records/{audit_id}.json` (the directory is resolved from `src/audit.py`'s own file
-location, never the current working directory), via a temporary file plus an atomic
-`os.replace` — a write that already exists with matching content is an idempotent no-op; a
-genuinely conflicting or unparseable existing file is never silently overwritten. The one
-production wall-clock call (`datetime.now(timezone.utc)`) lives in `app.py`'s
-`_attempt_audit_recording`, never inside `src/audit.py` itself.
+result, "approval": approval}` — deliberately excluding `recorded_at`, since including a
+wall-clock value in the digest would give an identical decision a different ID on every
+retry; excluding it is what makes a retried write of the same decision always resolve to
+the same file regardless of when the retry happens. `recorded_at` itself must be
+timezone-aware — a naive `datetime` is rejected by a `@field_validator`
+(`ValueError("recorded_at must be timezone-aware")`) — and is always normalized to UTC on
+construction, so every stored audit's timestamp is directly comparable regardless of the
+caller's local timezone. `record_campaign_reallocation_audit` writes exactly one UTF-8
+JSON file per record to `audit_records/{audit_id}.json` (the directory is resolved from
+`src/audit.py`'s own file location, never the current working directory), via a temporary
+file plus an atomic `os.replace` — a write that already exists with matching content
+(compared on every field except `recorded_at`, since the first successful write's
+timestamp is authoritative) is an idempotent no-op returning the existing path unchanged.
+A pre-existing file under the same `audit_id` with genuinely different content raises
+exactly `ValueError("An audit record with this audit_id already exists with different
+content.")`; a pre-existing file that cannot be parsed and validated back into
+`CampaignReallocationAudit` raises without being overwritten or repaired — neither case is
+ever silently resolved. The one production wall-clock call (`datetime.now(timezone.utc)`)
+lives in `app.py`'s `_attempt_audit_recording`, never inside `src/audit.py` itself. This is
+local JSON file persistence, not a production database — see `docs/LIMITATIONS.md` for the
+absence of a query engine, indexing, replication, retention system, distributed locking,
+and automatic backup.
 
 ## In-Memory Audited CSV Export (`src/exports.py`)
 
 `build_campaign_reallocation_export_rows(audit)` and
 `serialize_campaign_reallocation_export_csv(rows)` consume only an already-built,
 already-persisted `CampaignReallocationAudit` — never a separate result/approval pair,
-never a re-read from disk, and never any Stage 1–34 production function. The export is one
-flat CSV, one row per campaign, in the locked result's own original order, with the
+never a re-read from disk, and never any Stage 1–34 production function; `src/exports.py`
+imports no Gemini SDK, `config`, `src.explanations`, or `src.gemini_analyzer`, so an export
+can never trigger a Gemini call, recompute a recommendation, or mutate the audit it reads.
+Both `APPROVED` and `REJECTED` audits are exportable, identically — the module never
+branches on `decision` beyond copying its `.value` into the row, so a rejection never
+rewrites, relabels, or reinterprets the deterministic recommendations that were reviewed;
+the CSV remains a factual record of what was recommended and what was decided. The export
+is one flat CSV, one row per campaign, in the locked result's own original order, with the
 shared audit/approval/portfolio/conservation context repeated on every row so each row is
 independently self-contained. `Decimal` values render via `format(value, "f")`; a
-one-apostrophe formula-injection prefix is applied to the five textual fields that can
+one-apostrophe formula-injection prefix is applied only to the five textual fields that can
 carry uploaded or human-entered text (`review_id`, `reviewer_name`, `decision_note`,
 `campaign_id`, `campaign_name`) when their first non-whitespace character is
-`=`/`+`/`-`/`@`. The CSV is generated entirely in memory and handed to Streamlit's
+`=`/`+`/`-`/`@` — every other column (enum values, the `is_conserved` boolean, the
+audit-ID hash, timestamps, and `Decimal` strings) is trusted, computed data and is never
+passed through this neutralization. In `app.py`, the export section is gated on both
+`AUDIT_RECORD_PATH_STATE_KEY` and `AUDIT_RECORD_STATE_KEY` being present — it only renders
+once `record_campaign_reallocation_audit` has actually returned successfully, never on the
+approval decision alone. The CSV is generated entirely in memory and handed to Streamlit's
 `st.download_button` — no export file is ever written to the server filesystem, and no
 `exports/` directory exists anywhere in this repository.
 

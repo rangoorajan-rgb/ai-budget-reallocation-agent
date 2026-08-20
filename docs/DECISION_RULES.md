@@ -1,17 +1,20 @@
 # Decision Rules
 
 > Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
-> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
-> finalizes this and the four other living documentation files named by the frozen master
-> plan (`docs/ARCHITECTURE.md`, `docs/DATA_DICTIONARY.md`, `docs/TEST_SCENARIOS.md`,
-> `docs/LIMITATIONS.md`). The body of this document below records every frozen rule
-> through the completed Stage 1–36 implementation — Sprint 2's deterministic core engine
-> (Stages 1–27, including the `ReasonCode`, scoring, ranking, allocation, and conservation
-> rules), the Streamlit interface, Gemini configuration and explanation layer, human
-> approval, immutable audit persistence, in-memory CSV export, and the Stage 36 end-to-end
-> integration suite. See `docs/ARCHITECTURE.md` for the actual, currently-implemented
-> state of `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty
-> `ReasonCode` members.
+> Sprint 4 — Hardening and Documentation is now active and remains incomplete; Stages
+> 37–40 (living documentation, README, packaging/dependency hardening, and test-suite
+> hardening) are complete, and Stage 41 (Human-in-the-Loop, Audit, and Governance
+> Completeness Review) corrected this file's "Pending" section, which had described
+> `RecommendationAction.HOLD` as unresolved even though Stage 21 (see below) fully resolved
+> it — a staleness first identified, but left uncorrected as out of scope, at Stage 37. The
+> body of this document below records every frozen rule through the completed Stage 1–36
+> implementation — Sprint 2's deterministic core engine (Stages 1–27, including the
+> `ReasonCode`, scoring, ranking, allocation, and conservation rules), the Streamlit
+> interface, Gemini configuration and explanation layer, human approval, immutable audit
+> persistence, in-memory CSV export, and the Stage 36 end-to-end integration suite. See
+> `docs/ARCHITECTURE.md` for the actual, currently-implemented state of
+> `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty `ReasonCode`
+> members.
 
 ## Approved Enumerations (`src/constants.py`)
 
@@ -2833,13 +2836,24 @@ placeholders, reserved for that sprint.
 
 ## Pending
 
-- **Final recommendation.** Stage 5 resolved how `INCREASE_THRESHOLD`/
-  `MAINTAIN_THRESHOLD` classify `weighted_performance_ratio` into a neutral
-  `PerformanceBand` (see above) — but a `PerformanceBand` is not a `RecommendationAction`.
-  `RecommendationAction` has a fourth member, `HOLD`, that cannot be derived from
-  performance ratio thresholds alone; assigning a final `RecommendationAction` requires
-  combining `PerformanceBand` with trend, confidence, tracking, and eligibility/
-  constraint considerations that remain pending later stages.
+- ~~**Final recommendation.**~~ **Resolved at Stage 21 — no longer pending.** This bullet
+  originally recorded that Stage 5 had produced only a neutral `PerformanceBand`, not a
+  final `RecommendationAction`, and that assigning `INCREASE`/`MAINTAIN`/`REDUCE`/`HOLD`
+  remained open. It predates Stage 21 (`src/recommendation.py`,
+  "Deterministic Ordered Campaign Recommendation-Action Selection Rules," above), which
+  fully resolved it: `resolve_campaign_recommendation_action` selects exactly one
+  `RecommendationAction` per campaign via the exact six-step ordered policy documented
+  above — a Paused override and a tracking-assessability override (both to `HOLD`),
+  unique-`SUITABLE` selection, multiple-`SUITABLE` ambiguity (`HOLD`), a conservative
+  `MAINTAIN` fallback, and a final `HOLD` fallback. `HOLD` is a fully implemented
+  review/deferral outcome, not an unresolved case — see `docs/ARCHITECTURE.md`'s "HOLD,
+  Confidence.NOT_ASSESSABLE, and ReasonCode: Actual Implemented State" section for the
+  currently-verified summary. This staleness was first identified — but, per Stage 37's
+  header-only authorized scope, deliberately left uncorrected in this section's body — at
+  Stage 37 (`project_management/DECISIONS.md`, 2026-08-20); it was corrected here at Stage
+  41. No enum member or production behavior changed to make this correction; only this
+  document's own stale description was brought into agreement with the Stage 21
+  implementation, which has been correct and unchanged since it was written.
 - **`NOT_ASSESSABLE` trigger and combined assessment.** Stage 7 resolved
   `conversions_28d` → `Confidence.HIGH`/`MEDIUM`/`LOW`, Stage 8 resolved
   `tracking_status` → `is_assessable`/`CampaignTrackingAssessment`, and Stage 9 resolved

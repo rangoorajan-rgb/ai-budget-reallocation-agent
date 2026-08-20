@@ -3420,3 +3420,49 @@ concern (`src/exports.py`), not a Stage 2 validation rule, and this stage does n
 one. No production defect was found during this probing; the stop-on-defect policy was
 never triggered.
 **Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 41: HOLD documentation staleness corrected, not new behaviour
+
+**Decision:** `docs/DECISION_RULES.md`'s "Pending" section retained a "Final recommendation"
+bullet describing `RecommendationAction.HOLD` as an unresolved question requiring
+`PerformanceBand` to be combined with trend/confidence/tracking/eligibility considerations
+in a future stage. This staleness was first identified at Stage 37
+(`project_management/DECISIONS.md`, 2026-08-20) but deliberately left uncorrected because
+Stage 37's authorized scope was limited to the five living documents' top-of-file headers
+only, not body content. Verified against `src/recommendation.py`, `src/classification.py`,
+and `src/reasons.py` at Stage 41: Stage 21 fully resolved `RecommendationAction` selection,
+including `HOLD`, via `resolve_campaign_recommendation_action`'s exact six-step ordered
+policy — this same file's own Stage 21 body section already documented that policy
+correctly; only the separate "Pending" section's summary bullet was stale. The bullet was
+rewritten to state the resolution, point to the Stage 21 section and
+`docs/ARCHITECTURE.md`'s HOLD/`Confidence.NOT_ASSESSABLE`/`ReasonCode` summary, and record
+the finding-to-fix timeline. No enum member, `src/recommendation.py`, or any other
+production behaviour was changed — this is a documentation correction only, bringing a
+stale description into agreement with implementation that has been correct since Stage 21.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 41: governance review confirms existing documentation, adds three narrow gap-fill clarifications
+
+**Decision:** A source-backed review of `src/pipeline.py`, `src/approval.py`,
+`src/audit.py`, `src/exports.py`, `src/explanations.py`, `src/gemini_analyzer.py`, the
+relevant sections of `app.py`, and the approval/audit/export/explanation/integration test
+modules confirmed that `docs/ARCHITECTURE.md` and `docs/LIMITATIONS.md` (both fully
+rewritten at Stage 37) already accurately documented the human-authority boundary, the
+session-state lifecycle, audit-persistence policy, export governance, and the Gemini/secret
+boundary — no contradiction with the current source or passing tests was found in either
+file's substantive content. Three narrow, source-verified gaps were filled in
+`docs/ARCHITECTURE.md`: (1) the Audit section did not previously state that `recorded_at`
+must be timezone-aware and is normalized to UTC on construction (verified against
+`src/audit.py`'s `_require_aware_utc` validator and `tests/test_audit.py`'s
+`test_naive_timestamp_rejected`); (2) the Human Approval section did not previously state
+that `reviewer_name`/`note` are captured on `CampaignReallocationApproval` and travel
+unchanged into the same-click audit record; (3) the Export section did not previously state
+explicitly that both `APPROVED` and `REJECTED` audits are exportable identically (a
+rejection never rewrites the reviewed recommendations) and that `src/exports.py` imports no
+Gemini SDK/`config`/`src.explanations`/`src.gemini_analyzer`. All three additions describe
+existing, already-implemented behaviour verified directly against source and tests before
+being written; no production code or behaviour was changed. Separately, all three
+authorized living documents' top-of-file status blockquotes (frozen at Stage-37-era
+language) were updated to reflect Stages 37–40 being complete and Stage 41's own role, a
+Stage-numbering consistency correction — no other cross-document contradiction was found.
+**Status:** Frozen.

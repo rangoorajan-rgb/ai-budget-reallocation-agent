@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stages
-37–40 complete, Sprint 4 as a whole not yet complete)
+37–41 complete, Sprint 4 as a whole not yet complete)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -17,9 +17,10 @@ Files — is complete** (documentation-only; see below). **Sprint 4, Development
 Rewrite the Project README — is complete** (documentation-only; see below). **Sprint 4,
 Development Stage 39 — Packaging and Dependency Hardening — is complete** (see below).
 **Sprint 4, Development Stage 40 — Test-Suite Hardening and Adversarial Validation
-Coverage — is complete** (see below). Sprint 4 remains incomplete: CI and a review of the
-human-in-the-loop boundary and audit-trail completeness are future Sprint 4 work not yet
-started.
+Coverage — is complete** (see below). **Sprint 4, Development Stage 41 — Human-in-the-Loop,
+Audit, and Governance Completeness Review — is complete** (documentation-only; see below).
+Sprint 4 remains incomplete: CI and provisional final release verification/Sprint 4
+closure (Stage 42) are future work not yet started.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -2939,9 +2940,91 @@ stage.
       unexpected temporary directory was created inside the repository (the 928 leaked
       OS-temp directories predate this stage and live outside the repository entirely).
 
+## Sprint 4, Development Stage 41 — Human-in-the-Loop, Audit, and Governance Completeness Review (complete)
+
+- [x] **Documentation-only stage. No production or test file changed.** Exactly three
+      content files were touched: `docs/ARCHITECTURE.md`, `docs/DECISION_RULES.md`,
+      `docs/LIMITATIONS.md`, plus the three project-management tracking files. `docs/DATA_DICTIONARY.md`,
+      `docs/TEST_SCENARIOS.md`, `app.py`, `config.py`, every file under `src/` and `tests/`,
+      `README.md`, `requirements.txt`, `pyproject.toml`, `.env.example`, `.gitignore`,
+      `.gitattributes`, all `data/` files, and `project_management/MASTER_PROJECT_PLAN.md`
+      remain byte-for-byte unchanged. This stage implements no new feature — it verifies
+      that the completed human-decision, audit-persistence, export, AI-isolation, and
+      governance boundaries are accurately and consistently documented against the real
+      source and tests (`src/pipeline.py`, `src/approval.py`, `src/audit.py`,
+      `src/exports.py`, `src/explanations.py`, `src/gemini_analyzer.py`, the relevant
+      sections of `app.py`, and `tests/test_integration.py`, `tests/test_approval.py`,
+      `tests/test_audit.py`, `tests/test_exports.py`, `tests/test_explanations.py`, and the
+      application test modules).
+- [x] **Governance areas reviewed, all found already accurate** (Stage 37's original
+      `docs/ARCHITECTURE.md`/`docs/LIMITATIONS.md` rewrite already documented these
+      correctly): the human authority boundary (deterministic-before-Gemini ordering,
+      Gemini's structural inability to alter any locked value, mandatory explicit human
+      approval/rejection, approval blocked for unconserved allocations, rejection always
+      possible, no overwrite/reconsideration path, no advertising-platform channel);
+      the locked-result and session-state lifecycle (all eight state keys, reset-on-new-
+      submission, bare-rerun preservation, per-boundary failure behaviour); audit
+      immutability (content-derived `audit_id`, atomic `os.replace` persistence,
+      idempotent identical-content retry, conflict/malformed-record rejection, approval
+      remaining finalized on a failed audit write, the local-JSON-not-a-database
+      limitation); export governance (in-memory generation, no `exports/` directory,
+      formula-injection mitigation scoped to exactly five untrusted textual fields); and
+      the Gemini/secret boundary (authorized-fields-only payloads, `SecretStr` redaction,
+      Gemini unavailability never blocking the deterministic workflow, no real API key or
+      network call required by the test suite).
+- [x] **Two genuine gaps found in `docs/ARCHITECTURE.md` and corrected** (source-verified
+      against `src/audit.py` and `tests/test_audit.py` before writing): the Audit section
+      did not previously state that `recorded_at` must be timezone-aware (a naive
+      `datetime` is rejected by a `@field_validator`) and is always normalized to UTC on
+      construction — added, with the exact rejection message. The Human Approval section
+      did not previously state explicitly that `reviewer_name`/`note` are captured
+      directly on `CampaignReallocationApproval` and travel unchanged into the audit record
+      built in the same click — added. The Export section was extended to state explicitly
+      that both `APPROVED` and `REJECTED` audits are exportable identically, that a
+      rejection therefore never rewrites the reviewed recommendations, and that
+      `src/exports.py` imports no Gemini SDK/`config`/`src.explanations`/
+      `src.gemini_analyzer`, so an export can never trigger a Gemini call, recompute a
+      recommendation, or mutate the audit it reads — all three additions state existing,
+      already-implemented behaviour; no production code or behaviour changed.
+- [x] **Stale HOLD documentation in `docs/DECISION_RULES.md` corrected**, per the
+      staleness identified but left uncorrected (out of Stage 37's header-only scope) at
+      Stage 37. The "Pending" section's "Final recommendation" bullet described
+      `RecommendationAction.HOLD` as an open question requiring a future stage — this
+      predated Stage 21, which fully resolved it via `src/recommendation.py`'s exact
+      six-step ordered policy (already correctly documented in this same file's own
+      Stage 21 body section, which was never stale). The bullet was rewritten to state the
+      resolution plainly, point to the Stage 21 section and `docs/ARCHITECTURE.md`'s HOLD
+      summary, and record when the staleness was found and when it was fixed. No enum
+      member or production behaviour was changed. Re-verified during this same review:
+      `Confidence.NOT_ASSESSABLE` remains a reserved enum member never assigned by
+      `classify_campaign_confidence` (`src/classification.py`); exactly the same 8 of 20
+      `ReasonCode` members remain the only ones emitted by `src/reasons.py`, confirmed
+      directly against `src/constants.py`'s `ReasonCode` enum.
+- [x] **Cross-document consistency corrected.** All three authorized living documents'
+      top-of-file status blockquotes were frozen at Stage-37-era language, understating
+      completed Sprint 4 progress (Stages 38, 39, and 40 were already complete). Each was
+      updated to state Stages 37–40 complete, Stage 41's own role, and that Sprint 4
+      remains incomplete — a Stage-numbering consistency correction, not a claim of Sprint
+      4 or project completion. No other contradiction (deterministic authority, Gemini
+      authority, approval finality, conservation, audit persistence, CSV exports,
+      local-pilot limitations, platform integrations, or API-key handling) was found across
+      the three files.
+- [x] **No CI workflow added.** Per the explicit CI boundary for this stage: the frozen
+      master plan requires hardening and documentation but does not explicitly require
+      hosted CI, so none was introduced. CI's continued absence is recorded factually as
+      optional future infrastructure, not as a Sprint 4 blocker.
+- [x] **No API key, no network call.** No Gemini API key was created, read, requested, or
+      used at any point during this stage; no network call of any kind occurred.
+- [x] Integration suite re-confirmed unchanged at `12 passed`. Full suite re-confirmed
+      unchanged at `1743 passed` — the exact Stage 40 baseline, since this stage changed no
+      test file. `git status --short` confirmed exactly the three authorized `docs/` files
+      changed for the documentation review, plus the three project-management tracking
+      files, and every protected file at zero diff. `audit_records/` confirmed to still
+      contain only `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
+
 ## Next Sprint Work
 
 **Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
-outstanding: CI, and a review of the human-in-the-loop boundary and audit-trail
-completeness. Neither is addressed by Stage 37, Stage 38, Stage 39, or Stage 40. No stage
-after Stage 40 has been started.
+outstanding: CI, and Stage 42 — provisional final release verification and Sprint 4
+closure, which has not been started. Neither is addressed by Stage 37, Stage 38, Stage 39,
+Stage 40, or Stage 41.

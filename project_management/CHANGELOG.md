@@ -3260,3 +3260,48 @@ JSON audit record. Sprint 4 — Hardening and Documentation is next and has not 
   repository. Sprint 4 remains incomplete: CI and a review of the human-in-the-loop
   boundary and audit-trail completeness remain future work, not addressed by this stage.
   No stage after Stage 40 has been started.
+
+## Sprint 4, Development Stage 41 — Human-in-the-Loop, Audit, and Governance Completeness Review
+
+### Fixed
+- `docs/DECISION_RULES.md`: the "Pending" section's "Final recommendation" bullet
+  described `RecommendationAction.HOLD` as an unresolved question, predating Stage 21's
+  actual resolution — a staleness identified but left uncorrected (out of Stage 37's
+  header-only scope) at Stage 37. Rewritten to state the resolution plainly, referencing
+  Stage 21's own (already-correct) body section and `docs/ARCHITECTURE.md`'s HOLD summary.
+  No enum member or production behaviour changed.
+- `docs/ARCHITECTURE.md`, `docs/DECISION_RULES.md`, `docs/LIMITATIONS.md`: top-of-file
+  status blockquotes, frozen at Stage-37-era language, understated completed Sprint 4
+  progress (Stages 38–40 were already complete). Updated to reflect Stages 37–40 complete
+  and Stage 41's own role, while continuing to state that Sprint 4 remains incomplete.
+
+### Added
+- `docs/ARCHITECTURE.md`: three narrow, source-verified clarifications following a
+  governance completeness review of `src/pipeline.py`, `src/approval.py`, `src/audit.py`,
+  `src/exports.py`, `src/explanations.py`, `src/gemini_analyzer.py`, the relevant sections
+  of `app.py`, and the approval/audit/export/explanation/integration test modules — the
+  Audit section now states that `recorded_at` must be timezone-aware and is normalized to
+  UTC on construction (a naive value is rejected); the Human Approval section now states
+  that `reviewer_name`/`note` are captured on `CampaignReallocationApproval` and travel
+  unchanged into the same-click audit record; the Export section now states explicitly
+  that both `APPROVED` and `REJECTED` audits are exportable identically and that
+  `src/exports.py` can never trigger a Gemini call, recompute a recommendation, or mutate
+  the audit it reads. Each addition documents existing, already-implemented behaviour;
+  none is new production behaviour.
+
+### Notes
+- Documentation/governance-review-only stage: no production or test file changed. Exactly
+  three `docs/` files touched (`docs/ARCHITECTURE.md`, `docs/DECISION_RULES.md`,
+  `docs/LIMITATIONS.md`), plus the three project-management tracking files; every other
+  file confirmed at zero diff. This stage implements no new feature — it verifies that the
+  completed human-decision, audit-persistence, export, AI-isolation, and governance
+  boundaries already accurately and consistently documented against source and tests, and
+  corrects the one genuine staleness and three narrow gaps found. No CI workflow was
+  added — its continued absence is recorded as optional future infrastructure, not a
+  Sprint 4 blocker. No dependency, Gemini API key, or network call was used at any point.
+  Integration suite re-confirmed unchanged at `12 passed`; full suite re-confirmed
+  unchanged at `1743 passed` (the exact Stage 40 baseline, since no test file changed).
+  `audit_records/` confirmed to still contain only `.gitkeep`; no `exports/` directory
+  exists; no real `.env` exists. Sprint 4 remains incomplete: CI and Stage 42 (provisional
+  final release verification and Sprint 4 closure) remain future work, not addressed by
+  this stage. No stage after Stage 41 has been started.

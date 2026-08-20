@@ -1,10 +1,12 @@
 # Limitations
 
-> Sprint 4, Development Stage 37. Reflects the completed Sprint 1–3 implementation
-> (Development Stages 1–36). This document states honest, current facts about the
+> Sprint 4, Development Stage 41 (Human-in-the-Loop, Audit, and Governance Completeness
+> Review). Reflects the completed Sprint 1–3 implementation (Development Stages 1–36) plus
+> Sprint 4's Stages 37–40. This document states honest, current facts about the
 > application as implemented — it does not overstate readiness. The frozen master plan's
 > Sprint 3 exit criteria describe the project as ready for real-world **pilot** use, not
-> as enterprise-production-ready software.
+> as enterprise-production-ready software. Sprint 4 remains incomplete; no CI workflow
+> exists at this stage.
 
 ## Known Constraints
 
