@@ -501,3 +501,267 @@ def test_duplicate_ids_compared_after_model_trimming():
     assert report.error_count == 2
     assert all(i.code is ValidationCode.DUPLICATE_CAMPAIGN_ID for i in report.issues)
     assert report.valid_campaigns == []
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4, Development Stage 40 — adversarial and edge-case CSV coverage
+#
+# Every outcome below was directly observed against the real
+# `validate_campaign_csv`/`CampaignInput` before being written into an
+# assertion — none is inferred from the source code alone. No new
+# validation rule is introduced or asserted; each test documents the
+# existing behaviour exactly as the production validator already produces
+# it. Formula-like strings (`=`, `+`, `-`, `@` leading characters) are
+# deliberately asserted as *accepted* here — CSV formula-injection
+# neutralization is a Stage 35 export-time concern (`src/exports.py`),
+# never a Stage 2 input-validation rule.
+# ---------------------------------------------------------------------------
+
+
+def test_csv_with_leading_utf8_bom_fails_header_match():
+    # A BOM prepended to the stream becomes part of the first header
+    # cell's text ("﻿campaign_id"), which does not exactly equal
+    # "campaign_id" -- the existing exact-match header policy (not a new
+    # BOM-specific rule) is what rejects it.
+    text = "﻿" + _csv_text([_row()])
+    report = validate_campaign_csv(io.StringIO(text))
+    assert report.is_valid is False
+    assert report.issues[0].code is ValidationCode.INVALID_HEADER
+    assert report.issues[0].row_number == 1
+    assert report.valid_campaigns == []
+
+
+def test_quoted_field_containing_a_comma_is_preserved_exactly():
+    report = validate_campaign_csv(_stream([_row(campaign_name="Brand, Inc.")]))
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].campaign_name == "Brand, Inc."
+
+
+def test_quoted_field_containing_embedded_double_quotes_is_preserved_exactly():
+    report = validate_campaign_csv(
+        _stream([_row(campaign_name='Brand "Premium" Search')])
+    )
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].campaign_name == 'Brand "Premium" Search'
+
+
+def test_quoted_field_containing_an_embedded_newline_is_preserved_exactly():
+    report = validate_campaign_csv(
+        _stream([_row(campaign_name="Brand\nSecond Line")])
+    )
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].campaign_name == "Brand\nSecond Line"
+
+
+def test_crlf_line_endings_parse_identically_to_lf():
+    text = _csv_text([_row(campaign_id="G001"), _row(campaign_id="G002")]).replace(
+        "\n", "\r\n"
+    )
+    report = validate_campaign_csv(io.StringIO(text))
+    assert report.is_valid is True
+    assert [c.campaign_id for c in report.valid_campaigns] == ["G001", "G002"]
+
+
+def test_blank_line_between_data_rows_is_one_malformed_row_others_still_parse():
+    header_line = ",".join(REQUIRED_CAMPAIGN_HEADER)
+    row_one = ",".join(_row(campaign_id="G001"))
+    row_two = ",".join(_row(campaign_id="G002"))
+    text = f"{header_line}\n{row_one}\n\n{row_two}\n"
+    report = validate_campaign_csv(io.StringIO(text))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.MALFORMED_ROW
+    assert report.issues[0].row_number == 3
+    assert [c.campaign_id for c in report.valid_campaigns] == ["G001", "G002"]
+
+
+def test_blank_line_immediately_after_header_is_malformed_row():
+    header_line = ",".join(REQUIRED_CAMPAIGN_HEADER)
+    row_one = ",".join(_row(campaign_id="G001"))
+    text = f"{header_line}\n\n{row_one}\n"
+    report = validate_campaign_csv(io.StringIO(text))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.MALFORMED_ROW
+    assert report.issues[0].row_number == 2
+    assert [c.campaign_id for c in report.valid_campaigns] == ["G001"]
+
+
+def test_trailing_newline_at_end_of_file_produces_no_extra_row():
+    # A single trailing "\n" is ordinary file formatting, not a blank
+    # data row -- csv.reader does not yield an empty final row for it.
+    report = validate_campaign_csv(_stream([_row(campaign_id="G001")]))
+    assert report.is_valid is True
+    assert [c.campaign_id for c in report.valid_campaigns] == ["G001"]
+
+
+def test_whitespace_only_campaign_id_is_rejected_as_blank():
+    report = validate_campaign_csv(_stream([_row(campaign_id="   ")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "campaign_id"
+
+
+def test_whitespace_only_campaign_name_is_rejected_as_blank():
+    report = validate_campaign_csv(_stream([_row(campaign_name="   ")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "campaign_name"
+
+
+def test_whitespace_only_review_id_is_rejected_as_blank():
+    review, report = validate_review_setup(_valid_review_kwargs(review_id="   "))
+    assert review is None
+    assert report.issues[0].code is ValidationCode.INVALID_REVIEW_FIELD
+    assert report.issues[0].field == "review_id"
+
+
+def test_malformed_unclosed_quote_is_reported_as_malformed_row_no_crash():
+    # An unclosed quote makes Python's csv.reader consume the rest of the
+    # stream into that one field -- no exception is ever raised by
+    # validate_campaign_csv; the resulting short row is reported the same
+    # way any other wrong-cell-count row is.
+    header_line = ",".join(REQUIRED_CAMPAIGN_HEADER)
+    bad_row = (
+        'G001,"Unclosed Name,Google Ads,Active,CPA,45.00,3000.00,500.00,'
+        "6000.00,2850.00,40,155,42.10,44.80,Healthy,High,False,False,,"
+    )
+    text = f"{header_line}\n{bad_row}\n"
+    report = validate_campaign_csv(io.StringIO(text))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.MALFORMED_ROW
+    assert report.valid_campaigns == []
+
+
+def test_scientific_notation_accepted_for_unquantized_decimal_field():
+    report = validate_campaign_csv(_stream([_row(kpi_target="4.5E1")]))
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].kpi_target == Decimal("45")
+
+
+def test_scientific_notation_accepted_and_quantized_for_currency_field():
+    report = validate_campaign_csv(_stream([_row(current_budget="3E3")]))
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].current_budget == Decimal("3000.00")
+
+
+def test_very_large_valid_decimal_within_model_contract_preserved_exactly():
+    # The largest value Decimal/Currency can hold under the project's
+    # established default global context (28 significant digits) -- the
+    # same extreme value already used as the project's own precision
+    # regression fixture elsewhere (e.g. src/constraints.py's own tests).
+    big = "99999999999999999999999999.99"
+    report = validate_campaign_csv(
+        _stream(
+            [
+                _row(
+                    current_budget=big,
+                    minimum_budget="0.00",
+                    maximum_budget=big,
+                    spend_to_date="0.00",
+                )
+            ]
+        )
+    )
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].current_budget == Decimal(big)
+
+
+def test_negative_current_budget_rejected():
+    report = validate_campaign_csv(_stream([_row(current_budget="-100.00")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "current_budget"
+
+
+def test_negative_conversions_rejected():
+    report = validate_campaign_csv(_stream([_row(conversions_7d="-5")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "conversions_7d"
+
+
+def test_nan_kpi_target_rejected():
+    report = validate_campaign_csv(_stream([_row(kpi_target="NaN")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "kpi_target"
+
+
+def test_infinity_current_budget_rejected():
+    report = validate_campaign_csv(_stream([_row(current_budget="Infinity")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "current_budget"
+
+
+def test_negative_infinity_kpi_target_rejected():
+    report = validate_campaign_csv(_stream([_row(kpi_target="-Infinity")]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_CAMPAIGN_FIELD
+    assert report.issues[0].field == "kpi_target"
+
+
+def test_formula_like_campaign_id_and_name_are_accepted_by_validation():
+    # Formula-injection neutralization is a Stage 35 export-time policy
+    # (src/exports.py), never a Stage 2 input-validation rule -- a
+    # leading =/+/-/@ is ordinary, structurally valid text at this layer.
+    report = validate_campaign_csv(
+        _stream([_row(campaign_id="=SUM(A1)", campaign_name="+HYPERLINK(x)")])
+    )
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].campaign_id == "=SUM(A1)"
+    assert report.valid_campaigns[0].campaign_name == "+HYPERLINK(x)"
+
+
+def test_mixed_valid_and_invalid_rows_retains_valid_records_at_validator_level():
+    # The validator itself never blocks the whole portfolio -- it reports
+    # both the invalid row and the still-parsed valid one side by side.
+    # Whole-portfolio blocking on any error is a separate, UI-level policy
+    # (app.py's own _may_run_pipeline), never implemented in this module.
+    rows = [_row(campaign_id="G001"), _row(campaign_id="", campaign_name="Bad Row")]
+    report = validate_campaign_csv(_stream(rows))
+    assert report.is_valid is False
+    assert [c.campaign_id for c in report.valid_campaigns] == ["G001"]
+    assert report.error_count == 1
+
+
+def test_empty_stream_input():
+    report = validate_campaign_csv(io.StringIO(""))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.EMPTY_FILE
+    assert report.valid_campaigns == []
+
+
+def test_header_only_input():
+    report = validate_campaign_csv(_stream([]))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.NO_CAMPAIGN_ROWS
+    assert report.valid_campaigns == []
+
+
+def test_whitespace_only_input_fails_header_match():
+    report = validate_campaign_csv(io.StringIO("   \n   \n"))
+    assert report.error_count == 1
+    assert report.issues[0].code is ValidationCode.INVALID_HEADER
+    assert report.valid_campaigns == []
+
+
+def test_adversarial_inputs_never_mutate_the_supplied_text():
+    original_bytes = _csv_text([_row(campaign_name='Brand, "Premium"\nSecond')])
+    stream = io.StringIO(original_bytes)
+    validate_campaign_csv(stream)
+    # The stream's own already-consumed text content is never rewritten in
+    # place -- re-reading the same underlying value confirms it is
+    # unchanged by having been validated.
+    assert stream.getvalue() == original_bytes
+
+
+def test_adversarial_inputs_never_convert_through_float():
+    report = validate_campaign_csv(
+        _stream([_row(current_budget="3000.10", kpi_target="0.30000000000000004")])
+    )
+    assert report.is_valid is True
+    assert report.valid_campaigns[0].current_budget == Decimal("3000.10")
+    assert report.valid_campaigns[0].kpi_target == Decimal("0.30000000000000004")
+    # The classic float-imprecision value (0.1 + 0.2 in binary float) is
+    # preserved exactly as typed -- proof no float round-trip occurred.
+    assert str(report.valid_campaigns[0].kpi_target) == "0.30000000000000004"

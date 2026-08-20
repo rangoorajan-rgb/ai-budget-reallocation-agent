@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stages
-37–39 complete, Sprint 4 as a whole not yet complete)
+37–40 complete, Sprint 4 as a whole not yet complete)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -14,9 +14,12 @@ approval — see Stage 36 below — + 12 Stage 36 integration tests in
 `tests/test_integration.py`). All frozen Sprint 3 exit criteria (`MASTER_PROJECT_PLAN.md`)
 are satisfied. **Sprint 4, Development Stage 37 — Finalize the Five Living Documentation
 Files — is complete** (documentation-only; see below). **Sprint 4, Development Stage 38 —
-Rewrite the Project README — is complete** (documentation-only; see below). Sprint 4
-remains incomplete: packaging/dependency consistency and test-suite hardening are future
-Sprint 4 work not yet started.
+Rewrite the Project README — is complete** (documentation-only; see below). **Sprint 4,
+Development Stage 39 — Packaging and Dependency Hardening — is complete** (see below).
+**Sprint 4, Development Stage 40 — Test-Suite Hardening and Adversarial Validation
+Coverage — is complete** (see below). Sprint 4 remains incomplete: CI and a review of the
+human-in-the-loop boundary and audit-trail completeness are future Sprint 4 work not yet
+started.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -2838,9 +2841,107 @@ stage.
       `requires-python = ">=3.11"` was not touched); no upper Python-version bound was
       added; no CI workflow was added in this stage.
 
+## Sprint 4, Development Stage 40 — Test-Suite Hardening and Adversarial Validation Coverage (complete)
+
+- [x] **Test-suite-only stage.** No production code and no application behaviour changed.
+      Exactly four test files plus the three project-management tracking files were
+      touched: `tests/test_gemini_analyzer.py`, `tests/test_config.py`,
+      `tests/test_app_approval.py`, `tests/test_validation.py`. Every other file —
+      `app.py`, `config.py`, every file under `src/`, every other test file, all of
+      `docs/`, `README.md`, `requirements.txt`, `pyproject.toml`, `.gitattributes`,
+      `.env.example`, `.gitignore`, all `data/` files, and
+      `project_management/MASTER_PROJECT_PLAN.md` — remains byte-for-byte unchanged.
+- [x] **Part A — `sys.modules` cross-test pollution eliminated.**
+      `tests/test_gemini_analyzer.py`'s and `tests/test_config.py`'s fresh-reimport tests
+      (each popping their own module from `sys.modules` and reimporting it to prove
+      import-time side-effect freedom) previously left a *different* module object
+      installed under the canonical name for the rest of the process, since nothing
+      restored the original afterward — the same latent bug already worked around
+      defensively at Stage 36 via a dedicated autouse fixture scoped to
+      `tests/test_integration.py`. Both files now wrap the pop/reimport in `try/finally`,
+      restoring `sys.modules["src.gemini_analyzer"]`/`sys.modules["config"]` to the
+      exact module object captured at each file's own collection time, and each test now
+      asserts `sys.modules[...] is <original>` afterward as explicit proof of restoration.
+      No existing assertion was weakened; the reimport itself remains genuine. Confirmed
+      order-independent: `tests/test_gemini_analyzer.py`+`tests/test_config.py` run in
+      both orders, `105 passed` either way.
+- [x] **Part B — leaked temporary audit directories eliminated.**
+      `tests/test_app_approval.py`'s `_audit_redirect_snippet()` helper called
+      `tempfile.mkdtemp(prefix="stage33_test_audit_")` on every invocation across roughly
+      27 of its ~34 tests, with nothing ever cleaning the directories up — confirmed 928
+      such directories accumulated in the OS temp folder from prior sessions. Replaced
+      with pytest-managed `tmp_path`, threaded through `_audit_redirect_snippet`,
+      `_fresh_app`, `_unconserved_app`, `_app_test_with_fake_approve`, and every calling
+      test function's signature; `import tempfile` removed from the file entirely. A new
+      test, `test_no_tempfile_mkdtemp_used_in_module_source`, asserts via AST inspection
+      that neither `tempfile` nor `mkdtemp` is referenced anywhere in the module source.
+      No production code was touched; no test-only override was added to `app.py`. Every
+      existing Stage 33 assertion/scenario was preserved. Confirmed: `35 passed` (34
+      original + 1 new); the pre-existing 928-directory count in the OS temp folder stays
+      flat after re-running the file (verified twice — no new leaks); the real repository
+      `audit_records/` directory confirmed to still contain only `.gitkeep`.
+- [x] **Part C — adversarial/edge-case CSV validation coverage added**, satisfying the
+      master plan's explicit Sprint 4 requirement. 27 new tests appended to
+      `tests/test_validation.py` (44 pre-existing tests → 71 passed), testing only the
+      real Stage 2 `validate_campaign_csv`/`CampaignInput` interface — no validation rule
+      was reimplemented or invented. Every expected outcome was first verified against the
+      real validator via ad-hoc probe scripts before any assertion was written, per the
+      explicit "test actual contracts, not assumptions" instruction. Coverage added: UTF-8
+      BOM (→ `INVALID_HEADER`, since the BOM becomes part of the first header cell);
+      quoted fields containing a comma / an embedded double quote / an embedded newline
+      (all preserved exactly, standard RFC-4180 `csv.reader` handling); CRLF line endings
+      (parse identically to LF); a blank line between two data rows (exactly one
+      `MALFORMED_ROW` at the correct row number, rows before/after still parse); a blank
+      line immediately after the header (`MALFORMED_ROW` at row 2); a trailing newline at
+      end of file (no spurious extra row); whitespace-only `campaign_id`/`campaign_name`/
+      `review_id` (each rejected as blank via the model's existing
+      `str_strip_whitespace=True`/`min_length=1` constraints); an unclosed quote (consumed
+      to end of stream by `csv.reader`, reported as one `MALFORMED_ROW`, no crash);
+      scientific notation for both a plain `Decimal` field and a quantized `Currency`
+      field (both accepted and parsed/quantized exactly); a 28-significant-digit extreme
+      Decimal value (accepted, preserved exactly); negative `current_budget` and
+      `conversions_7d` (rejected via the model's existing `ge=0` constraints); `NaN`,
+      `Infinity`, and `-Infinity` string values (all rejected with the model's exact
+      existing message, "Input should be a finite number"); formula-like strings
+      (`=SUM(...)`, `+HYPERLINK(...)`) in `campaign_id`/`campaign_name` (accepted at this
+      layer — confirmed and documented as a Stage 35 export-time concern only, not a
+      Stage 2 validation rule, per explicit instruction not to impose export policy on
+      validation); a mix of valid and invalid rows in one stream (valid rows retained in
+      `valid_campaigns`, confirming partial retention is the validator's own contract,
+      distinct from the separate UI-level whole-portfolio-blocking policy already covered
+      by Stage 36); and empty, header-only, and whitespace-only full input streams (empty
+      and whitespace-only both fail on `INVALID_HEADER`, header-only reaches
+      `NO_CAMPAIGN_ROWS`). Two additional tests confirm no adversarial input is ever
+      mutated or silently converted through `float` anywhere in the pipeline.
+- [x] **No production defect was found.** Every one of the adversarial categories above
+      produced clean, deterministic, already-documented-consistent behaviour — no crash,
+      no float conversion or precision loss, no non-determinism, no contradiction with any
+      existing documented contract. The Stage 40 stop-on-defect policy was therefore never
+      triggered; nothing in `src/` needed to be touched or even considered for change.
+- [x] **Part D — order-independence and full regression confirmed.**
+      `tests/test_gemini_analyzer.py`+`tests/test_config.py` in both orders: `105 passed`
+      each way. `tests/test_app_approval.py`: `35 passed`. `tests/test_validation.py`:
+      `71 passed`. `tests/test_integration.py`: `12 passed`, unchanged from the Stage
+      36–39 baseline. Full suite: `1743 passed` (1715 pre-existing + 27 new Stage 40
+      validation tests + 1 new Stage 40 app-approval test). No existing test was deleted,
+      skipped, xfailed, or collapsed anywhere.
+- [x] **No dependency, API key, or network call.** `requirements.txt` was not touched; no
+      Gemini API key was created, read, requested, or used; no network call of any kind
+      occurred; no real `.env` file was created. The recurring external `google-genai`
+      `DeprecationWarning` (`_UnionGenericAlias`) remains present in the full-suite run and
+      was left unsuppressed and unfiltered, as required.
+- [x] `git status --short` confirmed exactly the four authorized test files changed, no
+      new file created, and every protected file at zero diff. `audit_records/` confirmed
+      to still contain only `.gitkeep`; no `exports/` directory exists; no real `.env`
+      exists; no generated CSV/JSON artifact exists anywhere in the repository; no
+      secret-like value appears in the diff (only the `GEMINI_API_KEY` environment-variable
+      *name*, never a value, appears — consistent with the rest of the codebase); no
+      unexpected temporary directory was created inside the repository (the 928 leaked
+      OS-temp directories predate this stage and live outside the repository entirely).
+
 ## Next Sprint Work
 
 **Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
-outstanding: test-suite hardening (including the master plan's explicit "adversarial/
-edge-case CSV inputs" requirement); CI; and a review of the human-in-the-loop boundary and
-audit-trail completeness. None of these is addressed by Stage 37, Stage 38, or Stage 39.
+outstanding: CI, and a review of the human-in-the-loop boundary and audit-trail
+completeness. Neither is addressed by Stage 37, Stage 38, Stage 39, or Stage 40. No stage
+after Stage 40 has been started.

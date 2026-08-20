@@ -630,12 +630,30 @@ def test_no_mutation_of_prompt_or_locked_campaign():
 
 
 def test_import_performs_no_client_construction_environment_or_network(monkeypatch):
+    # Sprint 4, Development Stage 40: the fresh reimport below is
+    # deliberately real -- it is the only way to prove import-time
+    # side-effect freedom -- but sys.modules["src.gemini_analyzer"] must
+    # be restored to this file's own canonical, collection-time-imported
+    # module object afterward (even if an assertion below fails), or
+    # every later test in this file or any other that relies on this
+    # module's `ExplanationStatus`/`ExplanationResult` identity (as
+    # app.py's own `is ExplanationStatus.GENERATED` check does) would
+    # silently break -- exactly the cross-test pollution bug this
+    # restoration prevents.
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    sys.modules.pop("src.gemini_analyzer", None)
-    reimported = importlib.import_module("src.gemini_analyzer")
-    assert "GEMINI_API_KEY" not in __import__("os").environ
-    assert not hasattr(reimported, "CLIENT")
-    assert not hasattr(reimported, "_client")
+    try:
+        sys.modules.pop("src.gemini_analyzer", None)
+        reimported = importlib.import_module("src.gemini_analyzer")
+        assert "GEMINI_API_KEY" not in __import__("os").environ
+        assert not hasattr(reimported, "CLIENT")
+        assert not hasattr(reimported, "_client")
+    finally:
+        sys.modules["src.gemini_analyzer"] = gemini_analyzer
+
+    # Proof, not assumption: the canonical module object is back in place
+    # immediately after this test completes, regardless of the outcome
+    # above.
+    assert sys.modules["src.gemini_analyzer"] is gemini_analyzer
 
 
 # ---------------------------------------------------------------------------

@@ -3203,3 +3203,60 @@ JSON audit record. Sprint 4 — Hardening and Documentation is next and has not 
   still contain only `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
   Sprint 4 remains incomplete: test-suite hardening and CI remain future work, not
   addressed by this stage.
+
+## Sprint 4, Development Stage 40 — Test-Suite Hardening and Adversarial Validation Coverage
+
+### Fixed
+- `tests/test_gemini_analyzer.py` and `tests/test_config.py`: the existing fresh-reimport
+  tests (proving import-time side-effect freedom by popping their own module from
+  `sys.modules` and reimporting it) previously left a different module object installed
+  under the canonical name for the rest of the process, since nothing restored the
+  original afterward. Both now wrap the pop/reimport in `try/finally`, restore
+  `sys.modules[...]` to the exact module object captured at each file's own collection
+  time, and assert that restoration explicitly. No existing assertion was weakened; the
+  reimport itself is still genuine. Confirmed order-independent in both run orders
+  (`105 passed` either way).
+- `tests/test_app_approval.py`: `_audit_redirect_snippet()` and its three calling helpers
+  (`_fresh_app`, `_unconserved_app`, `_app_test_with_fake_approve`) previously called
+  `tempfile.mkdtemp(prefix="stage33_test_audit_")` on every invocation, leaking a real,
+  never-cleaned-up directory on each of roughly 27 test runs — 928 such directories were
+  confirmed to have accumulated in the OS temp folder from prior sessions. Replaced with
+  pytest-managed `tmp_path`, threaded through every helper and calling test function;
+  `import tempfile` removed entirely. Every existing Stage 33 assertion/scenario is
+  preserved unchanged.
+
+### Added
+- `tests/test_app_approval.py`: `test_no_tempfile_mkdtemp_used_in_module_source` — an AST-
+  based check confirming neither `tempfile` nor `mkdtemp` is referenced anywhere in the
+  module source, guarding against the leak this stage fixed.
+- `tests/test_validation.py`: 27 new adversarial/edge-case CSV tests (44 pre-existing →
+  71 passed), satisfying the master plan's explicit Sprint 4 "adversarial/edge-case CSV
+  inputs" requirement. Covers a leading UTF-8 BOM, quoted fields containing a comma / an
+  embedded double quote / an embedded newline, CRLF line endings, blank lines in three
+  positions (between rows, immediately after the header, and a trailing newline at EOF),
+  whitespace-only required string fields, an unclosed quote, scientific notation for both
+  a plain `Decimal` field and a quantized `Currency` field, a 28-significant-digit extreme
+  Decimal value, negative monetary/count values, `NaN`/`Infinity`/`-Infinity`,
+  formula-like strings in identifier/name fields, a mix of valid and invalid rows in one
+  stream, and empty/header-only/whitespace-only full input. Every expected outcome was
+  verified against the real `validate_campaign_csv`/`CampaignInput` interface via ad-hoc
+  probe scripts before being written; no validation rule was reimplemented or invented.
+
+### Notes
+- Test-suite-only stage: no production file changed. Exactly four authorized test files
+  touched (`tests/test_gemini_analyzer.py`, `tests/test_config.py`,
+  `tests/test_app_approval.py`, `tests/test_validation.py`), plus the three
+  project-management tracking files; every other file confirmed at zero diff. No existing
+  test was deleted, skipped, xfailed, or collapsed. No production defect was found during
+  the adversarial-CSV probing — the stop-on-defect policy was never triggered; formula-like
+  strings in `campaign_id`/`campaign_name` are confirmed accepted at the validation layer
+  by design, since formula-injection neutralization is exclusively a Stage 35 export-time
+  concern. No dependency, Gemini API key, or network call was used at any point.
+  Integration suite re-confirmed unchanged at `12 passed`; full suite grew from `1715
+  passed` to `1743 passed` (27 new validation tests + 1 new app-approval test); the
+  recurring external `google-genai` deprecation warning remains present and unsuppressed.
+  `audit_records/` confirmed to still contain only `.gitkeep`; no `exports/` directory
+  exists; no real `.env` exists; no unexpected temporary directory was created inside the
+  repository. Sprint 4 remains incomplete: CI and a review of the human-in-the-loop
+  boundary and audit-trail completeness remain future work, not addressed by this stage.
+  No stage after Stage 40 has been started.

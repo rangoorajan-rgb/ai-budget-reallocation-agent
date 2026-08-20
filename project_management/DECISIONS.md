@@ -3377,3 +3377,46 @@ for `.png`/`.jpg`/`.jpeg`/`.gif`/`.ico`/`.pdf`/`.docx`. No repository-wide renor
 its line endings — confirmed via `git status`/`git diff --stat` showing no mass content
 change anywhere in the tree beyond the two files this stage intentionally changed.
 **Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 40: `sys.modules` reimport tests must self-restore
+
+**Decision:** Any test that pops a module from `sys.modules` and reimports it fresh to
+prove import-time side-effect freedom (`tests/test_gemini_analyzer.py`'s and
+`tests/test_config.py`'s reimport tests) must restore `sys.modules[...]` to the exact
+module object captured at that test file's own collection time in a `finally` block, and
+must assert that restoration explicitly afterward. Without this, a different module object
+is left installed under the canonical name for the rest of the process, silently breaking
+any later identity-based check (e.g. `app.py`'s `is ExplanationStatus.GENERATED`) —
+exactly the latent bug already worked around defensively, but only locally within
+`tests/test_integration.py`, at Stage 36. The genuine reimport itself is preserved; only
+its cleanup was hardened.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 40: pytest-managed `tmp_path` replaces `tempfile.mkdtemp` in UI approval tests
+
+**Decision:** `tests/test_app_approval.py`'s audit-redirect helpers now require and thread
+through pytest's `tmp_path` fixture instead of calling `tempfile.mkdtemp(prefix=
+"stage33_test_audit_")` directly. The prior pattern created a real, uncleaned directory on
+every one of roughly 27 test invocations, with 928 such directories confirmed to have
+accumulated in the OS temp folder across prior sessions. `tmp_path` is pytest-owned,
+automatically disposed of, and lives outside the repository; no production code was
+changed and no test-only override was introduced into `app.py` to support this.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 40: adversarial CSV validation coverage added; formula-like strings confirmed accepted at the validation layer
+
+**Decision:** 27 new tests were added to `tests/test_validation.py` covering BOM, quoted
+special characters, CRLF, blank-line placement, whitespace-only required fields, malformed/
+unclosed quoting, scientific notation, extreme-precision Decimals, negative values, `NaN`/
+`Infinity`/`-Infinity`, formula-like strings, mixed valid/invalid rows, and empty/
+header-only/whitespace-only input — satisfying the master plan's explicit Sprint 4
+"adversarial/edge-case CSV inputs" requirement. Every expected outcome was verified against
+the real `validate_campaign_csv`/`CampaignInput` interface via ad-hoc probe scripts before
+any assertion was written; no validation rule was reimplemented or invented. Formula-like
+strings (e.g. `=SUM(A1)`) in `campaign_id`/`campaign_name` are confirmed **accepted** at
+this layer by design — no format restriction exists in `src/validation.py` or
+`src/models.py`; formula-injection neutralization is exclusively a Stage 35 export-time
+concern (`src/exports.py`), not a Stage 2 validation rule, and this stage does not impose
+one. No production defect was found during this probing; the stop-on-defect policy was
+never triggered.
+**Status:** Frozen.

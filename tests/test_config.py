@@ -255,23 +255,46 @@ def test_module_does_not_use_load_dotenv():
 
 
 def test_import_performs_no_environment_or_file_loading(monkeypatch):
+    # Sprint 4, Development Stage 40: the fresh reimport below is
+    # deliberately real -- it is the only way to prove import-time
+    # side-effect freedom -- but sys.modules["config"] must be restored
+    # to this file's own canonical, collection-time-imported module
+    # object afterward (even if an assertion below fails), or any later
+    # test/file in the same pytest session relying on this module's
+    # identity would silently see a different module object under the
+    # same name.
     import importlib
     import sys
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    sys.modules.pop("config", None)
-    reimported = importlib.import_module("config")
-    assert not hasattr(reimported, "CONFIG")
-    assert "GEMINI_API_KEY" not in os.environ
+    try:
+        sys.modules.pop("config", None)
+        reimported = importlib.import_module("config")
+        assert not hasattr(reimported, "CONFIG")
+        assert "GEMINI_API_KEY" not in os.environ
+    finally:
+        sys.modules["config"] = config
+
+    # Proof, not assumption: the canonical module object is back in place
+    # immediately after this test completes, regardless of the outcome
+    # above.
+    assert sys.modules["config"] is config
 
 
 def test_import_works_without_any_key():
+    # See test_import_performs_no_environment_or_file_loading above for
+    # why this reimport must restore sys.modules["config"] afterward.
     import importlib
     import sys
 
-    sys.modules.pop("config", None)
-    reimported = importlib.import_module("config")
-    assert reimported.GeminiConfig(api_key=None).api_key is None
+    try:
+        sys.modules.pop("config", None)
+        reimported = importlib.import_module("config")
+        assert reimported.GeminiConfig(api_key=None).api_key is None
+    finally:
+        sys.modules["config"] = config
+
+    assert sys.modules["config"] is config
 
 
 def test_module_creates_no_module_level_config_singleton():

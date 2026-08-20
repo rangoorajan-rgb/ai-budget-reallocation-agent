@@ -13,11 +13,18 @@ ID defense-in-depth check, the single unexpected-exception boundary, and
 session-state lifecycle (including clearing on both a new successful and a
 new invalid deterministic submission). No real Gemini/network call is ever
 made.
+
+**Sprint 4, Development Stage 40 hardening**: every embedded-script audit
+redirect now uses a pytest-managed `tmp_path` directory instead of a
+manually created `tempfile.mkdtemp(...)` directory that was never cleaned
+up. `tmp_path` is disposed of automatically by pytest and lives outside
+the repository entirely; no test in this file writes into the repository's
+real `audit_records/` directory, and no OS-temp-directory leak accumulates
+across repeated runs.
 """
 
 import ast
 import inspect
-import tempfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -36,10 +43,9 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 APP_PATH = Path(__file__).resolve().parent.parent / "app.py"
 
 
-def _audit_redirect_snippet() -> str:
+def _audit_redirect_snippet(directory: Path) -> str:
     """Build a script snippet that redirects `app.record_campaign_reallocation_audit`
-    to a fresh, isolated OS temp directory (never the repository's real
-    `audit_records/`).
+    to the supplied directory (never the repository's real `audit_records/`).
 
     Authorized addition (Sprint 3, Development Stage 34): every real
     approve/reject click in this file now also attempts automatic audit
@@ -49,14 +55,19 @@ def _audit_redirect_snippet() -> str:
     Stage 33 tests ever write a real file into the tracked repository
     directory. This does not change what any test verifies -- only the
     harness plumbing.
+
+    **Stage 40 hardening**: `directory` is always a pytest-managed
+    `tmp_path`, supplied by the caller -- this function no longer calls
+    `tempfile.mkdtemp(...)` itself, eliminating the leaked, never-cleaned-
+    up OS temp directories that call created on every single test in this
+    file.
     """
-    audit_dir = tempfile.mkdtemp(prefix="stage33_test_audit_")
     return f'''
 import src.audit as audit_module
 from pathlib import Path as _AuditPath
 
 _real_record_campaign_reallocation_audit = audit_module.record_campaign_reallocation_audit
-_STAGE33_AUDIT_DIR = _AuditPath({audit_dir!r})
+_STAGE33_AUDIT_DIR = _AuditPath({str(directory)!r})
 
 
 def _stage33_redirected_record(audit, *, directory=None):
@@ -99,14 +110,14 @@ VALID_REVIEW = {
 }
 
 
-def _fresh_app() -> AppTest:
+def _fresh_app(tmp_path: Path) -> AppTest:
     # AppTest.from_file executes app.py in an isolated namespace that does
     # not honor an external monkeypatch of a real approve/reject click's
     # automatic Stage 34 audit write (confirmed empirically), so this
     # helper uses AppTest.from_string with the redirect embedded directly
     # in the executed script instead -- the only mechanism that reliably
     # takes effect.
-    script = "import app\n" + _audit_redirect_snippet() + "\napp.main()\n"
+    script = "import app\n" + _audit_redirect_snippet(tmp_path) + "\napp.main()\n"
     at = AppTest.from_string(script)
     at.run(timeout=10)
     assert not at.exception
@@ -198,8 +209,8 @@ app.run_budget_reallocation_review = _unconserved_run
 """
 
 
-def _unconserved_app() -> AppTest:
-    script = _UNCONSERVED_SCRIPT_HEADER + _audit_redirect_snippet() + "\napp.main()\n"
+def _unconserved_app(tmp_path: Path) -> AppTest:
+    script = _UNCONSERVED_SCRIPT_HEADER + _audit_redirect_snippet(tmp_path) + "\napp.main()\n"
     at = AppTest.from_string(script)
     at.run(timeout=10)
     return at
@@ -214,7 +225,7 @@ if "fake_approve_calls" not in st.session_state:
 """
 
 
-def _app_test_with_fake_approve(body: str) -> AppTest:
+def _app_test_with_fake_approve(body: str, tmp_path: Path) -> AppTest:
     """Build an AppTest running app.py with `app.approve_campaign_reallocation_review`
     replaced by a fake. `body` must define `_fake_approve(result, reviewer_name, *, note=None)`.
 
@@ -228,7 +239,7 @@ def _app_test_with_fake_approve(body: str) -> AppTest:
     """
     script = (
         _APPROVAL_FAKE_HEADER
-        + _audit_redirect_snippet()
+        + _audit_redirect_snippet(tmp_path)
         + body
         + "\napp.approve_campaign_reallocation_review = _fake_approve\napp.main()\n"
     )
@@ -242,15 +253,15 @@ def _app_test_with_fake_approve(body: str) -> AppTest:
 # ---------------------------------------------------------------------------
 
 
-def test_controls_absent_without_locked_result():
-    at = _fresh_app()
+def test_controls_absent_without_locked_result(tmp_path):
+    at = _fresh_app(tmp_path)
     assert "Human approval" not in [s.value for s in at.subheader]
     assert not any(b.key == "approve_review" for b in at.button)
     assert not any(b.key == "reject_review" for b in at.button)
 
 
-def test_exact_heading_and_caption():
-    at = _fresh_app()
+def test_exact_heading_and_caption(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     assert "Human approval" in [s.value for s in at.subheader]
     expected_caption = (
@@ -261,8 +272,8 @@ def test_exact_heading_and_caption():
     assert expected_caption in [c.value for c in at.caption]
 
 
-def test_controls_appear_after_successful_review():
-    at = _fresh_app()
+def test_controls_appear_after_successful_review(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     assert any(t.key == "approval_reviewer_name" for t in at.text_input)
     assert any(t.key == "approval_note" for t in at.text_area)
@@ -275,8 +286,8 @@ def test_controls_appear_after_successful_review():
 # ---------------------------------------------------------------------------
 
 
-def test_approver_starts_blank():
-    at = _fresh_app()
+def test_approver_starts_blank(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     assert at.text_input(key="approval_reviewer_name").value == ""
 
@@ -286,8 +297,8 @@ def test_approver_starts_blank():
 # ---------------------------------------------------------------------------
 
 
-def test_successful_approval():
-    at = _fresh_app()
+def test_successful_approval(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert not at.exception
@@ -295,8 +306,8 @@ def test_successful_approval():
     assert "Approver: Carol" in [m.value for m in at.markdown]
 
 
-def test_successful_rejection():
-    at = _fresh_app()
+def test_successful_rejection(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _reject(at, "Dave")
     assert not at.exception
@@ -304,22 +315,22 @@ def test_successful_rejection():
     assert "Approver: Dave" in [m.value for m in at.markdown]
 
 
-def test_approval_note_optional_and_displayed_when_present():
-    at = _fresh_app()
+def test_approval_note_optional_and_displayed_when_present(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol", note="  Looks fine  ")
     assert "Decision note: Looks fine" in [m.value for m in at.markdown]
 
 
-def test_rejection_note_optional_and_displayed_when_present():
-    at = _fresh_app()
+def test_rejection_note_optional_and_displayed_when_present(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _reject(at, "Dave", note="  Numbers look wrong  ")
     assert "Decision note: Numbers look wrong" in [m.value for m in at.markdown]
 
 
-def test_approval_without_note_shows_no_note_line():
-    at = _fresh_app()
+def test_approval_without_note_shows_no_note_line(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert not any(m.value.startswith("Decision note:") for m in at.markdown)
@@ -330,24 +341,24 @@ def test_approval_without_note_shows_no_note_line():
 # ---------------------------------------------------------------------------
 
 
-def test_blank_name_validation_on_approve():
-    at = _fresh_app()
+def test_blank_name_validation_on_approve(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     at.button(key="approve_review").click().run(timeout=10)
     assert "Reviewer name must not be blank." in [e.value for e in at.error]
     assert at.session_state["approval_decision_result"] is None
 
 
-def test_blank_name_validation_on_reject():
-    at = _fresh_app()
+def test_blank_name_validation_on_reject(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     at.button(key="reject_review").click().run(timeout=10)
     assert "Reviewer name must not be blank." in [e.value for e in at.error]
     assert at.session_state["approval_decision_result"] is None
 
 
-def test_whitespace_only_name_is_blank():
-    at = _fresh_app()
+def test_whitespace_only_name_is_blank(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "   ")
     assert "Reviewer name must not be blank." in [e.value for e in at.error]
@@ -359,8 +370,8 @@ def test_whitespace_only_name_is_blank():
 # ---------------------------------------------------------------------------
 
 
-def test_unconserved_approval_blocked():
-    at = _unconserved_app()
+def test_unconserved_approval_blocked(tmp_path):
+    at = _unconserved_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert "An unconserved allocation cannot be approved." in [e.value for e in at.error]
@@ -368,8 +379,8 @@ def test_unconserved_approval_blocked():
     assert any(b.key == "reject_review" for b in at.button)
 
 
-def test_unconserved_rejection_succeeds():
-    at = _unconserved_app()
+def test_unconserved_rejection_succeeds(tmp_path):
+    at = _unconserved_app(tmp_path)
     _submit_valid_sample(at)
     _reject(at, "Carol")
     assert "Decision: REJECTED" in [w.value for w in at.warning]
@@ -381,7 +392,7 @@ def test_unconserved_rejection_succeeds():
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_one_domain_call_per_click():
+def test_exactly_one_domain_call_per_click(tmp_path):
     body = """
 from src.approval import approve_campaign_reallocation_review as _real_approve
 
@@ -389,14 +400,14 @@ def _fake_approve(result, reviewer_name, *, note=None):
     st.session_state["fake_approve_calls"].append(1)
     return _real_approve(result, reviewer_name, note=note)
 """
-    at = _app_test_with_fake_approve(body)
+    at = _app_test_with_fake_approve(body, tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert len(at.session_state["fake_approve_calls"]) == 1
 
 
-def test_ordinary_rerun_creates_no_decision():
-    at = _fresh_app()
+def test_ordinary_rerun_creates_no_decision(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     assert at.session_state["approval_decision_result"] is None
     at.run(timeout=10)
@@ -409,8 +420,8 @@ def test_ordinary_rerun_creates_no_decision():
 # ---------------------------------------------------------------------------
 
 
-def test_finalized_approval_replaces_editable_controls():
-    at = _fresh_app()
+def test_finalized_approval_replaces_editable_controls(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert not any(t.key == "approval_reviewer_name" for t in at.text_input)
@@ -419,8 +430,8 @@ def test_finalized_approval_replaces_editable_controls():
     assert not any(b.key == "reject_review" for b in at.button)
 
 
-def test_finalized_approval_cannot_be_overwritten():
-    at = _fresh_app()
+def test_finalized_approval_cannot_be_overwritten(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     stored = at.session_state["approval_decision_result"]
@@ -432,8 +443,8 @@ def test_finalized_approval_cannot_be_overwritten():
     assert [s.value for s in at.success].count("Decision: APPROVED") == 1
 
 
-def test_finalized_rejection_cannot_be_overwritten():
-    at = _fresh_app()
+def test_finalized_rejection_cannot_be_overwritten(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _reject(at, "Dave")
     stored = at.session_state["approval_decision_result"]
@@ -447,8 +458,8 @@ def test_finalized_rejection_cannot_be_overwritten():
 # ---------------------------------------------------------------------------
 
 
-def test_new_successful_submission_clears_approval():
-    at = _fresh_app()
+def test_new_successful_submission_clears_approval(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert at.session_state["approval_decision_result"] is not None
@@ -460,8 +471,8 @@ def test_new_successful_submission_clears_approval():
     assert not any(s.value == "Decision: APPROVED" for s in at.success)
 
 
-def test_new_invalid_submission_clears_approval():
-    at = _fresh_app()
+def test_new_invalid_submission_clears_approval(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert at.session_state["approval_decision_result"] is not None
@@ -499,8 +510,8 @@ def _fake_generate_explanation(prompt, config):
     assert any(b.key == "approve_review" for b in at.button)
 
 
-def test_campaign_selector_change_does_not_affect_approval():
-    at = _fresh_app()
+def test_campaign_selector_change_does_not_affect_approval(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     at.selectbox(key="explanation_campaign_id").set_value("G002 — Shopping - Core Catalog")
     at.run(timeout=10)
@@ -513,15 +524,15 @@ def test_campaign_selector_change_does_not_affect_approval():
 # ---------------------------------------------------------------------------
 
 
-def test_approval_succeeds_without_gemini_configuration(monkeypatch):
+def test_approval_succeeds_without_gemini_configuration(monkeypatch, tmp_path):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    at = _fresh_app()
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     assert "Decision: APPROVED" in [s.value for s in at.success]
 
 
-def test_failed_explanation_does_not_block_approval():
+def test_failed_explanation_does_not_block_approval(tmp_path):
     body = """
 def _fake_generate_explanation(prompt, config):
     from src.gemini_analyzer import ExplanationResult, ExplanationStatus, ErrorCategory
@@ -535,7 +546,7 @@ def _fake_generate_explanation(prompt, config):
     script = (
         "import app\n"
         + body
-        + _audit_redirect_snippet()
+        + _audit_redirect_snippet(tmp_path)
         + "\napp.generate_explanation = _fake_generate_explanation\napp.main()\n"
     )
     at = AppTest.from_string(script)
@@ -553,8 +564,8 @@ def _fake_generate_explanation(prompt, config):
 # ---------------------------------------------------------------------------
 
 
-def test_deterministic_result_unchanged_after_approval():
-    at = _fresh_app()
+def test_deterministic_result_unchanged_after_approval(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     snapshot = at.session_state["locked_review_result"].model_dump()
     _approve(at, "Carol")
@@ -563,16 +574,16 @@ def test_deterministic_result_unchanged_after_approval():
     assert [row["campaign_id"] for row in rows] == ["G001", "M001", "G002", "G003"]
 
 
-def test_deterministic_result_unchanged_after_rejection():
-    at = _fresh_app()
+def test_deterministic_result_unchanged_after_rejection(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     snapshot = at.session_state["locked_review_result"].model_dump()
     _reject(at, "Dave")
     assert at.session_state["locked_review_result"].model_dump() == snapshot
 
 
-def test_deterministic_result_visible_after_approval_error():
-    at = _unconserved_app()
+def test_deterministic_result_visible_after_approval_error(tmp_path):
+    at = _unconserved_app(tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
     rows = at.dataframe[0].value.to_dict("records")
@@ -585,8 +596,8 @@ def test_deterministic_result_visible_after_approval_error():
 # ---------------------------------------------------------------------------
 
 
-def test_stale_review_id_decision_not_rendered():
-    at = _fresh_app()
+def test_stale_review_id_decision_not_rendered(tmp_path):
+    at = _fresh_app(tmp_path)
     _submit_valid_sample(at)
     stale = CampaignReallocationApproval(
         review_id="SOME-OTHER-REVIEW-ID", decision=ReviewStatus.APPROVED, reviewer_name="Carol"
@@ -608,12 +619,12 @@ def test_stale_review_id_decision_not_rendered():
 # ---------------------------------------------------------------------------
 
 
-def test_unexpected_approval_exception_is_contained():
+def test_unexpected_approval_exception_is_contained(tmp_path):
     body = """
 def _fake_approve(result, reviewer_name, *, note=None):
     raise RuntimeError("simulated unexpected failure")
 """
-    at = _app_test_with_fake_approve(body)
+    at = _app_test_with_fake_approve(body, tmp_path)
     _submit_valid_sample(at)
     _approve(at, "Carol")
 
@@ -683,3 +694,24 @@ def test_no_module_level_approval_singleton():
                 if isinstance(target, ast.Name):
                     module_level_assigns.add(target.id)
     assert "APPROVAL" not in module_level_assigns
+
+
+# ---------------------------------------------------------------------------
+# 32. Stage 40 hardening: no leaked OS temp directories
+# ---------------------------------------------------------------------------
+
+
+def test_no_tempfile_mkdtemp_used_in_module_source():
+    """`tempfile.mkdtemp` created a real, never-cleaned-up directory on
+    every single call in this file prior to Stage 40 hardening -- confirm
+    the module source no longer references it at all."""
+    tree = ast.parse(inspect.getsource(inspect.getmodule(_audit_redirect_snippet)))
+    referenced = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    assert "mkdtemp" not in referenced
+
+    imported_modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_modules.add(alias.name)
+    assert "tempfile" not in imported_modules
