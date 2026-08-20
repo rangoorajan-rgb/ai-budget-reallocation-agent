@@ -1,32 +1,16 @@
 # Data Dictionary
 
-> Sprint 3, Development Stage 28 (adds the deterministic-only Streamlit
-> review shell, `app.py`, consuming Sprint 2's Stage 27 final deterministic
-> responsibility — end-to-end pipeline orchestration and portfolio
-> reporting — `BudgetReallocationReviewResult`/
-> `CampaignBudgetRecommendationResult` — from `src/pipeline.py`, which
-> completed the master plan's Sprint 2 "Deterministic Core Engine" goal
-> — to the Stage 1 enumerations, numerical constants, core input models,
-> CSV schema, Stage 2 validation reporting, Stage 3 metric facts, Stage 4
-> pacing facts, Stage 5 performance classification, Stage 6 trend
-> classification, Stage 7 conversion-volume confidence classification,
-> Stage 8 tracking-based assessability, Stage 9 pacing interpretation,
-> Stage 10 static budget-bound facts, Stage 11 applicable-change-percentage
-> resolution, Stage 12 raw percentage-based monetary movement cap, Stage
-> 13 test-floor distance, Stage 14 protection constraint, Stage 15
-> test-aware static decrease room, Stage 16 raw increase limit, Stage 17
-> raw decrease limit, Stage 18 protection-adjusted effective decrease
-> limit, Stage 19 campaign action availability, Stage 20 campaign action
-> suitability, Stage 21 recommendation-action selection, Stage 22
-> recommendation reasons, Stage 23 single-campaign reallocation priority
-> scoring, Stage 24 cross-campaign reallocation ranking, Stage 25
-> cross-campaign budget allocation, and Stage 26 independent budget
-> conservation verification). Combined assessment,
-> `Confidence.NOT_ASSESSABLE` ownership, the remaining `ReasonCode`
-> trigger conditions, and other derived/decision fields, plus export
-> fields, are pending later stages. Streamlit/UI, Gemini explanation,
-> human approval, audit persistence, exports, and Sprint 4 hardening
-> remain pending separate, later sprints.
+> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
+> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
+> finalizes this and the four other living documentation files named by the frozen master
+> plan (`docs/ARCHITECTURE.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`,
+> `docs/LIMITATIONS.md`). The body of this document below reflects the completed Stage
+> 1–36 implementation — Sprint 2's deterministic core engine (Stages 1–27), the Streamlit
+> interface, Gemini configuration and explanation layer, human approval, immutable audit
+> persistence, in-memory CSV export, and the Stage 36 end-to-end integration suite. See
+> `docs/ARCHITECTURE.md` for the actual, currently-implemented state of
+> `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty `ReasonCode`
+> members.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 

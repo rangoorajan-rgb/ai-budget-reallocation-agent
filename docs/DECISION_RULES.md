@@ -1,21 +1,17 @@
 # Decision Rules
 
-> Sprint 2, Development Stage 21. Records the frozen enumerations, frozen numerical
-> constants, the frozen deterministic validation rules, the frozen deterministic
-> metric-calculation rules, the frozen deterministic pacing-calculation rules, the frozen
-> neutral performance-, trend-, conversion-volume-confidence-, and
-> tracking-assessability-classification rules, the frozen neutral pacing-interpretation
-> rules, the frozen static budget-bound calculation rules, the frozen applicable-
-> change-percentage resolution rule, the frozen raw percentage-based monetary
-> movement-cap calculation rule, the frozen test-floor distance calculation rule, the
-> frozen protection constraint rule, the frozen test-aware static decrease-room rule,
-> the frozen raw increase limit rule, the frozen raw decrease limit rule, the frozen
-> protection-adjusted effective decrease limit rule, the frozen campaign action
-> availability rule, the frozen conservative diagonal-only campaign action
-> suitability rule, and the frozen ordered campaign recommendation-action
-> selection rule. Combined assessment, `Confidence.NOT_ASSESSABLE` ownership,
-> `ReasonCode`, numeric prioritisation scoring, ranking, and allocation rules are
-> pending later Sprint 2 stages.
+> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
+> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
+> finalizes this and the four other living documentation files named by the frozen master
+> plan (`docs/ARCHITECTURE.md`, `docs/DATA_DICTIONARY.md`, `docs/TEST_SCENARIOS.md`,
+> `docs/LIMITATIONS.md`). The body of this document below records every frozen rule
+> through the completed Stage 1–36 implementation — Sprint 2's deterministic core engine
+> (Stages 1–27, including the `ReasonCode`, scoring, ranking, allocation, and conservation
+> rules), the Streamlit interface, Gemini configuration and explanation layer, human
+> approval, immutable audit persistence, in-memory CSV export, and the Stage 36 end-to-end
+> integration suite. See `docs/ARCHITECTURE.md` for the actual, currently-implemented
+> state of `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty
+> `ReasonCode` members.
 
 ## Approved Enumerations (`src/constants.py`)
 

@@ -1,32 +1,15 @@
 # Test Scenarios
 
-> Sprint 2, Development Stage 21 populates the Campaign Recommendation
-> Scenarios section below, backed by the new `tests/test_recommendation.py`
-> (84 tests, a dedicated file for the new `src/recommendation.py` module —
-> Stage 21 does not extend `tests/test_suitability.py`, which remains
-> unchanged at 67 tests, `tests/test_availability.py`, which remains
-> unchanged at 61 tests, nor `tests/test_constraints.py`, which remains
-> unchanged at 322 tests: 25 Stage 10 + 24 Stage 11 + 35 Stage 12 + 35 Stage
-> 13 + 28 Stage 14 + 39 Stage 15 + 40 Stage 16 + 46 Stage 17 + 50 Stage 18),
-> in addition to the Campaign Action Suitability Scenarios (Stage 20, below),
-> the Campaign Action Availability Scenarios (Stage 19, below), the Effective
-> Decrease Limit Scenarios (Stage 18, below), the Raw Decrease Limit Scenarios
-> (Stage 17, below), the Raw Increase Limit Scenarios (Stage 16, below), the
-> Test-Aware Static Decrease Room Scenarios (Stage 15, below), the Protection
-> Constraint Scenarios (Stage 14, below), the Test-Floor Room Scenarios (Stage
-> 13, below), the Raw Percentage Movement-Cap Scenarios (Stage 12, below), the
-> Applicable Change-Percentage Resolution Scenarios (Stage 11, below), the
-> Static Budget-Bound Scenarios (Stage 10, below), the Stage 9 Pacing
-> Interpretation Scenarios (`tests/test_pacing_interpretation.py`, 33 tests), the
-> Stage 8 Tracking Assessability Scenarios (`tests/test_tracking_assessment.py`, 30
-> tests), the Stage 7 Conversion-Volume Confidence Classification Scenarios
-> (`tests/test_confidence_classification.py`, 32 tests), the Stage 6 Trend
-> Classification Scenarios (`tests/test_trend_classification.py`, 29 tests), the Stage 5
-> Performance Classification Scenarios (`tests/test_classification.py`, 23 tests), the
-> Stage 4 Pacing Calculation Scenarios (`tests/test_pacing.py`, 30 tests), the Stage 3
-> Metric Calculation Scenarios (`tests/test_metrics.py`, 28 tests), and the Stage 2
-> Validation Scenarios (`tests/test_validation.py`, 44 tests). Allocation and
-> Approval/Audit scenarios are pending later stages.
+> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
+> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
+> finalizes this and the four other living documentation files named by the frozen master
+> plan (`docs/ARCHITECTURE.md`, `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+> `docs/LIMITATIONS.md`). The body of this document below records every test scenario
+> through the completed Stage 1–36 implementation — Sprint 2's deterministic core engine
+> (Stages 1–27, including the Campaign Recommendation, Allocation, and Conservation
+> Scenarios), the Streamlit interface, Gemini configuration and explanation layer, human
+> approval, immutable audit persistence, in-memory CSV export, and the Stage 36 end-to-end
+> Final Integration Scenarios.
 
 ## Validation Scenarios
 

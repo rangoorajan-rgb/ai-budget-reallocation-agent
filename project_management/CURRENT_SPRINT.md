@@ -1,6 +1,7 @@
 # Current Sprint
 
-**Active sprint:** Sprint 4 — Hardening and Documentation (not yet started)
+**Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stage
+37 complete, Sprint 4 as a whole not yet complete)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -11,7 +12,10 @@ in the repository. Verified baseline: `1715 passed` (1703 Stage 1–35 regressio
 retiring four now-obsolete "test_integration.py stays empty" guard assertions per explicit
 approval — see Stage 36 below — + 12 Stage 36 integration tests in
 `tests/test_integration.py`). All frozen Sprint 3 exit criteria (`MASTER_PROJECT_PLAN.md`)
-are satisfied. Sprint 4 — Hardening and Documentation is next and has not yet started.
+are satisfied. **Sprint 4, Development Stage 37 — Finalize the Five Living Documentation
+Files — is complete** (documentation-only; see below). Sprint 4 remains incomplete:
+`README.md`, packaging/dependency consistency, and test-suite hardening are all future
+Sprint 4 work not yet started.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -2630,13 +2634,88 @@ sum of each stage's separate focused tests:
   approving/rejecting scenario (A, B, E, F), including the unconserved-rejection and
   failure/retry cases.
 
-## Next Sprint
+## Sprint 4, Development Stage 37 — Finalize the Five Living Documentation Files (complete)
 
-**Sprint 3 is complete. Sprint 4 — Hardening and Documentation is next and has not yet
-started.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope: full test coverage review
-including adversarial/edge-case CSV inputs; finalizing `docs/ARCHITECTURE.md` and
-`docs/LIMITATIONS.md` (both remain untouched placeholders, deliberately deferred through
-every Sprint 3 stage); a review of the human-in-the-loop boundary and audit-trail
-completeness; and general cleanup and packaging. The remaining `ReasonCode` members'
-trigger conditions (see Stage 27's Explicitly-Out-of-Scope list above) remain open and
-belong to this sprint.
+- [x] **Documentation-only stage.** No production code, no test code, and no application
+      behaviour changed. Exactly the eight files named below were touched; every other
+      file in the repository — `app.py`, `config.py`, every file under `src/` and
+      `tests/`, `README.md`, `requirements.txt`, `pyproject.toml`, `.env.example`,
+      `.gitignore`, all `data/` files, and `project_management/MASTER_PROJECT_PLAN.md` —
+      remains byte-for-byte unchanged.
+- [x] `docs/ARCHITECTURE.md` — fully replaced the Sprint 1 placeholder with an accurate
+      architecture document grounded directly in the completed Stage 1–36 source code:
+      system purpose and three-tier trust model; the full module/responsibility table;
+      the deterministic core pipeline (validation boundary, metrics/classifications,
+      constraints, availability/suitability/recommendation/reasons/scoring, ranking/
+      allocation/conservation, Stage 27 orchestration); the Streamlit interface and its
+      session-state lifecycle; optional Gemini configuration, locked explanation payload/
+      prompt construction, and the Gemini transport boundary; human approval/rejection;
+      immutable audit construction and local JSON persistence; in-memory audited CSV
+      export; a Mermaid end-to-end data-flow diagram; the human-in-the-loop boundary; AI
+      isolation and lack of authority; security/secret-handling and persistence
+      boundaries; failure behaviour; the explicit absence of advertising-platform
+      integrations; the fake-client/network-free test architecture; and — verified
+      directly against `src/recommendation.py`, `src/classification.py`, and
+      `src/reasons.py` — the actual, currently-implemented state of
+      `RecommendationAction.HOLD` (fully implemented, a complete six-step ordered policy,
+      not pending), `Confidence.NOT_ASSESSABLE` (a reserved enum member never assigned by
+      any current production function), and `ReasonCode` (exactly 8 of 20 members
+      currently emitted by `src/reasons.py`, with the remaining 12 named individually as
+      either reserved-but-unemitted or intentionally excluded).
+- [x] `docs/LIMITATIONS.md` — fully replaced the Sprint 1 placeholder with honest,
+      current-fact limitations and non-goals covering every point required: no live
+      advertising-platform ingestion; no advertising-platform budget writeback; uploaded-
+      CSV-only data quality dependency; Gemini's optional, non-authoritative role and its
+      possible unavailable/blocked/incomplete/incorrect states; mandatory human approval/
+      rejection before audit persistence or export; approval is not a platform-execution
+      action; local JSON audit storage (not a production database); in-memory-only CSV
+      export; no authentication; no authorization/RBAC; no multi-user concurrency model;
+      no centralized database; no distributed locking; no cloud persistence; no automatic
+      audit backup/retention; no real-time monitoring; no scheduled execution; no retry
+      queue/background job processor; no production observability; local/single-user
+      pilot orientation (explicitly not an enterprise-production-readiness claim, matching
+      the master plan's own "ready for real-world pilot use" wording); Gemini's
+      third-party cost/data-processing implications and the user's own responsibility to
+      assess privacy/security/organizational policy; the current Python
+      3.14-on-Windows-only verified test environment with no cross-version/cross-platform
+      matrix; and an explicit statement that reserved enum/`ReasonCode` values are not
+      evidence of implemented behaviour.
+- [x] **Three stale top-of-file status headers corrected — bodies untouched.**
+      `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, and `docs/TEST_SCENARIOS.md`
+      each had a top blockquote frozen at Stage 28 or Stage 21 language (predating Stage
+      22 in two cases), despite each file's own body already correctly documenting
+      through Stage 36. Each blockquote was replaced with an accurate summary stating
+      Sprint 3 (Stages 28–36) complete, Sprint 4 active, and Stage 37's role in finalizing
+      all five living documentation files, with a pointer to `docs/ARCHITECTURE.md`'s new
+      HOLD/`Confidence.NOT_ASSESSABLE`/`ReasonCode` section. No other line in any of the
+      three files' bodies was edited, reorganized, reformatted, or deduplicated.
+- [x] **HOLD, `Confidence.NOT_ASSESSABLE`, and `ReasonCode` documented as actual repository
+      truth, not new behaviour.** No enum member was added, removed, or altered; no new
+      business logic, trigger rule, or combined-assessment layer was invented anywhere.
+      Every claim was verified directly against `src/recommendation.py`,
+      `src/classification.py`, and `src/reasons.py` before being written. The phrase
+      "pending Sprint 2" was not used anywhere in the newly written content, since Sprint
+      2 is complete; unimplemented behaviour is stated as a current fact (e.g. "reserved,
+      never assigned by any current production function"), not as "deferred forever" or
+      any other permanence claim beyond what the repository actually shows today.
+      A pre-existing, out-of-scope staleness was found and deliberately left untouched
+      per the header-only restriction: `docs/DECISION_RULES.md`'s "Pending" section still
+      contains a "Final recommendation" bullet describing `RecommendationAction.HOLD`'s
+      trigger as unresolved — this predates Stage 21 actually resolving it and is body
+      content, not the header: correcting it was out of this stage's authorized scope and
+      is left for a future stage.
+- [x] **No API key, no network call.** No Gemini API key was created, read, requested, or
+      used at any point during this stage; no network call of any kind occurred.
+- [x] Full suite re-run and confirmed unchanged at `1715 passed`. `git status --short`
+      confirmed exactly the eight authorized files changed, no new file created, and
+      every protected file at zero diff. `audit_records/` confirmed to still contain only
+      `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
+
+## Next Sprint Work
+
+**Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
+outstanding: a `README.md` rewrite (deliberately excluded from Stage 37 — separate
+audience/purpose); packaging and dependency-consistency hardening; test-suite hardening
+(including the master plan's explicit "adversarial/edge-case CSV inputs" requirement); and
+a review of the human-in-the-loop boundary and audit-trail completeness. None of these is
+addressed by Stage 37.

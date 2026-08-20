@@ -3051,3 +3051,67 @@ record written → CSV export available flow works end-to-end; Gemini remains ve
 confined to explanation of locked numbers with no path to alter recommendations or touch
 live advertising-platform budgets; and every approval or rejection produces a traceable
 JSON audit record. Sprint 4 — Hardening and Documentation is next and has not yet started.
+
+## Sprint 4 — Hardening and Documentation (in progress)
+
+### Changed
+- Sprint 4, Development Stage 37: corrected the stale top-of-file status headers in
+  `docs/DATA_DICTIONARY.md` (previously frozen at "Sprint 3, Development Stage 28"),
+  `docs/DECISION_RULES.md` (previously frozen at "Sprint 2, Development Stage 21"), and
+  `docs/TEST_SCENARIOS.md` (previously frozen at "Sprint 2, Development Stage 21") to
+  accurately state Sprint 3 (Stages 28–36) complete, Sprint 4 active, and Stage 37's role
+  finalizing all five living documentation files — each file's own body already correctly
+  documented through Stage 36 and was left completely untouched; only the header
+  blockquote changed in each of the three files.
+
+### Added
+- Sprint 4, Development Stage 37: fully replaced the Sprint 1 placeholder content of
+  `docs/ARCHITECTURE.md` with an accurate architecture document grounded directly in the
+  completed Stage 1–36 source code — system purpose and three-tier trust model
+  (deterministic core / Gemini explanation / human decision); the full module-to-stage
+  responsibility table; the deterministic core pipeline (validation boundary, metrics and
+  classifications, constraints, availability/suitability/recommendation/reasons/scoring,
+  ranking/allocation/conservation, Stage 27 orchestration); the Streamlit interface and
+  its eight-key session-state lifecycle; optional Gemini configuration, locked explanation
+  payload/prompt construction, and the Gemini transport boundary; human approval/
+  rejection; immutable audit construction and local JSON persistence; in-memory audited
+  CSV export; a Mermaid end-to-end data-flow diagram; the human-in-the-loop boundary; AI
+  isolation and structural lack of authority over deterministic results; security/
+  secret-handling and persistence boundaries; failure behaviour; the explicit absence of
+  advertising-platform integrations; the fake-client/network-free test architecture; and a
+  dedicated section documenting the actual, currently-implemented state of
+  `RecommendationAction.HOLD` (fully implemented via a six-step ordered policy in
+  `src/recommendation.py` — not pending), `Confidence.NOT_ASSESSABLE` (a reserved
+  `src/constants.py` enum member never assigned by `classify_campaign_confidence` or any
+  other current production function), and `ReasonCode` (exactly 8 of 20 members currently
+  emitted by `src/reasons.py`, with the remaining 12 named individually as
+  reserved-but-unemitted or intentionally excluded) — every claim verified directly
+  against source before being written; no enum member added, removed, or altered, and no
+  new business logic invented.
+- Sprint 4, Development Stage 37: fully replaced the Sprint 1 placeholder content of
+  `docs/LIMITATIONS.md` with honest, current-fact limitations and non-goals: no live
+  advertising-platform ingestion or budget writeback; uploaded-CSV-only data-quality
+  dependency; Gemini's optional, non-authoritative role and its possible unavailable/
+  blocked/incomplete/incorrect states, plus its third-party cost/data-processing
+  implications; mandatory human approval/rejection before audit persistence or export;
+  approval is not a platform-execution action; local JSON audit storage rather than a
+  production database; in-memory-only CSV export; no authentication, authorization/RBAC,
+  multi-user concurrency model, centralized database, distributed locking, cloud
+  persistence, automatic audit backup/retention, real-time monitoring, scheduled
+  execution, retry queue/background job processor, or production observability; explicit
+  local/single-user pilot orientation (not an enterprise-production-readiness claim,
+  matching the master plan's own "ready for real-world pilot use" wording); the current
+  Python 3.14-on-Windows-only verified test environment; and an explicit statement that
+  reserved enum/`ReasonCode` values are not evidence of implemented behaviour.
+- Documentation-only stage: no production file, test file, or application behaviour
+  changed. Exactly eight files touched (the five documentation files above plus
+  `project_management/CURRENT_SPRINT.md`/`DECISIONS.md`/`CHANGELOG.md`); every other file
+  — `app.py`, `config.py`, all of `src/` and `tests/`, `README.md`, `requirements.txt`,
+  `pyproject.toml`, `.env.example`, `.gitignore`, all `data/` files, and
+  `project_management/MASTER_PROJECT_PLAN.md` — confirmed at zero diff. No API key was
+  created, read, requested, or used; no network call of any kind occurred. Full suite
+  re-confirmed unchanged at `1715 passed`. `audit_records/` confirmed to still contain
+  only `.gitkeep`; no `exports/` directory exists; no real `.env` exists. Sprint 4 remains
+  incomplete: a `README.md` rewrite, packaging/dependency-consistency hardening, and
+  test-suite hardening (including adversarial/edge-case CSV inputs) all remain future
+  Sprint 4 work, not started by this stage.

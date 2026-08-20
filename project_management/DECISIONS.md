@@ -3242,3 +3242,55 @@ Documentation is next and has not yet started; `docs/ARCHITECTURE.md` and
 `docs/LIMITATIONS.md` remain deliberately untouched placeholders, reserved for that sprint
 per the frozen master plan.
 **Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 37: documentation-only, no behaviour change
+
+**Decision:** Stage 37 finalizes the five living documentation files named by the frozen
+`MASTER_PROJECT_PLAN.md` Sprint 4 scope. It is documentation-only: no production file, no
+test file, and no application behaviour changed. Exactly eight files were authorized and
+touched: `docs/ARCHITECTURE.md`, `docs/LIMITATIONS.md` (both fully replaced from Sprint 1
+placeholders), `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+`docs/TEST_SCENARIOS.md` (top-of-file status header corrected only, bodies untouched), and
+`project_management/CURRENT_SPRINT.md`/`DECISIONS.md`/`CHANGELOG.md`. No API key was
+created, read, requested, or used; no network call of any kind occurred. Sprint 4 remains
+incomplete after Stage 37.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 37: HOLD, Confidence.NOT_ASSESSABLE, and ReasonCode documented as verified repository truth
+
+**Decision:** `docs/ARCHITECTURE.md` documents, verified directly against
+`src/recommendation.py`, `src/classification.py`, and `src/reasons.py` before being
+written: `RecommendationAction.HOLD` is fully implemented via `resolve_campaign_recommendation_action`'s
+exact six-step ordered policy (paused override, tracking-assessability override, unique-
+`SUITABLE` selection, multiple-`SUITABLE` ambiguity, conservative `MAINTAIN` fallback,
+final `HOLD` fallback) — it is not pending. `Confidence.NOT_ASSESSABLE` is a reserved enum
+member in `src/constants.py` that `classify_campaign_confidence` (Stage 7) never assigns —
+it assigns only `HIGH`/`MEDIUM`/`LOW`; tracking-based assessability
+(`CampaignTrackingAssessment.is_assessable`, Stage 8) remains a separate, independent
+boolean fact never combined with `Confidence` by any production code. `ReasonCode` has
+exactly 8 of its 20 members currently emitted by `resolve_campaign_recommendation_reason`
+(Stage 22) — `PAUSED_CAMPAIGN`, `TRACKING_UNRELIABLE`, `HELD_FOR_MANUAL_REVIEW`,
+`ABOVE_TARGET_STRONG`, `NEAR_TARGET`, `RECENT_TREND_IMPROVING`, `RECENT_TREND_STABLE`,
+`RECENT_TREND_DECLINING` — with the remaining 12 named individually, distinguishing 9
+reserved-but-unemitted members from 3 intentionally-excluded members (`TRACKING_WARNING`,
+`INSUFFICIENT_CONVERSION_VOLUME`, `PROTECTED_FROM_REDUCTION` — each diagnostically true in
+some cases but never causally participating in Stage 21's decision). No enum member was
+added, removed, or altered anywhere; no new business logic, trigger rule, or
+combined-assessment layer was invented. The phrase "pending Sprint 2" was avoided
+throughout the newly written content since Sprint 2 is complete; unimplemented behaviour
+is stated as a current, verified fact, never as "deferred forever" or any other permanence
+claim beyond what the repository shows today.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 37: stale documentation staleness found but left untouched (out of scope)
+
+**Decision:** While verifying `RecommendationAction.HOLD`'s actual implemented state,
+`docs/DECISION_RULES.md`'s "Pending" section was found to still contain a "Final
+recommendation" bullet describing `HOLD`'s trigger as unresolved and "pending later
+stages" — this predates Stage 21 (which fully resolved it) and was apparently never
+removed once Stage 21 shipped. Because Stage 37 is explicitly authorized to correct only
+the top-of-file status header of `docs/DECISION_RULES.md`, not its body, this stale bullet
+was deliberately left untouched rather than silently expanding this stage's scope. It
+remains a known, documented item for a future Sprint 4 stage to correct.
+**Status:** Frozen (as a recorded, deferred finding — not a decision to leave it stale
+forever).
