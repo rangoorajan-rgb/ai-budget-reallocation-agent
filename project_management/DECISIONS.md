@@ -3294,3 +3294,36 @@ was deliberately left untouched rather than silently expanding this stage's scop
 remains a known, documented item for a future Sprint 4 stage to correct.
 **Status:** Frozen (as a recorded, deferred finding — not a decision to leave it stale
 forever).
+
+## 2026-08-20 — Sprint 4, Development Stage 38: README rewrite, documentation-only, no behaviour change
+
+**Decision:** Stage 38 fully replaces the stale `README.md` — previously still describing
+the project as "Sprint 2 complete... Sprint 3 next" with a `1258 passed` baseline — with
+an accurate, user-facing guide reflecting the completed Stage 1–36 implementation:
+project description and governance model, current project status, features, an
+architecture overview linking to (not duplicating) the five `docs/` files, requirements,
+Windows PowerShell installation steps with an unverified-but-equivalent macOS/Linux note,
+optional Gemini configuration guidance, the run command and normal workflow, CSV input
+guidance, outputs/persistence facts, testing commands and exact current counts, security
+and privacy disclosures, limitations/non-goals, a repository-structure table, pilot-use
+guidance, and the licence reference. It is documentation-only: no production file, no test
+file, no dependency, and no application behaviour changed. Exactly four files were
+authorized and touched: `README.md` and the three project-management tracking files. No
+API key was created, read, requested, or used; no network call of any kind occurred; no
+`.env` file was created. Sprint 4 remains incomplete after Stage 38.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 38: every README claim verified against the repository
+
+**Decision:** Every factual claim written into the new `README.md` was verified directly
+against the repository before being written — the exact `origin` remote URL, the exact
+LICENSE text (MIT, Copyright (c) 2026 Rangoo Rajan), `pyproject.toml`'s exact
+`requires-python` floor (`>=3.11`, no upper bound), the exact `data/campaign_template.csv`/
+`data/sample_campaigns.csv` paths, `.env.example`'s exact one-line content
+(`GEMINI_API_KEY=`), `.gitignore`'s `.env` entry, and the exact current test counts (`12
+passed` integration, `1715 passed` full suite) — nothing was inferred from a filename
+alone. No upper Python-version bound or supported-OS matrix was invented; the README
+explicitly states the macOS/Linux instructions are equivalent but not independently
+verified by this project's own test suite, and explicitly states no CI workflow currently
+exists rather than implying any CI coverage.
+**Status:** Frozen.

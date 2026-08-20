@@ -1,7 +1,7 @@
 # Current Sprint
 
-**Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stage
-37 complete, Sprint 4 as a whole not yet complete)
+**Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stages
+37–38 complete, Sprint 4 as a whole not yet complete)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -13,8 +13,9 @@ retiring four now-obsolete "test_integration.py stays empty" guard assertions pe
 approval — see Stage 36 below — + 12 Stage 36 integration tests in
 `tests/test_integration.py`). All frozen Sprint 3 exit criteria (`MASTER_PROJECT_PLAN.md`)
 are satisfied. **Sprint 4, Development Stage 37 — Finalize the Five Living Documentation
-Files — is complete** (documentation-only; see below). Sprint 4 remains incomplete:
-`README.md`, packaging/dependency consistency, and test-suite hardening are all future
+Files — is complete** (documentation-only; see below). **Sprint 4, Development Stage 38 —
+Rewrite the Project README — is complete** (documentation-only; see below). Sprint 4
+remains incomplete: packaging/dependency consistency and test-suite hardening are future
 Sprint 4 work not yet started.
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
@@ -2711,11 +2712,68 @@ sum of each stage's separate focused tests:
       every protected file at zero diff. `audit_records/` confirmed to still contain only
       `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
 
+## Sprint 4, Development Stage 38 — Rewrite the Project README (complete)
+
+- [x] **Documentation-only stage.** No production code, no test code, no dependency, and
+      no application behaviour changed. Exactly the four authorized files were touched:
+      `README.md`, `project_management/CURRENT_SPRINT.md`, `DECISIONS.md`, and
+      `CHANGELOG.md`. Every other file — `app.py`, `config.py`, every file under `src/`
+      and `tests/`, every file under `docs/`, `requirements.txt`, `pyproject.toml`,
+      `.env.example`, `.gitignore`, all `data/` files, and
+      `project_management/MASTER_PROJECT_PLAN.md` — remains byte-for-byte unchanged.
+- [x] `README.md` fully replaced. The stale README (still describing the project as
+      "Sprint 2 complete... Sprint 3 next" with a `1258 passed` baseline) was replaced
+      with an accurate, user-facing guide covering: project description and the explicit
+      "never writes changes to an advertising platform" boundary; current project status
+      through Stage 38; the three-layer trust and governance model; an accurate feature
+      summary (no reserved enum value listed as an implemented feature); a compact
+      architecture overview linking to all five `docs/` files without duplicating them;
+      repository-evidenced requirements (Python `>=3.11` floor from `pyproject.toml`, no
+      invented upper bound or OS matrix); copyable Windows PowerShell installation steps
+      plus an unverified-but-equivalent macOS/Linux note; optional Gemini configuration
+      guidance using only placeholder key text, with an explicit "never commit, paste,
+      print, or share a real key" instruction and no source-code key placement
+      instruction; the `streamlit run app.py` command and the 8-step normal workflow,
+      including the "invalid review details or any invalid CSV row block the entire
+      portfolio" rule; CSV input guidance linking to the real template/sample files and
+      the data dictionary rather than reproducing the schema from memory; accurate
+      outputs/persistence facts (session-state-only locked result, `audit_records/`
+      default directory with `.gitkeep` as the only tracked file, in-memory-only CSV
+      export, no `exports/` directory, no production database); the verified testing
+      commands and exact current counts (`12 passed` integration, `1715 passed` full
+      suite), with an explicit "no CI workflow currently exists" statement; security and
+      privacy disclosures (secret handling, what Gemini receives, organizational
+      responsibility, no auth/RBAC/multi-user isolation); a limitations/non-goals summary
+      linking to `docs/LIMITATIONS.md`; a repository-structure table; pilot-use guidance
+      explicitly distinguishing "ready for real-world pilot use" from
+      enterprise-production readiness; and the correct MIT licence reference.
+- [x] **Every factual claim verified against the repository before being written** — the
+      exact `origin` remote URL (`git remote -v`), the LICENSE file's exact text (MIT,
+      Copyright (c) 2026 Rangoo Rajan), `pyproject.toml`'s exact `requires-python`
+      floor, the exact `data/campaign_template.csv`/`data/sample_campaigns.csv` paths,
+      `.env.example`'s exact one-line content, `.gitignore`'s `.env` entry, and the exact
+      current test counts — nothing was inferred from a filename alone.
+- [x] **No API key, no network call.** No Gemini API key was created, read, requested, or
+      used at any point during this stage; no network call of any kind occurred; no
+      `.env` file was created.
+- [x] Full suite re-run and confirmed unchanged at `1715 passed`. `git status --short`
+      confirmed exactly the four authorized files changed, no new file created, and
+      every protected file at zero diff. `audit_records/` confirmed to still contain only
+      `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
+
+## Known Deferred Documentation-Consistency Item
+
+`docs/DECISION_RULES.md`'s "Pending" section still contains a "Final recommendation"
+bullet describing `RecommendationAction.HOLD`'s trigger as unresolved — this predates
+Stage 21 (which fully resolved it) and was recorded as a deferred finding at Stage 37
+(`project_management/DECISIONS.md`, 2026-08-20). It remains unmodified after Stage 38,
+since all `docs/` files were protected during this stage; it is left for a future Sprint 4
+stage.
+
 ## Next Sprint Work
 
 **Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
-outstanding: a `README.md` rewrite (deliberately excluded from Stage 37 — separate
-audience/purpose); packaging and dependency-consistency hardening; test-suite hardening
+outstanding: packaging and dependency-consistency hardening; test-suite hardening
 (including the master plan's explicit "adversarial/edge-case CSV inputs" requirement); and
 a review of the human-in-the-loop boundary and audit-trail completeness. None of these is
-addressed by Stage 37.
+addressed by Stage 37 or Stage 38.

@@ -3115,3 +3115,43 @@ JSON audit record. Sprint 4 — Hardening and Documentation is next and has not 
   incomplete: a `README.md` rewrite, packaging/dependency-consistency hardening, and
   test-suite hardening (including adversarial/edge-case CSV inputs) all remain future
   Sprint 4 work, not started by this stage.
+
+### Changed
+- Sprint 4, Development Stage 38: fully replaced the stale `README.md`. The previous
+  content still described the project as "Sprint 2 — Deterministic Core Engine complete...
+  Sprint 3... is next" with a `1258 passed` baseline, listed only a 5-item solution
+  summary omitting CSV export, and contained no installation, Gemini-configuration,
+  testing, or limitations guidance of any kind. The new README accurately reflects the
+  completed Stage 1–36 implementation and current Stage 38 status: project description and
+  the explicit never-writes-to-a-live-platform boundary; the three-layer trust and
+  governance model (deterministic rules decide, Gemini only explains, human approval is
+  mandatory before persistence/export); an accurate feature summary; a compact
+  architecture overview linking to all five `docs/` files; repository-evidenced
+  requirements; copyable Windows PowerShell installation steps plus an unverified-but-
+  equivalent macOS/Linux note; optional Gemini configuration guidance using only
+  placeholder key text with an explicit never-commit/print/share warning; the
+  `streamlit run app.py` command and the 8-step normal workflow, including the
+  invalid-input portfolio-blocking rule; CSV input guidance linking to the real template
+  and sample files and the data dictionary; accurate outputs/persistence facts
+  (session-state-only locked result, `audit_records/` as the default local audit
+  directory with `.gitkeep` as its only tracked file, in-memory-only CSV export, no
+  `exports/` directory, no production database); verified testing commands and exact
+  current counts (`12 passed` integration, `1715 passed` full suite) with an explicit
+  no-CI-workflow statement; security and privacy disclosures; a limitations/non-goals
+  summary linking to `docs/LIMITATIONS.md`; a repository-structure table; pilot-use
+  guidance explicitly distinguishing real-world pilot readiness from
+  enterprise-production readiness; and the correct MIT licence reference.
+
+### Notes
+- Documentation-only stage: no production file, test file, dependency, or application
+  behaviour changed. Exactly four files touched (`README.md` and the three
+  project-management tracking files); every other file — `app.py`, `config.py`, all of
+  `src/` and `tests/`, all of `docs/`, `requirements.txt`, `pyproject.toml`,
+  `.env.example`, `.gitignore`, all `data/` files, and
+  `project_management/MASTER_PROJECT_PLAN.md` — confirmed at zero diff. No API key was
+  created, read, requested, or used; no network call of any kind occurred; no `.env` file
+  was created. Full suite re-confirmed unchanged at `1715 passed`. `audit_records/`
+  confirmed to still contain only `.gitkeep`; no `exports/` directory exists; no real
+  `.env` exists. Sprint 4 remains incomplete: packaging/dependency-consistency hardening
+  and test-suite hardening remain future Sprint 4 work, not started by this stage. No
+  stage after Stage 38 is completed.
