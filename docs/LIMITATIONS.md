@@ -1,12 +1,14 @@
 # Limitations
 
-> Sprint 4, Development Stage 41 (Human-in-the-Loop, Audit, and Governance Completeness
-> Review). Reflects the completed Sprint 1–3 implementation (Development Stages 1–36) plus
-> Sprint 4's Stages 37–40. This document states honest, current facts about the
-> application as implemented — it does not overstate readiness. The frozen master plan's
-> Sprint 3 exit criteria describe the project as ready for real-world **pilot** use, not
-> as enterprise-production-ready software. Sprint 4 remains incomplete; no CI workflow
-> exists at this stage.
+> **Sprint 4 — Hardening and Documentation is complete (Development Stages 37–42).** All
+> four planned sprints are complete, verified at Stage 42 (Final Release Verification and
+> Project Completion) against `12 passed` integration / `1743 passed` full-suite
+> baselines. This document states honest, current facts about the application as
+> implemented — it does not overstate readiness. The frozen master plan's exit criteria
+> describe the project as ready for real-world **pilot** use, not as enterprise-
+> production-ready software; that positioning is unchanged by project completion. No CI
+> workflow exists — this was never a frozen Sprint 4 exit criterion, and its absence does
+> not block completion; see the "No hosted CI workflow" item below.
 
 ## Known Constraints
 
@@ -113,6 +115,13 @@
 - **No production observability/telemetry.** The application emits no structured logs,
   metrics, or traces of its own; the only feedback surface is the Streamlit UI itself
   within the active session.
+- **No hosted CI workflow.** There is no GitHub Actions or other continuous-integration
+  configuration anywhere in this repository. This was never a frozen Sprint 4 exit
+  criterion (`project_management/MASTER_PROJECT_PLAN.md`), so its absence does not block
+  project completion. Verification is local and reproducible: `python -m pytest
+  tests/test_integration.py -q` and `python -m pytest -q`, run from a clean checkout with
+  `requirements.txt` installed, using no real Gemini API key and no network call. Hosted
+  CI remains a possible future enhancement, not incomplete planned work.
 
 ## Assumptions
 

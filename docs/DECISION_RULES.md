@@ -1,18 +1,19 @@
 # Decision Rules
 
-> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
-> Sprint 4 — Hardening and Documentation is now active and remains incomplete; Stages
-> 37–40 (living documentation, README, packaging/dependency hardening, and test-suite
-> hardening) are complete, and Stage 41 (Human-in-the-Loop, Audit, and Governance
-> Completeness Review) corrected this file's "Pending" section, which had described
-> `RecommendationAction.HOLD` as unresolved even though Stage 21 (see below) fully resolved
-> it — a staleness first identified, but left uncorrected as out of scope, at Stage 37. The
-> body of this document below records every frozen rule through the completed Stage 1–36
-> implementation — Sprint 2's deterministic core engine (Stages 1–27, including the
-> `ReasonCode`, scoring, ranking, allocation, and conservation rules), the Streamlit
-> interface, Gemini configuration and explanation layer, human approval, immutable audit
-> persistence, in-memory CSV export, and the Stage 36 end-to-end integration suite. See
-> `docs/ARCHITECTURE.md` for the actual, currently-implemented state of
+> **Sprint 4 — Hardening and Documentation is complete (Development Stages 37–42).** All
+> four planned sprints are complete, verified at Stage 42 (Final Release Verification and
+> Project Completion) against `12 passed` integration / `1743 passed` full-suite
+> baselines. Stage 41 (Human-in-the-Loop, Audit, and Governance Completeness Review)
+> corrected this file's "Pending" section, which had described `RecommendationAction.HOLD`
+> as unresolved even though Stage 21 (see below) fully resolved it — a staleness first
+> identified, but left uncorrected as out of scope, at Stage 37. The body of this document
+> below records every frozen rule through the completed Stage 1–36 implementation —
+> Sprint 2's deterministic core engine (Stages 1–27, including the `ReasonCode`, scoring,
+> ranking, allocation, and conservation rules), the Streamlit interface, Gemini
+> configuration and explanation layer, human approval, immutable audit persistence,
+> in-memory CSV export, and the Stage 36 end-to-end integration suite; it remains accurate
+> and unchanged through Stage 42 — no rule, formula, or enum changed during Sprint 4
+> hardening. See `docs/ARCHITECTURE.md` for the actual, currently-implemented state of
 > `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty `ReasonCode`
 > members.
 

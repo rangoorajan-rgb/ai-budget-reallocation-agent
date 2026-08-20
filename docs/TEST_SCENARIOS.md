@@ -1,15 +1,19 @@
 # Test Scenarios
 
-> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
-> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
-> finalizes this and the four other living documentation files named by the frozen master
-> plan (`docs/ARCHITECTURE.md`, `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
-> `docs/LIMITATIONS.md`). The body of this document below records every test scenario
-> through the completed Stage 1–36 implementation — Sprint 2's deterministic core engine
-> (Stages 1–27, including the Campaign Recommendation, Allocation, and Conservation
-> Scenarios), the Streamlit interface, Gemini configuration and explanation layer, human
-> approval, immutable audit persistence, in-memory CSV export, and the Stage 36 end-to-end
-> Final Integration Scenarios.
+> **Sprint 4 — Hardening and Documentation is complete (Development Stages 37–42).** All
+> four planned sprints are complete, verified at Stage 42 (Final Release Verification and
+> Project Completion) against `12 passed` integration / `1743 passed` full-suite
+> baselines — up from the `12 passed` / `1715 passed` baseline recorded when Stage 36
+> completed, the growth accounted for entirely by Stage 40's 28 new adversarial-validation
+> and test-isolation-hardening tests; every scenario recorded below remains unchanged. The
+> body of this document below records every test scenario through the completed Stage
+> 1–36 implementation — Sprint 2's deterministic core engine (Stages 1–27, including the
+> Campaign Recommendation, Allocation, and Conservation Scenarios), the Streamlit
+> interface, Gemini configuration and explanation layer, human approval, immutable audit
+> persistence, in-memory CSV export, and the Stage 36 end-to-end Final Integration
+> Scenarios. Stage 40's new adversarial CSV validation scenarios live in
+> `tests/test_validation.py` itself and are summarized in
+> `project_management/CHANGELOG.md`'s Stage 40 entry rather than duplicated here.
 
 ## Validation Scenarios
 

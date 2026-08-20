@@ -1,7 +1,13 @@
 # Current Sprint
 
-**Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stages
-37–41 complete, Sprint 4 as a whole not yet complete)
+**Sprint 4 — Hardening and Documentation: Complete** (Development Stages 37–42, all
+complete). **Planned implementation status: Complete.** All four frozen sprints (Sprint 1
+— Foundation; Sprint 2 — Deterministic Core Engine, Stages 1–27; Sprint 3 — Explanation,
+Approval, and Interface, Stages 28–36; Sprint 4 — Hardening and Documentation, Stages
+37–42) are complete, verified at Stage 42 (Final Release Verification and Project
+Completion) against `12 passed` integration / `1743 passed` full-suite baselines. **Next
+work: optional post-project maintenance or future enhancements only; no Development Stage
+43 has started.**
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -19,8 +25,9 @@ Development Stage 39 — Packaging and Dependency Hardening — is complete** (s
 **Sprint 4, Development Stage 40 — Test-Suite Hardening and Adversarial Validation
 Coverage — is complete** (see below). **Sprint 4, Development Stage 41 — Human-in-the-Loop,
 Audit, and Governance Completeness Review — is complete** (documentation-only; see below).
-Sprint 4 remains incomplete: CI and provisional final release verification/Sprint 4
-closure (Stage 42) are future work not yet started.
+**Sprint 4, Development Stage 42 — Final Release Verification and Project Completion — is
+complete** (documentation-only; see below). **Sprint 4 is complete. The planned
+four-sprint implementation is complete.**
 **Reference:** See [MASTER_PROJECT_PLAN.md](MASTER_PROJECT_PLAN.md) for the full frozen plan.
 
 The repository foundation (directory structure, root project files, placeholder modules,
@@ -3022,9 +3029,133 @@ stage.
       files, and every protected file at zero diff. `audit_records/` confirmed to still
       contain only `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
 
-## Next Sprint Work
+## Sprint 4, Development Stage 42 — Final Release Verification and Project Completion (complete)
 
-**Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
-outstanding: CI, and Stage 42 — provisional final release verification and Sprint 4
-closure, which has not been started. Neither is addressed by Stage 37, Stage 38, Stage 39,
-Stage 40, or Stage 41.
+- [x] **Documentation-only stage. No production or test file changed, no feature added, no
+      architecture redesigned, no CI added.** Six of the nine authorized files required an
+      evidence-backed correction: `README.md`, `docs/ARCHITECTURE.md`,
+      `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`, `docs/LIMITATIONS.md`,
+      `docs/TEST_SCENARIOS.md`, plus the three project-management tracking files.
+      `app.py`, `config.py`, every file under `src/` and `tests/`, `requirements.txt`,
+      `pyproject.toml`, `.env.example`, `.gitignore`, `.gitattributes`, all `data/` files,
+      `project_management/MASTER_PROJECT_PLAN.md`, and `audit_records/.gitkeep` remain
+      byte-for-byte unchanged.
+- [x] **Frozen-plan completion matrix — every exit criterion verified against repository
+      content, not against prior completion reports alone:**
+      - **Sprint 1 — Foundation.** `src/`, `tests/`, `data/`, `audit_records/`, `docs/`,
+        `assets/`, `project_management/` all confirmed present; `README.md`, `LICENSE`,
+        `.gitignore`, `.env.example`, `requirements.txt`, `pyproject.toml` all confirmed
+        present at repository root; placeholder modules were subsequently fully
+        implemented (Stages 1–36) without any structural directory loss. **Satisfied.**
+      - **Sprint 2 — Deterministic Core Engine.** Confirmed present and populated:
+        `src/validation.py`, `src/metrics.py`, `src/pacing.py`, `src/classification.py`,
+        `src/constraints.py`, `src/availability.py`, `src/suitability.py`,
+        `src/recommendation.py`, `src/reasons.py`, `src/scoring.py`, `src/ranking.py`,
+        `src/allocation.py`, `src/conservation.py`, `src/pipeline.py`. Direct inspection of
+        `src/metrics.py`, `src/pacing.py`, `src/constraints.py`, `src/allocation.py`,
+        `src/conservation.py`, and `src/pipeline.py` confirmed every one uses `Decimal`
+        exclusively (no `float` in any monetary calculation); `src/pipeline.py`'s
+        orchestration is pure function composition with no random, clock, or I/O input, so
+        recommendation/allocation output is deterministic; `CampaignReallocationConservation`
+        is returned unchanged and inspectable on every result, never hidden or
+        auto-repaired; a repository-wide grep for advertising-platform API client
+        patterns (`google[_-]ads[_-]api`, `meta[_-]ads[_-]api`, `facebook[_-]business`,
+        etc.) and for direct `requests`/`urllib` usage outside the Gemini transport module
+        returned zero matches; the deterministic pipeline requires no Gemini import
+        (`src/pipeline.py` imports no `config`, `src.explanations`, or
+        `src.gemini_analyzer`). **Satisfied.**
+      - **Sprint 3 — Explanation, Approval, and Interface.** `app.py` implements the full
+        Streamlit workflow (review-setup form, CSV upload, locked-result rendering,
+        explanation section, approval section, export section); `config.py` and
+        `src/explanations.py`/`src/gemini_analyzer.py` implement optional Gemini
+        configuration, locked payload/prompt construction, and transport handling;
+        `generate_explanation` returns a real, network-free `UNAVAILABLE` result when no
+        key is configured, and `app.py` never gates the deterministic result, approval, or
+        export on any explanation state; `src/approval.py` implements explicit
+        `approve_campaign_reallocation_review`/`reject_campaign_reallocation_review`,
+        with approval raising `ValueError` on an unconserved result while rejection
+        remains unconditionally available; `src/audit.py` implements immutable,
+        content-derived, atomically-persisted audit records
+        (`os.replace`-based, confirmed via source read); `app.py`'s export section is
+        gated on `AUDIT_RECORD_PATH_STATE_KEY`/`AUDIT_RECORD_STATE_KEY`, i.e. successful
+        persistence; `tests/test_integration.py` exists (12 scenarios, all passing);
+        `ExplanationResult` has no field capable of representing a recommendation,
+        amount, score, rank, or conservation value, confirmed by direct source read of
+        `src/gemini_analyzer.py`. **Satisfied.**
+      - **Sprint 4 — Hardening and Documentation.** All five `docs/` files contain
+        substantive, current, cross-verified content (confirmed by this stage's own read
+        and by Stages 37/41's prior source-grounded rewrites); `README.md` is substantive
+        and usable end-to-end (installation, configuration, running, testing, security,
+        limitations, licence); `requirements.txt` declares exactly six bounded-range
+        dependencies, all confirmed installed within range via local `pip show` metadata
+        (`streamlit==1.59.2`, `pydantic==2.13.4`, `google-genai==2.12.1`, `httpx==0.28.1`,
+        `python-dotenv==1.2.2`, `pytest==9.1.1`); `.gitattributes` declares an explicit
+        line-ending policy with no repository-wide renormalization ever run (Stage 39,
+        re-confirmed unchanged this stage); Stage 40 fixed the `sys.modules`
+        cross-test-pollution and `tempfile.mkdtemp` leak defects and added 27 adversarial
+        CSV validation tests; Stage 41 reviewed and confirmed the human-in-the-loop,
+        audit, export, secret, and governance boundaries, correcting one genuine stale
+        HOLD-as-pending description and three narrow documentation gaps; `docs/LIMITATIONS.md`
+        explicitly documents limitations and non-goals; `12 passed` / `1743 passed` are
+        the final, re-verified test results (see below). **Satisfied.**
+- [x] **Final verification commands run and results recorded:** `git status --short`
+      (clean before this stage's edits); `git branch --show-current` → `main`; `git log -1`
+      → HEAD was the Stage 41 commit ("Complete governance and audit boundary review");
+      `python -m pytest tests/test_integration.py -q` → `12 passed`; `python -m pytest -q`
+      → `1743 passed` — both exactly matching the pre-stage baseline, confirming this
+      stage's documentation-only edits changed no test outcome. The external
+      `google-genai` `DeprecationWarning` remains present in both runs and was not
+      suppressed, filtered, or otherwise treated as a failure, per this stage's explicit
+      instruction.
+- [x] **Dependency/artifact/security checks:** all six `requirements.txt` entries confirmed
+      present and unchanged; all six installed versions confirmed within their declared
+      ranges via local `pip show` only — no package was installed, removed, or upgraded;
+      no network call was made at any point; no real Gemini client was constructed; no
+      real API key was read, requested, or required. `audit_records/` confirmed to contain
+      only `.gitkeep`; no `exports/` directory exists; no real `.env` exists; no generated
+      audit JSON or CSV artifact exists anywhere in the repository; `git diff` confirmed no
+      secret-like value present (only descriptive references to "API key"/"secret" as
+      concepts, never a value); `git status --short`/`git diff --stat` after this stage's
+      edits confirmed exactly the six documentation files listed above changed, plus the
+      three project-management tracking files, with every protected file — including
+      `app.py`, `config.py`, every `src/` and `tests/` file, `requirements.txt`,
+      `pyproject.toml`, `.gitattributes`, `.env.example`, `.gitignore`, all `data/` files,
+      `project_management/MASTER_PROJECT_PLAN.md`, and `audit_records/.gitkeep` — at zero
+      diff.
+- [x] **Documentation reconciliation.** `README.md`'s "Current Project Status" and
+      "Testing" sections were stale (Stage 38-era "active"/`1715 passed"` language) and
+      were corrected to state Sprint 4 complete (Stages 37–42), the final `12 passed` /
+      `1743 passed` baseline, and that CI's absence does not block completion; no other
+      README section required a substantive rewrite. All five `docs/` living documents'
+      top-of-file status blockquotes were stale (frozen at Stage 37 or Stage 41 language)
+      and were updated to state all four sprints complete and the final verified test
+      counts; no living-document technical body was altered except one addition —
+      `docs/LIMITATIONS.md`'s "Out of Scope" section gained one new bullet, "No hosted CI
+      workflow," stating factually that CI does not exist, was never a frozen exit
+      criterion, and does not block completion, with the exact reproducing `pytest`
+      commands. No other body correction was required in any of the five living documents
+      — Stage 37's and Stage 41's prior source-grounded content remained accurate on
+      re-verification.
+- [x] **CI decision.** No GitHub Actions workflow or other CI configuration was added.
+      `project_management/MASTER_PROJECT_PLAN.md`'s frozen Sprint 4 exit criteria do not
+      name hosted CI; its absence is recorded factually (`docs/LIMITATIONS.md`,
+      `docs/ARCHITECTURE.md`, `README.md`) as a possible future enhancement, never as
+      incomplete planned work or a completion blocker.
+- [x] **API-key decision.** No Gemini API key was requested, read, or used at any point
+      during this stage; no network call of any kind occurred; no real Gemini client was
+      constructed. This stage's verification is entirely network-free, consistent with
+      every prior Sprint 3/4 stage.
+- [x] **All four sprints confirmed complete; the planned four-sprint implementation is
+      confirmed complete.** No Development Stage 43 or Sprint 5 was created — none is
+      needed, since no genuine unresolved blocker was found during this stage's audit.
+
+## Terminal Project Status
+
+- **Sprint 1 — Foundation:** Complete.
+- **Sprint 2 — Deterministic Core Engine (Stages 1–27):** Complete.
+- **Sprint 3 — Explanation, Approval, and Interface (Stages 28–36):** Complete.
+- **Sprint 4 — Hardening and Documentation (Stages 37–42):** Complete.
+- **Planned implementation status:** Complete.
+- **Final verified baseline:** `12 passed` (integration), `1743 passed` (full suite).
+- **Next work:** Optional post-project maintenance or future enhancements only; no
+  Development Stage 43 has started.

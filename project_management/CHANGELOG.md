@@ -3305,3 +3305,47 @@ JSON audit record. Sprint 4 — Hardening and Documentation is next and has not 
   exists; no real `.env` exists. Sprint 4 remains incomplete: CI and Stage 42 (provisional
   final release verification and Sprint 4 closure) remain future work, not addressed by
   this stage. No stage after Stage 41 has been started.
+
+## Sprint 4, Development Stage 42 — Final Release Verification and Project Completion
+
+### Fixed
+- `README.md`: the "Current Project Status" section was stale (Stage 38-era "active"
+  status, `1715 passed` baseline). Updated to state Sprint 4 complete (Stages 37–42), the
+  final `12 passed`/`1743 passed` baseline, and that CI's absence does not block project
+  completion. The "Testing" section's baseline was updated from `1715 passed` to
+  `1743 passed`.
+- `docs/ARCHITECTURE.md`, `docs/DATA_DICTIONARY.md`, `docs/DECISION_RULES.md`,
+  `docs/LIMITATIONS.md`, `docs/TEST_SCENARIOS.md`: every top-of-file status blockquote,
+  stale at Stage-37-era or Stage-41-era language, was updated to state that all four
+  planned sprints (including Sprint 4, Stages 37–42) are complete, and to record the final
+  `12 passed`/`1743 passed` verification baseline.
+
+### Added
+- `docs/LIMITATIONS.md`: one new "Out of Scope" bullet, "No hosted CI workflow," stating
+  factually that no GitHub Actions or other CI configuration exists, that this was never a
+  frozen Sprint 4 exit criterion, and that verification remains local and reproducible via
+  the documented `pytest` commands — CI absence does not block project completion.
+
+### Notes
+- Documentation-only, final-verification stage: no production or test file changed, no
+  feature added, no architecture redesigned, no CI added, no dependency changed. Six of
+  the nine authorized files required a correction (`README.md` and five `docs/` files),
+  plus the three project-management tracking files; every other file — `app.py`,
+  `config.py`, every `src/`/`tests/` file, `requirements.txt`, `pyproject.toml`,
+  `.gitattributes`, `.env.example`, `.gitignore`, all `data/` files,
+  `project_management/MASTER_PROJECT_PLAN.md`, and `audit_records/.gitkeep` — confirmed at
+  zero diff. A read-only audit of `MASTER_PROJECT_PLAN.md`'s frozen exit criteria against
+  actual repository content (not prior completion reports alone) confirmed every criterion
+  for all four sprints satisfied — see `project_management/CURRENT_SPRINT.md`'s Stage 42
+  entry for the full sprint-by-sprint completion matrix and
+  `project_management/DECISIONS.md`'s corresponding entry for the decision record.
+  Integration suite re-confirmed unchanged at `12 passed`; full suite re-confirmed
+  unchanged at `1743 passed` — both exactly the pre-stage baseline, since this stage
+  changed no test file. All six `requirements.txt` dependencies confirmed installed within
+  their declared ranges via local `pip show` metadata only; no package was installed,
+  removed, or upgraded; no network call was made; no real Gemini client was constructed;
+  no real API key was read, requested, or required. `audit_records/` confirmed to still
+  contain only `.gitkeep`; no `exports/` directory exists; no real `.env` exists; no
+  generated audit JSON or CSV artifact exists anywhere in the repository; no secret-like
+  value appears in the diff. **Sprint 4 is complete. The planned four-sprint
+  implementation is complete.** No Development Stage 43 or Sprint 5 was created.

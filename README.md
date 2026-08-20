@@ -19,13 +19,21 @@ human to act on manually, outside this application.
 - **Sprint 1 — Foundation:** complete.
 - **Sprint 2 — Deterministic Core Engine (Development Stages 1–27):** complete.
 - **Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36):** complete.
-- **Sprint 4 — Hardening and Documentation:** active.
-  - Stage 37 — Finalize the Five Living Documentation Files: complete.
-  - Stage 38 — Rewrite the Project README: active (this document).
-- Verified baseline immediately before Stage 38: `1715 passed`.
+- **Sprint 4 — Hardening and Documentation (Development Stages 37–42):** complete.
+  - Stage 37 — Finalize the Five Living Documentation Files.
+  - Stage 38 — Rewrite the Project README.
+  - Stage 39 — Packaging and Dependency Hardening.
+  - Stage 40 — Test-Suite Hardening and Adversarial Validation Coverage.
+  - Stage 41 — Human-in-the-Loop, Audit, and Governance Completeness Review.
+  - Stage 42 — Final Release Verification and Project Completion.
+- Final verified baseline: `12 passed` (integration), `1743 passed` (full suite).
 
-**Sprint 4 is not complete.** Packaging/dependency-consistency hardening and test-suite
-hardening remain future Sprint 4 work.
+**Sprint 4 is complete. The planned four-sprint implementation is complete.** There is
+currently no hosted CI workflow — this was never a frozen Sprint 4 exit criterion, and its
+absence does not block completion; verification is local and reproducible via the
+`pytest` commands documented under [Testing](#testing) below. Next work, if any, is
+optional post-project maintenance or future enhancements only — no Development Stage 43
+has started.
 
 ## Trust and Governance Model
 
@@ -187,10 +195,10 @@ python -m pytest tests/test_integration.py -q
 python -m pytest -q
 ```
 
-Current verified baseline:
+Current verified baseline (Stage 42, final release verification):
 
 - Integration suite: `12 passed`
-- Full suite: `1715 passed`
+- Full suite: `1743 passed`
 
 All automated tests are network-free. Gemini-dependent behavior is exercised either
 through the real, network-free "unavailable" path (no API key configured) or through fake

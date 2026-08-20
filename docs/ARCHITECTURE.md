@@ -1,11 +1,16 @@
 # Architecture
 
-> Sprint 4, Development Stage 41 (Human-in-the-Loop, Audit, and Governance Completeness
-> Review). Reflects the completed Sprint 1–3 implementation (Development Stages 1–36) plus
-> Sprint 4's Stages 37–40 (living documentation, README, packaging/dependency hardening,
-> and test-suite hardening). Every module, model, and function named below exists in the
-> repository exactly as described; nothing in this document is speculative or planned.
-> Sprint 4 remains incomplete.
+> **Sprint 4 — Hardening and Documentation is complete (Development Stages 37–42).** All
+> four planned sprints are complete: Sprint 1 — Foundation; Sprint 2 — Deterministic Core
+> Engine (Stages 1–27); Sprint 3 — Explanation, Approval, and Interface (Stages 28–36);
+> Sprint 4 — Hardening and Documentation (Stages 37–42: living documentation, README,
+> packaging/dependency hardening, test-suite hardening, human-in-the-loop/audit/governance
+> review, and final release verification). Verified at Stage 42 against `12 passed`
+> integration / `1743 passed` full-suite baselines. Every module, model, and function named
+> below exists in the repository exactly as described; nothing in this document is
+> speculative or planned. There is currently no hosted CI workflow — verification is local
+> and reproducible via the documented `pytest` commands; this is a possible future
+> enhancement, not incomplete planned work.
 
 ## Overview
 

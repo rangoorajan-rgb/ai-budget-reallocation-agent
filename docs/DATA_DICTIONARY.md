@@ -1,16 +1,18 @@
 # Data Dictionary
 
-> Sprint 3 — Explanation, Approval, and Interface (Development Stages 28–36) is complete.
-> Sprint 4 — Hardening and Documentation is now active; Sprint 4, Development Stage 37
-> finalizes this and the four other living documentation files named by the frozen master
-> plan (`docs/ARCHITECTURE.md`, `docs/DECISION_RULES.md`, `docs/TEST_SCENARIOS.md`,
-> `docs/LIMITATIONS.md`). The body of this document below reflects the completed Stage
-> 1–36 implementation — Sprint 2's deterministic core engine (Stages 1–27), the Streamlit
-> interface, Gemini configuration and explanation layer, human approval, immutable audit
-> persistence, in-memory CSV export, and the Stage 36 end-to-end integration suite. See
-> `docs/ARCHITECTURE.md` for the actual, currently-implemented state of
-> `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`, and the twenty `ReasonCode`
-> members.
+> **Sprint 4 — Hardening and Documentation is complete (Development Stages 37–42).** All
+> four planned sprints (Sprint 1 — Foundation; Sprint 2 — Deterministic Core Engine,
+> Stages 1–27; Sprint 3 — Explanation, Approval, and Interface, Stages 28–36; Sprint 4 —
+> Hardening and Documentation, Stages 37–42) are complete, verified at Stage 42 (Final
+> Release Verification and Project Completion) against `12 passed` integration / `1743
+> passed` full-suite baselines. The body of this document below reflects the completed
+> Stage 1–36 implementation — Sprint 2's deterministic core engine (Stages 1–27), the
+> Streamlit interface, Gemini configuration and explanation layer, human approval,
+> immutable audit persistence, in-memory CSV export, and the Stage 36 end-to-end
+> integration suite — and remains accurate and unchanged through Stage 42; no field,
+> model, or schema was altered during Sprint 4. See `docs/ARCHITECTURE.md` for the actual,
+> currently-implemented state of `RecommendationAction.HOLD`, `Confidence.NOT_ASSESSABLE`,
+> and the twenty `ReasonCode` members.
 
 ## Input CSV Schema (Google Ads and Meta Ads — shared)
 
