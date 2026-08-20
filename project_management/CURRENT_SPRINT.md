@@ -1,7 +1,7 @@
 # Current Sprint
 
 **Active sprint:** Sprint 4 — Hardening and Documentation (in progress; Development Stages
-37–38 complete, Sprint 4 as a whole not yet complete)
+37–39 complete, Sprint 4 as a whole not yet complete)
 **Status:** Sprint 2 — Deterministic Core Engine is complete (Development Stages 1–27).
 **Sprint 3 — Explanation, Approval, and Interface is complete** (Development Stages
 28 through 36). Stage 36 delivered the final end-to-end integration test, exercising the
@@ -2770,10 +2770,77 @@ Stage 21 (which fully resolved it) and was recorded as a deferred finding at Sta
 since all `docs/` files were protected during this stage; it is left for a future Sprint 4
 stage.
 
+## Sprint 4, Development Stage 39 — Packaging and Dependency Hardening (complete)
+
+- [x] **Documentation/packaging-only stage.** No production code and no test code
+      changed. Exactly two content files changed plus one new file: `requirements.txt`
+      (converted to bounded compatible version ranges), `.gitattributes` (new — the
+      repository's first explicit line-ending policy), and the three project-management
+      tracking files. Every other file — `app.py`, `config.py`, every file under `src/`
+      and `tests/` and `docs/`, `README.md`, `pyproject.toml`, `.env.example`,
+      `.gitignore`, all `data/` files, and `project_management/MASTER_PROJECT_PLAN.md` —
+      remains byte-for-byte unchanged.
+- [x] **Dependency declarations converted to bounded compatible ranges.**
+      `requirements.txt` changed from a mix of unpinned (`streamlit`, `pandas`, `pytest`)
+      and range-pinned (`pydantic>=2,<3`, `google-genai>=2,<3`) lines to six uniformly
+      bounded ranges: `streamlit>=1.59,<2`, `pydantic>=2,<3`, `google-genai>=2,<3`,
+      `httpx>=0.28,<1`, `python-dotenv>=1,<2`, `pytest>=8,<10`. No exact patch pin was
+      used anywhere. `requirements.txt` remains the repository's sole dependency-
+      installation mechanism; `pyproject.toml` was not touched and gained no
+      `[project.dependencies]` table.
+- [x] **`httpx` added as a sixth genuine direct dependency, previously satisfied only
+      transitively.** Verified via direct inspection: `src/gemini_analyzer.py` directly
+      imports `httpx` and directly references `httpx.TimeoutException`/
+      `httpx.NetworkError` to classify Gemini transport failures; `tests/test_gemini_analyzer.py`
+      directly imports `httpx` and directly constructs `httpx.ReadTimeout`/
+      `httpx.ConnectError` instances. `httpx` had no line of its own in `requirements.txt`
+      and was satisfied only because `google-genai` happens to declare it as one of its
+      own dependencies (confirmed via `pip show google-genai`'s `Requires:` field) — an
+      unsafe implicit reliance that a future `google-genai` release changing its internal
+      HTTP transport could silently break. This was flagged as a genuine, previously-
+      undeclared direct dependency, explicitly approved for inclusion, and added at
+      `httpx>=0.28,<1` (the installed `0.28.1` falls within this range).
+- [x] **Explicit `pandas` line removed, only after verification.** Confirmed via a
+      repository-wide search that no direct `import pandas`, `from pandas import ...`, or
+      pandas-specific API call (`pd.*`) exists anywhere in `app.py`, `config.py`, `src/`,
+      or `tests/` — the only match anywhere was a plain-English mention of "pandas/CSV"
+      inside `src/constants.py`'s module docstring, not a usage. Confirmed via local
+      `pip show streamlit` metadata (its own `Requires:` field lists `pandas` explicitly)
+      that Streamlit continues to bring pandas in transitively — `pip install -r
+      requirements.txt` still installs it, just no longer via an explicit, unused line of
+      this repository's own. No application code was changed to eliminate this transitive
+      dependency, per the frozen decision not to.
+- [x] **`.gitattributes` created — the repository's first explicit line-ending policy.**
+      `* text=auto` as the default, explicit `eol=lf` for `.py`/`.md`/`.txt`/`.toml`/
+      `.csv`/`.json`/`.yml`/`.yaml` text files, and explicit `binary` for
+      `.png`/`.jpg`/`.jpeg`/`.gif`/`.ico`/`.pdf`/`.docx`. **No repository-wide
+      renormalization was run** (`git add --renormalize .` was never executed) and no
+      existing file was touched merely to normalize its line endings — confirmed via
+      `git status --short`/`git diff --stat` showing only the two intended files changed,
+      with no mass content diff anywhere else in the tree.
+- [x] **Installed-version compatibility verified using only local package metadata — no
+      network call, no install/remove/upgrade.** All six declared packages' installed
+      versions fall within their newly declared ranges: `streamlit==1.59.2`,
+      `pydantic==2.13.4`, `google-genai==2.12.1`, `httpx==0.28.1`,
+      `python-dotenv==1.2.2`, `pytest==9.1.1`. A full repository-wide import scan (beyond
+      the five originally-named packages) confirmed no other undeclared direct
+      third-party dependency exists.
+- [x] Integration suite re-run and confirmed unchanged at `12 passed`; the recurring
+      external `google-genai` `DeprecationWarning` (`_UnionGenericAlias`) remains present
+      and remains harmless warning noise, not a test failure. Full suite re-run and
+      confirmed unchanged at `1715 passed`. `git status --short` confirmed exactly the
+      five authorized files/paths changed (`requirements.txt` modified, `.gitattributes`
+      new, plus the three PM files), no other new file created, and every protected file
+      at zero diff. `audit_records/` confirmed to still contain only `.gitkeep`; no
+      `exports/` directory exists; no real `.env` exists. No Gemini API key or network
+      call was used at any point.
+- [x] **Python's declared minimum version was not changed** (`pyproject.toml`'s
+      `requires-python = ">=3.11"` was not touched); no upper Python-version bound was
+      added; no CI workflow was added in this stage.
+
 ## Next Sprint Work
 
 **Sprint 4 remains incomplete.** Per `MASTER_PROJECT_PLAN.md`'s Sprint 4 scope, still
-outstanding: packaging and dependency-consistency hardening; test-suite hardening
-(including the master plan's explicit "adversarial/edge-case CSV inputs" requirement); and
-a review of the human-in-the-loop boundary and audit-trail completeness. None of these is
-addressed by Stage 37 or Stage 38.
+outstanding: test-suite hardening (including the master plan's explicit "adversarial/
+edge-case CSV inputs" requirement); CI; and a review of the human-in-the-loop boundary and
+audit-trail completeness. None of these is addressed by Stage 37, Stage 38, or Stage 39.

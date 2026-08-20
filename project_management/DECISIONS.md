@@ -3327,3 +3327,53 @@ explicitly states the macOS/Linux instructions are equivalent but not independen
 verified by this project's own test suite, and explicitly states no CI workflow currently
 exists rather than implying any CI coverage.
 **Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 39: bounded compatible dependency ranges; requirements.txt remains sole install mechanism
+
+**Decision:** `requirements.txt` remains the repository's sole dependency-installation
+mechanism; `pyproject.toml` gains no `[project.dependencies]` table. Every declared
+package now uses a bounded compatible version range (`>=X,<Y`) rather than an exact
+patch-version lock or being left entirely unpinned: `streamlit>=1.59,<2`,
+`pydantic>=2,<3`, `google-genai>=2,<3`, `httpx>=0.28,<1`, `python-dotenv>=1,<2`,
+`pytest>=8,<10`. Only genuine direct application/test dependencies are retained.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 39: httpx added as a sixth genuine direct dependency
+
+**Decision:** `httpx` is added to `requirements.txt` at `httpx>=0.28,<1`. Direct
+inspection confirmed `src/gemini_analyzer.py` directly imports `httpx` and directly
+references `httpx.TimeoutException`/`httpx.NetworkError` to classify Gemini transport
+failures, and `tests/test_gemini_analyzer.py` directly imports `httpx` and directly
+constructs `httpx.ReadTimeout`/`httpx.ConnectError` instances — genuine, direct usage by
+this repository's own code, not an incidental transitive artifact. It was previously
+undeclared and satisfied only because `google-genai` happens to declare `httpx` as one of
+its own dependencies (confirmed via local `pip show google-genai` metadata) — an unsafe
+implicit reliance a future `google-genai` release could silently break. The installed
+`httpx==0.28.1` satisfies the approved range. This was flagged during implementation as a
+genuine direct dependency outside the originally-named five-package set and explicitly
+approved before `requirements.txt` was edited.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 39: pandas removed from requirements.txt after verification
+
+**Decision:** The explicit `pandas` line is removed from `requirements.txt`. Verified via
+a repository-wide search across `app.py`, `config.py`, `src/`, and `tests/` that no direct
+`import pandas`, `from pandas import ...`, or pandas-specific API call (`pd.*`) exists
+anywhere — the only match anywhere in the codebase was a plain-English "pandas/CSV"
+mention inside `src/constants.py`'s own module docstring, not a usage. Verified via local
+`pip show streamlit` metadata that Streamlit's own declared dependencies include `pandas`
+— `pip install -r requirements.txt` continues to install it transitively through
+Streamlit; no application code was changed to eliminate this transitive dependency, per
+the frozen decision not to.
+**Status:** Frozen.
+
+## 2026-08-20 — Sprint 4, Development Stage 39: explicit repository line-ending policy via .gitattributes
+
+**Decision:** A new `.gitattributes` file establishes the repository's first explicit
+line-ending policy: `* text=auto` as the default, explicit `eol=lf` for
+`.py`/`.md`/`.txt`/`.toml`/`.csv`/`.json`/`.yml`/`.yaml` text files, and explicit `binary`
+for `.png`/`.jpg`/`.jpeg`/`.gif`/`.ico`/`.pdf`/`.docx`. No repository-wide renormalization
+(`git add --renormalize .`) was run, and no existing file was touched merely to normalize
+its line endings — confirmed via `git status`/`git diff --stat` showing no mass content
+change anywhere in the tree beyond the two files this stage intentionally changed.
+**Status:** Frozen.

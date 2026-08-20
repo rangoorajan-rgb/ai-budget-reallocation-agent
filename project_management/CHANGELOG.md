@@ -3155,3 +3155,51 @@ JSON audit record. Sprint 4 — Hardening and Documentation is next and has not 
   `.env` exists. Sprint 4 remains incomplete: packaging/dependency-consistency hardening
   and test-suite hardening remain future Sprint 4 work, not started by this stage. No
   stage after Stage 38 is completed.
+
+## Sprint 4, Development Stage 39 — Packaging and Dependency Hardening
+
+### Changed
+- `requirements.txt` converted to bounded compatible version ranges for every declared
+  package: `streamlit>=1.59,<2`, `pydantic>=2,<3`, `google-genai>=2,<3`,
+  `httpx>=0.28,<1`, `python-dotenv>=1,<2`, `pytest>=8,<10`. Previously `streamlit`,
+  `pandas`, and `pytest` were entirely unpinned while `pydantic` and `google-genai` were
+  already range-pinned; every package now uses the same bounded-range convention, with no
+  exact patch-version lock anywhere. `requirements.txt` remains the repository's sole
+  dependency-installation mechanism; `pyproject.toml` was not touched and gained no
+  `[project.dependencies]` table.
+- The explicit `pandas` line was removed after verifying (repository-wide search across
+  `app.py`, `config.py`, `src/`, and `tests/`) that no direct import or pandas-specific
+  API usage exists anywhere, and confirming via local Streamlit package metadata that
+  Streamlit itself declares `pandas` as one of its own dependencies — installation
+  behaviour is unchanged, only the unused explicit declaration is gone.
+
+### Added
+- `httpx>=0.28,<1` added to `requirements.txt` as a sixth, genuine direct dependency.
+  Discovered during Stage 39's required dependency inspection: `src/gemini_analyzer.py`
+  directly imports `httpx` and directly references `httpx.TimeoutException`/
+  `httpx.NetworkError` to classify Gemini transport failures, and
+  `tests/test_gemini_analyzer.py` directly imports and directly uses `httpx.ReadTimeout`/
+  `httpx.ConnectError` — real, direct usage that had been silently satisfied only through
+  `google-genai`'s own transitive dependency declaration, with no guarantee in this
+  repository's own dependency file. Flagged and explicitly approved before editing
+  `requirements.txt`; the installed `httpx==0.28.1` satisfies the approved range.
+- `.gitattributes` (new file) — the repository's first explicit line-ending policy:
+  `* text=auto` as the default, explicit `eol=lf` for `.py`/`.md`/`.txt`/`.toml`/`.csv`/
+  `.json`/`.yml`/`.yaml` text files, and explicit `binary` handling for
+  `.png`/`.jpg`/`.jpeg`/`.gif`/`.ico`/`.pdf`/`.docx`. No repository-wide renormalization
+  was run and no existing file was touched to normalize its line endings.
+
+### Notes
+- Packaging/dependency-only stage: no production file and no test file changed. Exactly
+  five authorized files/paths touched (`requirements.txt`, new `.gitattributes`, and the
+  three project-management tracking files); every other file confirmed at zero diff. No
+  package was installed, removed, or upgraded in the environment — all version
+  verification used only local `pip show` metadata. No Gemini API key or network call was
+  used at any point. Python's declared minimum version (`pyproject.toml`'s
+  `requires-python = ">=3.11"`) was not changed; no upper Python-version bound was added;
+  no CI workflow was added. Integration suite re-confirmed unchanged at `12 passed`; full
+  suite re-confirmed unchanged at `1715 passed`; the recurring external `google-genai`
+  deprecation warning remains present and remains harmless. `audit_records/` confirmed to
+  still contain only `.gitkeep`; no `exports/` directory exists; no real `.env` exists.
+  Sprint 4 remains incomplete: test-suite hardening and CI remain future work, not
+  addressed by this stage.
